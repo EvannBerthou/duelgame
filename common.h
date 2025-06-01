@@ -1,0 +1,213 @@
+#ifndef COMMON_H
+#define COMMON_H
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#define MAP_WIDTH 16
+#define MAP_HEIGHT 8
+
+#define MAX_PLAYER_COUNT 4
+
+typedef enum {
+    GS_PLAYING = 0,
+    GS_WAITING = 1,
+    GS_COUNT,
+} game_state;
+
+typedef enum {
+    PA_NONE,
+    PA_MOVE,
+    PA_ATTACK,
+    PA_SPELL,
+} player_action;
+
+typedef enum {
+    PKT_PING = 0,
+    PKT_JOIN = 1,
+    PKT_CONNECTED = 2,
+    PKT_PLAYER_UPDATE = 3,
+    PKT_PLAYER_ACTION = 4,
+    PKT_COUNT
+} net_packet_type_enum;
+
+typedef uint8_t net_packet_type;
+
+typedef struct {
+    uint8_t len;
+    net_packet_type type;
+    void *content;
+} net_packet;
+
+typedef struct {
+    uint8_t id;
+} net_packet_connected;
+
+typedef struct {
+    uint8_t id;
+    char username[8];
+} net_packet_join;
+
+typedef struct {
+    uint8_t id;
+    uint8_t health;
+    uint8_t x, y;
+} net_packet_player_update;
+
+typedef struct {
+    uint8_t id;
+    uint8_t action;
+    uint8_t x, y;
+} net_packet_player_action;
+
+char *packu8(char *buf, uint8_t u) {
+    *buf = u;
+    return buf + sizeof(uint8_t);
+}
+
+char *packsv(char *buf, char *str, int len) {
+    while (len-- > 0) {
+        *buf++ = *str++;
+    }
+    return buf;
+}
+
+char *packstruct(char *buf, void *content, net_packet_type_enum type) {
+    switch (type) {
+        case PKT_PING: return buf;
+        case PKT_JOIN: {
+            net_packet_join *p = (net_packet_join*)content;
+            buf = packu8(buf, p->id);
+            return packsv(buf, p->username, 8);
+        } break;
+        case PKT_CONNECTED: {
+            net_packet_connected *p = (net_packet_connected*)content;
+            return packu8(buf, p->id);
+        } break;
+        case PKT_PLAYER_UPDATE: {
+            net_packet_player_update *p = (net_packet_player_update*)content;
+            buf = packu8(buf, p->id);
+            buf = packu8(buf, p->health);
+            buf = packu8(buf, p->x);
+            buf = packu8(buf, p->y);
+            return buf;
+        } break;
+        case PKT_PLAYER_ACTION: {
+            net_packet_player_action *p = (net_packet_player_action*)content;
+            buf = packu8(buf, p->id);
+            buf = packu8(buf, p->action);
+            buf = packu8(buf, p->x);
+            buf = packu8(buf, p->y);
+            return buf;
+        } break;
+        default: exit(1);
+    }
+    return buf;
+}
+
+void *unpackstruct(net_packet_type_enum type, char *buf) {
+    switch (type) {
+        case PKT_PING: return NULL;
+        case PKT_JOIN: {
+            net_packet_join *p = malloc(sizeof(net_packet_join));
+            if (p == NULL) exit(1);
+            p->id = buf[0];
+            memcpy(p->username, buf + 1, 8);
+            return p;
+        } break;
+        case PKT_CONNECTED: {
+            net_packet_connected *p = malloc(sizeof(net_packet_connected));
+            if (p == NULL) exit(1);
+            p->id = buf[0];
+            return p;
+        } break;
+        case PKT_PLAYER_UPDATE: {
+            net_packet_player_update *p = malloc(sizeof(net_packet_player_update));
+            if (p == NULL) exit(1);
+            p->id = buf[0];
+            p->health = buf[1];
+            p->x = buf[2];
+            p->y = buf[3];
+            return p;
+        } break;
+        case PKT_PLAYER_ACTION: {
+            net_packet_player_action *p = malloc(sizeof(net_packet_player_action));
+            if (p == NULL) exit(1);
+            p->id = buf[0];
+            p->action = buf[1];
+            p->x = buf[2];
+            p->y = buf[3];
+            return p;
+        } break;
+        default: exit(1);
+    }
+
+    return NULL;
+}
+
+void write_packet(net_packet *p, int fd) {
+    char buf[20] = {0};
+    char *b = buf;
+    b = packu8(b, p->len);
+    b = packu8(b, p->type);
+    b = packstruct(b, p->content, p->type);
+
+    b = buf;
+    int packet_size_left = p->len;
+    int n = 0;
+    while ((n = write(fd, b, packet_size_left)) > 0) {
+        packet_size_left -= n;
+        b += n;
+    }
+    if (n < 0) {
+        fprintf(stderr, "Error sending packet\n");
+        exit(1);
+    }
+}
+
+int packet_read(net_packet *p, int fd) {
+    uint8_t packet_len;
+    int n = read(fd, &packet_len, sizeof(packet_len));
+    if (n == 0) {
+        return -1;
+    }
+    p->len = packet_len;
+
+    char buf[256] = {0};
+    char *b = buf;
+    int packet_size_left = packet_len - 1;
+    n = 0;
+    while ((n = read(fd, buf, packet_size_left)) > 0) {
+        packet_size_left -= n;
+        b += n;
+    }
+
+    p->type = buf[0];
+    p->content = unpackstruct(p->type, buf + 1);
+    return 0;
+}
+
+uint8_t get_packet_length(net_packet_type_enum type, void *p) {
+    (void)p;
+    switch (type) {
+        case PKT_PING: return 0;
+        case PKT_JOIN: return 9;
+        case PKT_CONNECTED: return 1;
+        case PKT_PLAYER_UPDATE: return 4;
+        case PKT_PLAYER_ACTION: return 4;
+        default: { fprintf(stderr, "Unknown type\n"); exit(1); }
+    }
+}
+
+void send_sock(net_packet_type_enum type, void *p, int fd) {
+    net_packet packet = {0};
+    packet.len = 2 + get_packet_length(type, p);
+    packet.type = type;
+    packet.content = p;
+    write_packet(&packet, fd);
+}
+
+#endif

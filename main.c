@@ -1,12 +1,19 @@
+#include <arpa/inet.h>
 #include <math.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
+#include "common.h"
 #include "raylib.h"
 
 #define WIDTH 1280
 #define HEIGHT 720
-
-#define MAP_WIDTH 16
-#define MAP_HEIGHT 8
 
 #define CELL_SIZE 64.0
 
@@ -19,12 +26,6 @@ const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0},
     {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
-
-typedef enum {
-    PA_MOVE,
-    PA_ATTACK,
-    PA_SPELL,
-} player_action;
 
 typedef enum {
     ST_TARGET,
@@ -43,6 +44,7 @@ typedef struct {
 typedef struct {
     // Position in grid space
     Vector2 position;
+    char name[9];
     Color color;
     float health;
     spell attack;
@@ -50,9 +52,16 @@ typedef struct {
     player_action action;
 } player;
 
-player players[3] = {0};
-const int player_count = sizeof(players) / sizeof(players[0]);
+typedef struct {
+    player_action action;
+    Vector2 position;
+} player_move;
+
+player players[MAX_PLAYER_COUNT] = {0};
+int player_count = 0;
+
 int current_player = 0;
+game_state state = GS_PLAYING;
 
 bool is_target_in_range_target(Vector2 origin, int range, player *target);
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, spell *s);
@@ -88,11 +97,6 @@ bool can_player_move(player *p, Vector2 cell) {
     if (MAP[(int)cell.y][(int)cell.x] == 1) {
         return false;
     }
-    for (int i = 0; i < player_count; i++) {
-        if (v2eq(players[i].position, cell) && players[i].health > 0) {
-            return false;
-        }
-    }
     return fabs(p->position.x - cell.x) <= 1 && fabs(p->position.y - cell.y) <= 1;
 }
 
@@ -104,7 +108,6 @@ int player_cast_spell(player *p, spell *s, Vector2 origin) {
         player *target = &players[i];
         if (s->type == ST_TARGET) {
             if (v2eq(target->position, origin) && is_target_in_range_target(p->position, s->range, target)) {
-                player_take_damage(&players[i], s->damage);
                 return true;
             }
         } else if (s->type == ST_ZONE) {
@@ -112,7 +115,6 @@ int player_cast_spell(player *p, spell *s, Vector2 origin) {
                 for (int y = -s->range; y <= s->range; y++) {
                     const Vector2 cell = {origin.x + x, origin.y + y};
                     if (is_cell_in_zone(p->position, origin, cell, s) && v2eq(players[i].position, cell)) {
-                        player_take_damage(&players[i], s->damage);
                         hit = true;
                     }
                 }
@@ -122,22 +124,25 @@ int player_cast_spell(player *p, spell *s, Vector2 origin) {
     return hit;
 }
 
-bool player_exec_action(player *p) {
+player_move player_exec_action(player *p) {
     const Vector2 g = screen2grid(GetMousePosition());
     if (IsMouseButtonPressed(0)) {
         if (p->action == PA_MOVE) {
             if (can_player_move(p, g)) {
-                p->position = g;
-                return true;
+                return (player_move){.action = PA_MOVE, .position = g};
             }
         } else if (p->action == PA_ATTACK) {
-            return player_cast_spell(p, &p->attack, g);
+            if (fabs(p->position.x - g.x) <= 1 && fabs(p->position.y - g.y) <= 1) {
+                return (player_move){.action = PA_ATTACK, .position = g};
+            }
         } else if (p->action == PA_SPELL) {
             spell *s = &p->spells[0];
-            return player_cast_spell(p, s, g);
+            if (player_cast_spell(p, s, g)) {
+                return (player_move){.action = PA_SPELL, .position = g};
+            }
         }
     }
-    return false;
+    return (player_move){.action = PA_NONE};
 }
 
 bool is_over_cell(int x, int y) {
@@ -201,14 +206,12 @@ bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, spell *s) {
 }
 
 void render_spell_actions(player *p, spell *s) {
+    //TODO: Rework
     if (s->type == ST_TARGET) {
-        for (int i = 0; i < player_count; i++) {
-            if (i == current_player)
-                continue;
-            if (is_target_in_range_target(p->position, s->range, &players[i])) {
-                Vector2 s = grid2screen(players[i].position);
-                DrawRectangleLinesEx((Rectangle){s.x, s.y, CELL_SIZE, CELL_SIZE}, 8, RED);
-            }
+        Vector2 g = screen2grid(GetMousePosition());
+        if (can_player_move(p, g)) {
+            Vector2 s = grid2screen(g);
+            DrawRectangleLinesEx((Rectangle){s.x, s.y, CELL_SIZE, CELL_SIZE}, 8, RED);
         }
     } else if (s->type == ST_ZONE) {
         Vector2 g = screen2grid(GetMousePosition());
@@ -239,7 +242,7 @@ void render_player_actions(player *p) {
         draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * 2, toolbar_y, 4, BLACK);
     }
 
-    if (p->action == PA_MOVE) {
+    if (p->action == PA_MOVE || p->action == PA_ATTACK) {
         for (int x = -1; x <= 1; x++) {
             for (int y = -1; y <= 1; y++) {
                 const int x_pos = p->position.x + x;
@@ -250,8 +253,6 @@ void render_player_actions(player *p) {
                 }
             }
         }
-    } else if (p->action == PA_ATTACK) {
-        render_spell_actions(p, &p->attack);
     } else if (p->action == PA_SPELL) {
         render_spell_actions(p, &p->spells[0]);
     }
@@ -264,19 +265,73 @@ void render_infos() {
         const int x = base_x_offset + player_info_width * i;
         DrawRectangleLines(x, 0, player_info_width, base_y_offset, RED);
         DrawCircle(x + 8 + 8, 16, 12, players[i].color);
+        DrawText(TextFormat("%s", players[i].name), x + 32, 8, 24, BLACK);
         DrawText(TextFormat("Health: %d", (int)players[i].health), x + 8, 32, 24, BLACK);
     }
+}
+
+int client_fd = 0;
+
+int8_t connect_to_server(const char *ip, uint16_t port) {
+    if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        return -1;
+    }
+
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
+        return -1;
+    }
+
+    int status;
+    if ((status = connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+void handle_packet(net_packet *p) {
+    if (p->type == PKT_PING) {
+        printf("PING\n");
+    } else if (p->type == PKT_JOIN) {
+        net_packet_join *join = (net_packet_join *)p->content;
+        printf("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
+        memcpy(players[join->id].name, join->username, 8);
+        players[join->id].name[8] = '\0';
+        player_count++;
+    } else if (p->type == PKT_CONNECTED) {
+        net_packet_connected *c = (net_packet_connected *)p->content;
+        printf("My ID is %d\n", c->id);
+        current_player = c->id;
+    } else if (p->type == PKT_PLAYER_UPDATE) {
+        net_packet_player_update *u = (net_packet_player_update *)p->content;
+        players[u->id].health = u->health;
+        players[u->id].position.x = u->x;
+        players[u->id].position.y = u->y;
+        printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
+        state = GS_PLAYING;
+    }
+
+    free(p->content);
 }
 
 int main() {
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     SetTargetFPS(60);
 
+    if (connect_to_server("127.0.0.1", 3000) < 0) {
+        fprintf(stderr, "Could not connect to server\n");
+        exit(1);
+    }
+
+    printf("Connected to server !\n");
+
     spell auto_attack = {.name = "Attack", .type = ST_TARGET, .damage = 25, .range = 1};
 
-    players[0].position = (Vector2){0, 0};
     players[0].color = YELLOW;
-    players[0].health = 100;
     players[0].action = PA_MOVE;
     players[0].attack = auto_attack;
     players[0].spells[0].name = "A";
@@ -284,9 +339,7 @@ int main() {
     players[0].spells[0].damage = 75;
     players[0].spells[0].range = 2;
 
-    players[1].position = (Vector2){MAP_WIDTH - 1, MAP_HEIGHT - 1};
     players[1].color = GREEN;
-    players[1].health = 100;
     players[1].action = PA_MOVE;
     players[1].attack = auto_attack;
     players[1].spells[0].name = "B";
@@ -295,9 +348,7 @@ int main() {
     players[1].spells[0].range = 5;
     players[1].spells[0].zone_size = 2;
 
-    players[2].position = (Vector2){MAP_WIDTH - 1, 0};
     players[2].color = BLUE;
-    players[2].health = 100;
     players[2].action = PA_MOVE;
     players[2].attack = auto_attack;
     players[2].spells[0].name = "C";
@@ -305,30 +356,79 @@ int main() {
     players[2].spells[0].damage = 25;
     players[2].spells[0].range = 5;
 
+    players[3].color = RED;
+    players[3].action = PA_MOVE;
+    players[3].attack = auto_attack;
+    players[3].spells[0].name = "C";
+    players[3].spells[0].type = ST_LINE;
+    players[3].spells[0].damage = 25;
+    players[3].spells[0].range = 5;
+
+    fd_set master_set;
+    FD_ZERO(&master_set);
+    FD_SET(client_fd, &master_set);
+    int fd_count = client_fd;
+
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+
+    srand(time(NULL));
+    net_packet_join join = {0};
+    memcpy(join.username, TextFormat("User %d", rand()), 8);
+    send_sock(PKT_JOIN, &join, client_fd);
+
     while (!WindowShouldClose()) {
+        fd_set read_fds = master_set;
+        int activity = select(fd_count + 1, &read_fds, NULL, NULL, &timeout);
+        if (activity < 0) {
+            exit(1);
+        }
+
+        if (FD_ISSET(client_fd, &read_fds)) {
+            net_packet p = {0};
+            if (packet_read(&p, client_fd) < 0) {
+                exit(1);
+            }
+            handle_packet(&p);
+        }
+
         BeginDrawing();
         {
             ClearBackground(GetColor(0x181818FF));
-            if (IsKeyPressed(KEY_Q)) {
-                players[current_player].action = PA_MOVE;
-            } else if (IsKeyPressed(KEY_W)) {
-                players[current_player].action = PA_ATTACK;
-            } else if (IsKeyPressed(KEY_E)) {
-                players[current_player].action = PA_SPELL;
+            if (state == GS_PLAYING) {
+                if (IsKeyPressed(KEY_Q)) {
+                    players[current_player].action = PA_MOVE;
+                } else if (IsKeyPressed(KEY_W)) {
+                    players[current_player].action = PA_ATTACK;
+                } else if (IsKeyPressed(KEY_E)) {
+                    players[current_player].action = PA_SPELL;
+                }
             }
 
-            if (player_exec_action(&players[current_player])) {
-                do {
-                    current_player = (current_player + 1) % player_count;
-                } while (players[current_player].health <= 0);
-                players[current_player].action = PA_MOVE;
+            if (state == GS_PLAYING) {
+                player_move move = player_exec_action(&players[current_player]);
+                if (move.action != PA_NONE) {
+                    state = GS_WAITING;
+                    // Send action to server
+                    net_packet_player_action a = {0};
+                    a.id = current_player;
+                    a.action = move.action;
+                    a.x = move.position.x;
+                    a.y = move.position.y;
+                    send_sock(PKT_PLAYER_ACTION, &a, client_fd);
+                }
             }
+
+            // When waiting, we should preview our action
 
             render_map();
             for (int i = 0; i < player_count; i++) {
                 render_player(&players[i]);
             }
-            render_player_actions(&players[current_player]);
+            if (state == GS_PLAYING) {
+                render_player_actions(&players[current_player]);
+            }
             render_infos();
         }
         EndDrawing();
