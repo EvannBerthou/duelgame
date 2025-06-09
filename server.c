@@ -1,3 +1,4 @@
+#include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdbool.h>
@@ -7,6 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "common.h"
+#include "net.h"
 
 typedef struct {
     uint8_t id;
@@ -37,6 +39,48 @@ int ci(int a) {
     return a;
 }
 
+void broadcast(net_packet_type_enum type, void *content) {
+    for (int i = 0; i < player_count; i++) {
+        send_sock(type, content, clients[i]);
+    }
+}
+
+void play_round(player_info *player) {
+    if (player->action == PA_MOVE) {
+        net_packet_player_update u = pkt_player_update(player->id, player->health, player->ax, player->ay);
+        broadcast(PKT_PLAYER_UPDATE, &u);
+        player->state = GS_PLAYING;
+        player->x = player->ax;
+        player->y = player->ay;
+    } else if (player->action == PA_SPELL) {
+        //TODO: Rework. We should check different spell types etc.
+        for (int j = 0; j < player_count; j++) {
+            player_info *pj = &players[j];
+            // Should check spell zone etc instead of just where the player clicked
+            if (pj->x == player->ax && pj->y == player->ay) {
+                pj->health = fmax(pj->health - 25, 0);
+                net_packet_player_update u = pkt_player_update(j, pj->health, pj->x, pj->y);
+                broadcast(PKT_PLAYER_UPDATE, &u);
+            }
+        }
+        player->state = GS_PLAYING;
+    } else {
+        fprintf(stderr, "Unsupported player action\n");
+        exit(1);
+    }
+}
+
+player_info *get_player(int fd) {
+    for (int i = 0; i < player_count; i++) {
+        if (clients[i] == fd) {
+            return &players[i];
+        }
+    }
+    printf("Unkown player\n");
+    exit(1);
+    return NULL;
+}
+
 fd_set master_set, read_fds;
 
 void handle_message(int fd) {
@@ -59,16 +103,11 @@ void handle_message(int fd) {
 
         // We send previously connected players informations to the new player
         for (int i = 0; i < player_count - 1; i++) {
-            net_packet_join other_user_join = {0};
-            other_user_join.id = i;
-            memcpy(other_user_join.username, players[i].name, 8);
+            net_packet_join other_user_join = pkt_join(i, players[i].name);
             send_sock(PKT_JOIN, &other_user_join, fd);
 
-            net_packet_player_update u = {0};
-            u.id = players[i].id;
-            u.health = players[i].health;
-            u.x = players[i].x;
-            u.y = players[i].y;
+            net_packet_player_update u =
+                pkt_player_update(players[i].id, players[i].health, players[i].x, players[i].y);
             send_sock(PKT_PLAYER_UPDATE, &u, fd);
         }
 
@@ -80,23 +119,29 @@ void handle_message(int fd) {
         players[last_player].id = last_player;
         memcpy(players[last_player].name, j->username, 8);
         players[last_player].name[8] = '\0';
-        players[last_player].health = 100;
+        players[last_player].health = 0;
         players[last_player].x = spawn_positions[last_player][0];
         players[last_player].y = spawn_positions[last_player][1];
 
-        net_packet_player_update u = {0};
-        u.id = players[last_player].id;
-        u.health = players[last_player].health;
-        u.x = players[last_player].x;
-        u.y = players[last_player].y;
+        player_info *pi = &players[last_player];
+        net_packet_player_update u = pkt_player_update(pi->id, pi->health, pi->x, pi->y);
+        broadcast(PKT_PLAYER_UPDATE, &u);
 
-        for (int i = 0; i < player_count; i++) {
-            send_sock(PKT_PLAYER_UPDATE, &u, clients[i]);
-        }
-
-        net_packet_connected c = {0};
-        c.id = last_player;
+        net_packet_connected c = pkt_connected(last_player);
         send_sock(PKT_CONNECTED, &c, fd);
+    } else if (p.type == PKT_PLAYER_BUILD) {
+        // TODO: We should only recieved this packet before the game has started
+        net_packet_player_build *b = (net_packet_player_build *)p.content;
+        player_info *player = get_player(fd);
+        printf("Player %d has %d base health and is using following spells : ", player->id, b->base_health);
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            printf("%d ", b->spells[i]);
+        }
+        printf("\n");
+        player->health = b->base_health;
+        // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
+        net_packet_player_update u = pkt_player_update(player->id, player->health, player->x, player->y);
+        broadcast(PKT_PLAYER_UPDATE, &u);
     } else if (p.type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p.content;
         printf("Player %d played : %d at %d %d\n", a->id, a->action, a->x, a->y);
@@ -112,41 +157,10 @@ void handle_message(int fd) {
                 all_played = false;
         }
 
-        //TODO: Set a specific action order (ex: player move before they attack)
+        // TODO: Set a specific action order (ex: player move before they attack)
         if (all_played) {
             for (int i = 0; i < player_count; i++) {
-                if (players[i].action == PA_MOVE) {
-                    net_packet_player_update u = {0};
-                    u.id = i;
-                    u.health = players[i].health;
-                    u.x = players[i].ax;
-                    u.y = players[i].ay;
-
-                    for (int j = 0; j < player_count; j++) {
-                        send_sock(PKT_PLAYER_UPDATE, &u, clients[j]);
-                    }
-                    players[i].state = GS_PLAYING;
-                    players[i].x = players[i].ax;
-                    players[i].y = players[i].ay;
-                } else if (players[i].action == PA_ATTACK) {
-                    for (int j = 0; j < player_count; j++) {
-                        if (players[j].x == players[i].ax && players[j].y == players[i].ay) {
-                            players[j].health -= 25;
-                            net_packet_player_update u = {0};
-                            u.id = j;
-                            u.health = players[j].health;
-                            u.x = players[j].x;
-                            u.y = players[j].y;
-                            for (int k = 0; k < player_count; k++) {
-                                send_sock(PKT_PLAYER_UPDATE, &u, clients[k]);
-                            }
-                        }
-                    }
-                    players[i].state = GS_PLAYING;
-                } else {
-                    fprintf(stderr, "Unsupported player action\n");
-                    exit(1);
-                }
+                play_round(&players[i]);
             }
             // TODO: Send end round packet
         }

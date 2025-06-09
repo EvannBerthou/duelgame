@@ -2,5 +2,5 @@
 
 set -xe
 
-gcc -Wall -Wextra server.c -o server
+gcc -Wall -Wextra server.c -o server -lm
 ./server
