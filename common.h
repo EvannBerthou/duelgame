@@ -6,9 +6,9 @@
 #define MAX_SPELL_COUNT 2
 
 typedef enum {
+    ST_MOVE,
     ST_TARGET,
     ST_ZONE,
-    ST_LINE,
 } spell_type_enum;
 
 typedef uint8_t spell_type;
@@ -25,8 +25,9 @@ typedef struct {
 } spell;
 
 const spell all_spells[] = {
-    {.id = 0, .name = "Attack", .icon = 0, .type = ST_ZONE, .damage = 25, .range = 5, .zone_size = 3},
-    {.id = 1, .name = "Hello?", .icon = 1, .type = ST_TARGET, .damage = 50, .range = 2},
+    {.id = 0, .name = "Move", .icon = 0, .type = ST_MOVE, .range = 1},
+    {.id = 1, .name = "Target", .icon = 1, .type = ST_TARGET, .damage = 25, .range = 1, .zone_size = 3},
+    {.id = 2, .name = "Zone", .icon = 2, .type = ST_TARGET, .damage = 50, .range = 2},
 };
 
 

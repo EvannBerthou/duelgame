@@ -15,24 +15,34 @@
 #define MAX_PLAYER_COUNT 4
 
 typedef enum {
-    GS_PLAYING = 0,
-    GS_WAITING = 1,
-    GS_COUNT,
+    RS_PLAYING = 0,
+    RS_WAITING = 1,
+    RS_COUNT,
+} round_state;
+
+typedef enum {
+    GS_WAITING,
+    GS_STARTED,
+    GS_ENDED,
+    GS_COUNT
 } game_state;
 
 typedef enum {
     PA_NONE,
-    PA_MOVE,
     PA_SPELL,
 } player_action;
 
+//TODO: Fix type IDs for the protocol
 typedef enum {
-    PKT_PING = 0,
-    PKT_JOIN = 1,
-    PKT_CONNECTED = 2,
-    PKT_PLAYER_UPDATE = 3,
-    PKT_PLAYER_BUILD = 4,
-    PKT_PLAYER_ACTION = 5,
+    PKT_PING,
+    PKT_JOIN,
+    PKT_CONNECTED,
+    PKT_GAME_START,
+    PKT_PLAYER_UPDATE,
+    PKT_PLAYER_BUILD,
+    PKT_PLAYER_ACTION,
+    PKT_ROUND_END,
+    PKT_GAME_END,
     PKT_COUNT
 } net_packet_type_enum;
 
@@ -46,14 +56,6 @@ typedef struct {
 
 typedef struct {
     uint8_t id;
-} net_packet_connected;
-
-net_packet_connected pkt_connected(uint8_t id) {
-    return (net_packet_connected){id};
-}
-
-typedef struct {
-    uint8_t id;
     char username[8];
 } net_packet_join;
 
@@ -63,6 +65,17 @@ net_packet_join pkt_join(uint8_t id, const char *username) {
     memcpy(p.username, username, 8);
     return p;
 }
+
+typedef struct {
+    uint8_t id;
+} net_packet_connected;
+
+net_packet_connected pkt_connected(uint8_t id) {
+    return (net_packet_connected){id};
+}
+
+typedef struct {
+} net_packet_game_start;
 
 typedef struct {
     uint8_t id;
@@ -93,10 +106,19 @@ typedef struct {
     uint8_t id;
     uint8_t action;
     uint8_t x, y;
+    uint8_t spell;
 } net_packet_player_action;
 
-net_packet_player_action pkt_player_action(uint8_t id, uint8_t action, uint8_t x, uint8_t y) {
-    return (net_packet_player_action){id, action, x, y};
+net_packet_player_action pkt_player_action(uint8_t id, uint8_t action, uint8_t x, uint8_t y, uint8_t spell) {
+    return (net_packet_player_action){id, action, x, y, spell};
+}
+
+typedef struct {
+    uint8_t winner_id;
+} net_packet_game_end;
+
+net_packet_game_end pkt_game_end(uint8_t winner_id) {
+    return (net_packet_game_end) {winner_id};
 }
 
 char *packu8(char *buf, uint8_t u) {
@@ -123,6 +145,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             net_packet_connected *p = (net_packet_connected*)content;
             return packu8(buf, p->id);
         } break;
+        case PKT_GAME_START: return buf;
         case PKT_PLAYER_UPDATE: {
             net_packet_player_update *p = (net_packet_player_update*)content;
             buf = packu8(buf, p->id);
@@ -145,6 +168,13 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, p->action);
             buf = packu8(buf, p->x);
             buf = packu8(buf, p->y);
+            buf = packu8(buf, p->spell);
+            return buf;
+        } break;
+        case PKT_ROUND_END: return buf;
+        case PKT_GAME_END: {
+            net_packet_game_end *p = (net_packet_game_end*)content;
+            buf = packu8(buf, p->winner_id);
             return buf;
         } break;
         default: exit(1);
@@ -168,6 +198,7 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             p->id = buf[0];
             return p;
         } break;
+        case PKT_GAME_START: return NULL;
         case PKT_PLAYER_UPDATE: {
             net_packet_player_update *p = malloc(sizeof(net_packet_player_update));
             if (p == NULL) exit(1);
@@ -193,6 +224,14 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             p->action = buf[1];
             p->x = buf[2];
             p->y = buf[3];
+            p->spell = buf[4];
+            return p;
+        } break;
+        case PKT_ROUND_END: return NULL;
+        case PKT_GAME_END: {
+            net_packet_game_end *p = malloc(sizeof(net_packet_game_end));
+            if (p == NULL) exit(1);
+            p->winner_id = buf[0];
             return p;
         } break;
         default: exit(1);
@@ -249,9 +288,12 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_PING: return 0;
         case PKT_JOIN: return 9;
         case PKT_CONNECTED: return 1;
+        case PKT_GAME_START: return 0;
         case PKT_PLAYER_UPDATE: return 4;
         case PKT_PLAYER_BUILD: return 2;
-        case PKT_PLAYER_ACTION: return 4;
+        case PKT_PLAYER_ACTION: return 5;
+        case PKT_ROUND_END: return 0;
+        case PKT_GAME_END: return 1;
         default: { fprintf(stderr, "Unknown type\n"); exit(1); }
     }
 }

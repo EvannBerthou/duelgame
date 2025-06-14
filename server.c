@@ -1,3 +1,4 @@
+#include <asm-generic/socket.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -10,15 +11,21 @@
 #include "common.h"
 #include "net.h"
 
+// Number of players required to have join the game in order to start
+#define LOBBY_FULL_COUNT 2
+
+game_state gs = GS_WAITING;
+
 typedef struct {
     uint8_t id;
     char name[9];
     uint8_t x, y;
     uint8_t health;
 
-    game_state state;
+    round_state state;
     player_action action;
     uint8_t ax, ay;
+    uint8_t spell;
 } player_info;
 
 int clients[MAX_PLAYER_COUNT] = {0};
@@ -34,6 +41,7 @@ int spawn_positions[][2] = {
 
 int ci(int a) {
     if (a < 0) {
+        printf("ci\n");
         exit(-a);
     }
     return a;
@@ -45,25 +53,54 @@ void broadcast(net_packet_type_enum type, void *content) {
     }
 }
 
-void play_round(player_info *player) {
-    if (player->action == PA_MOVE) {
-        net_packet_player_update u = pkt_player_update(player->id, player->health, player->ax, player->ay);
-        broadcast(PKT_PLAYER_UPDATE, &u);
-        player->state = GS_PLAYING;
-        player->x = player->ax;
-        player->y = player->ay;
-    } else if (player->action == PA_SPELL) {
-        //TODO: Rework. We should check different spell types etc.
-        for (int j = 0; j < player_count; j++) {
-            player_info *pj = &players[j];
-            // Should check spell zone etc instead of just where the player clicked
-            if (pj->x == player->ax && pj->y == player->ay) {
-                pj->health = fmax(pj->health - 25, 0);
-                net_packet_player_update u = pkt_player_update(j, pj->health, pj->x, pj->y);
-                broadcast(PKT_PLAYER_UPDATE, &u);
+void damage_player(player_info *p, const spell *s) {
+    p->health = fmax(p->health - s->damage, 0);
+    net_packet_player_update u = pkt_player_update(p->id, p->health, p->x, p->y);
+    broadcast(PKT_PLAYER_UPDATE, &u);
+
+    int alive_count = player_count;
+    for (int i = 0; i < player_count; i++) {
+        if (players[i].health <= 0) {
+            alive_count--;
+        }
+    }
+    // One player won
+    if (alive_count == 1) {
+        for (int i = 0; i < player_count; i++) {
+            if (players[i].health > 0) {
+                printf("Player %s won the game !\n", players[i].name);
+                net_packet_game_end e = pkt_game_end(players[i].id);
+                broadcast(PKT_GAME_END, &e);
+                break;
             }
         }
-        player->state = GS_PLAYING;
+    } 
+    // No winner
+    else if (alive_count == 0) {
+        printf("Nobody won the game...\n");;;
+        net_packet_game_end e = pkt_game_end(255);
+        broadcast(PKT_GAME_END, &e);
+    }
+}
+
+void play_round(player_info *player) {
+    if (player->action == PA_SPELL) {
+        printf("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
+        const spell *s = &all_spells[player->spell];
+        if (s->type == ST_MOVE) {
+            player->x = player->ax;
+            player->y = player->ay;
+            net_packet_player_update u = pkt_player_update(player->id, player->health, player->x, player->y);
+            broadcast(PKT_PLAYER_UPDATE, &u);
+        } else if (s->type == ST_TARGET) {
+            for (int i = 0; i < player_count; i++) {
+                player_info *other = &players[i];
+                if (other->x == player->ax && other->y == player->ay) {
+                    damage_player(other, s);
+                }
+            }
+        }
+        player->state = RS_PLAYING;
     } else {
         fprintf(stderr, "Unsupported player action\n");
         exit(1);
@@ -88,6 +125,7 @@ void handle_message(int fd) {
     if (packet_read(&p, fd) < 0) {
         FD_CLR(fd, &master_set);
         printf("Player %d left\n", fd);
+        // TODO: Handle this
         return;
     }
 
@@ -149,11 +187,12 @@ void handle_message(int fd) {
         players[a->id].action = a->action;
         players[a->id].ax = a->x;
         players[a->id].ay = a->y;
-        players[a->id].state = GS_WAITING;
+        players[a->id].state = RS_WAITING;
+        players[a->id].spell = a->spell;
 
         int all_played = true;
         for (int i = 0; i < player_count; i++) {
-            if (players[i].state == GS_PLAYING)
+            if (players[i].state == RS_PLAYING)
                 all_played = false;
         }
 
@@ -162,15 +201,21 @@ void handle_message(int fd) {
             for (int i = 0; i < player_count; i++) {
                 play_round(&players[i]);
             }
-            // TODO: Send end round packet
+            broadcast(PKT_ROUND_END, NULL);
         }
     }
 
     free(p.content);
 }
 
+void start_game() {
+    broadcast(PKT_GAME_START, NULL);
+}
+
 int main() {
     int sockfd = ci(socket(AF_INET, SOCK_STREAM, 0));
+    int yes = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -217,12 +262,16 @@ int main() {
                     } else {
                         clients[player_count] = connfd;
                         player_count++;
+                        if (player_count == LOBBY_FULL_COUNT) {
+                            start_game();
+                        }
                     }
                 } else {
                     handle_message(i);
                 }
             }
         }
+        usleep(16000);  // Sleep to avoid 100% CPU usage while I implement a better solution
     }
 
     printf("Client connected\n");
