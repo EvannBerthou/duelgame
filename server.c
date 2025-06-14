@@ -11,6 +11,8 @@
 #include "common.h"
 #include "net.h"
 
+fd_set master_set, read_fds;
+
 // Number of players required to have join the game in order to start
 #define LOBBY_FULL_COUNT 2
 
@@ -30,6 +32,8 @@ typedef struct {
 
 int clients[MAX_PLAYER_COUNT] = {0};
 player_info players[MAX_PLAYER_COUNT] = {0};
+// Stores the order in which players will do their actions
+int player_round_order[MAX_PLAYER_COUNT] = {0};
 int player_count = 0;
 
 int spawn_positions[][2] = {
@@ -74,10 +78,12 @@ void damage_player(player_info *p, const spell *s) {
                 break;
             }
         }
-    } 
+    }
     // No winner
     else if (alive_count == 0) {
-        printf("Nobody won the game...\n");;;
+        printf("Nobody won the game...\n");
+        ;
+        ;
         net_packet_game_end e = pkt_game_end(255);
         broadcast(PKT_GAME_END, &e);
     }
@@ -118,7 +124,29 @@ player_info *get_player(int fd) {
     return NULL;
 }
 
-fd_set master_set, read_fds;
+int compare_players_action(const void *a, const void *b) {
+    int player1_id = *(int *)a;
+    int player2_id = *(int *)b;
+
+    player_info *p1 = &players[player1_id];
+    player_info *p2 = &players[player2_id];
+
+    const spell *s1 = &all_spells[p1->spell];
+    const spell *s2 = &all_spells[p2->spell];
+
+    if (s1->speed == s2->speed) {
+        return rand() % 2 == 0 ? 1 : -1;  // If both spell have the same speed, its random (for now ?)
+    }
+
+    return all_spells[p2->spell].speed - all_spells[p1->spell].speed;
+}
+
+void sort_actions() {
+    for (int i = 0; i < player_count; i++) {
+        player_round_order[i] = i;
+    }
+    qsort(player_round_order, player_count, sizeof(int), &compare_players_action);
+}
 
 void handle_message(int fd) {
     net_packet p = {0};
@@ -196,10 +224,11 @@ void handle_message(int fd) {
                 all_played = false;
         }
 
-        // TODO: Set a specific action order (ex: player move before they attack)
         if (all_played) {
+            sort_actions();
             for (int i = 0; i < player_count; i++) {
-                play_round(&players[i]);
+                play_round(&players[player_round_order[i]]);
+                usleep(500000); // 0.5s sleep to show actions
             }
             broadcast(PKT_ROUND_END, NULL);
         }

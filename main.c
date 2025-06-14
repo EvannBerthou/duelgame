@@ -58,7 +58,7 @@ round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
 
-uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1};
+uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
 
@@ -234,6 +234,7 @@ void render_tooltip(const spell *s) {
     } else if (s->type == ST_TARGET || s->type == ST_ZONE) {
         DrawText(TextFormat("Damage = %d", s->damage), tooltip.x + 8, tooltip.y + 24, 18, BLACK);
         DrawText(TextFormat("Range = %d", s->range), tooltip.x + 8, tooltip.y + 42, 18, BLACK);
+        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x + 8, tooltip.y + 74, 18, BLACK);
     }
 }
 
