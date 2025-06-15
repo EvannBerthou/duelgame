@@ -30,6 +30,7 @@ typedef enum {
 typedef enum {
     PA_NONE,
     PA_SPELL,
+    PA_CANT_PLAY,
 } player_action;
 
 //TODO: Fixed type IDs for the protocol when more mature
@@ -81,10 +82,12 @@ typedef struct {
     uint8_t id;
     uint8_t health;
     uint8_t x, y;
+    uint8_t effect;
+    uint8_t effect_round_left;
 } net_packet_player_update;
 
-net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t x, uint8_t y) {
-    return (net_packet_player_update){id, health, x, y};
+net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t x, uint8_t y, uint8_t effect, uint8_t erl) {
+    return (net_packet_player_update){id, health, x, y, effect, erl};
 }
 
 // Player build
@@ -152,6 +155,8 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, p->health);
             buf = packu8(buf, p->x);
             buf = packu8(buf, p->y);
+            buf = packu8(buf, p->effect);
+            buf = packu8(buf, p->effect_round_left);
             return buf;
         } break;
         case PKT_PLAYER_BUILD: {
@@ -206,6 +211,8 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             p->health = buf[1];
             p->x = buf[2];
             p->y = buf[3];
+            p->effect = buf[4];
+            p->effect_round_left = buf[5];
             return p;
         } break;
         case PKT_PLAYER_BUILD: {
@@ -289,7 +296,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_JOIN: return 9;
         case PKT_CONNECTED: return 1;
         case PKT_GAME_START: return 0;
-        case PKT_PLAYER_UPDATE: return 4;
+        case PKT_PLAYER_UPDATE: return 6;
         case PKT_PLAYER_BUILD: return 2;
         case PKT_PLAYER_ACTION: return 5;
         case PKT_ROUND_END: return 0;

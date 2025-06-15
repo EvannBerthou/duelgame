@@ -106,9 +106,13 @@ typedef struct {
     char name[9];
     Color color;
     float health;
-    uint8_t spells[1];
+    uint8_t spells[MAX_SPELL_COUNT];
+    uint8_t cooldowns[MAX_SPELL_COUNT];
     player_action action;
     uint8_t selected_spell;
+
+    spell_effect effect;
+    uint8_t effect_round_left;
 
     int animation;
 } player;
@@ -126,7 +130,7 @@ round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
 
-uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3};
+uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3, 4, 0, 0, 0, 0};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
 
@@ -161,7 +165,7 @@ void compute_map_variants() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (MAP[y][x] == 0) {
-                if (rand() % 100 > 90) { //10% of chance to have a random floor cell texture
+                if (rand() % 100 > 90) {  // 10% of chance to have a random floor cell texture
                     MAP_VARIANTS[y][x] = (rand() % FLOOR_TEXTURE_COUNT - 1) + 1;
                 }
             }
@@ -238,10 +242,16 @@ int player_cast_spell(player *p, Vector2 origin) {
 }
 
 player_move player_exec_action(player *p) {
+    if (p->effect != SE_NONE) {
+        return (player_move){.action = PA_CANT_PLAY, .position = (Vector2){0, 0}};
+    }
+
     const Vector2 g = screen2grid(GetMousePosition());
     if (IsMouseButtonPressed(0)) {
         if (p->action == PA_SPELL) {
-            if (player_cast_spell(p, g)) {
+            if (p->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
+                // Set spell on cooldown
+                p->cooldowns[p->selected_spell] = get_selected_spell()->cooldown;
                 return (player_move){.action = PA_SPELL, .position = g};
             }
         }
@@ -396,8 +406,19 @@ void render_player_actions(player *p) {
     int toolbar_y = base_y_offset + CELL_SIZE * MAP_HEIGHT + 16;
 
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-        Color c = icons[all_spells[p->spells[i]].icon];
-        draw_cell(base_x_offset + (CELL_SIZE + 8) * i, toolbar_y, c);
+        const int x = base_x_offset + (CELL_SIZE + 8) * i;
+        const int y = toolbar_y;
+        bool on_cooldown = p->cooldowns[i] > 0;
+        if (on_cooldown) {
+            Color c = GRAY;
+            draw_cell(x, y, c);
+            const char *text = TextFormat("%d", p->cooldowns[i]);
+            Vector2 size = MeasureTextEx(GetFontDefault(), text, 56, 0);
+            DrawText(text, x + (CELL_SIZE - size.x) / 2, y + (CELL_SIZE - size.y) / 2, 56, WHITE);
+        } else {
+            Color c = icons[all_spells[p->spells[i]].icon];
+            draw_cell(x, y, c);
+        }
     }
 
     if (p->action == PA_SPELL) {
@@ -415,8 +436,10 @@ void render_player_actions(player *p) {
     }
 
     // In-game rendering
-    if (p->action == PA_SPELL) {
-        render_spell_actions(p);
+    if (p->cooldowns[p->selected_spell] == 0) {
+        if (p->action == PA_SPELL) {
+            render_spell_actions(p);
+        }
     }
 }
 
@@ -433,6 +456,10 @@ void render_infos() {
             DrawText(TextFormat("%s", players[i].name), x + 32, 8, 24, BLACK);
         }
         DrawText(TextFormat("Health: %d", (int)players[i].health), x + 8, 32, 24, BLACK);
+        if (players[i].effect_round_left > 0) {
+            DrawText(TextFormat("Effect %d : %d rounds left", players[i].effect, players[i].effect_round_left), x + 8,
+                     52, 24, BLACK);
+        }
     }
 }
 
@@ -484,9 +511,16 @@ void handle_packet(net_packet *p) {
         players[u->id].health = u->health;
         players[u->id].position.x = u->x;
         players[u->id].position.y = u->y;
+        players[u->id].effect = u->effect;
+        players[u->id].effect_round_left = u->effect_round_left;
         printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
     } else if (p->type == PKT_ROUND_END) {
         printf("Round ended\n");
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            if (players[current_player].cooldowns[i] > 0) {
+                players[current_player].cooldowns[i]--;
+            }
+        }
         state = RS_PLAYING;
     } else if (p->type == PKT_GAME_END) {
         net_packet_game_end *e = (net_packet_game_end *)p->content;
@@ -531,7 +565,6 @@ int main() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (PROPS[y][x]) {
-                // TODO: Should be based on time
                 PROPS_ANIMATION[y][x] = new_animation(0.2f, WALL_TORCH_ANIMATION_COUNT);
             }
         }

@@ -28,6 +28,9 @@ typedef struct {
     player_action action;
     uint8_t ax, ay;
     uint8_t spell;
+
+    spell_effect effect;
+    uint8_t effect_round_left;
 } player_info;
 
 int clients[MAX_PLAYER_COUNT] = {0};
@@ -38,7 +41,8 @@ int player_count = 0;
 
 int spawn_positions[][2] = {
     {0, 0},
-    {MAP_WIDTH - 1, 0},
+    //{MAP_WIDTH - 1, 0},
+    {1, 0},
     {0, MAP_HEIGHT - 1},
     {MAP_WIDTH - 1, MAP_HEIGHT - 1},
 };
@@ -51,6 +55,10 @@ int ci(int a) {
     return a;
 }
 
+net_packet_player_update pkt_from_info(player_info *p) {
+    return pkt_player_update(p->id, p->health, p->x, p->y, p->effect, p->effect_round_left);
+}
+
 void broadcast(net_packet_type_enum type, void *content) {
     for (int i = 0; i < player_count; i++) {
         send_sock(type, content, clients[i]);
@@ -59,7 +67,11 @@ void broadcast(net_packet_type_enum type, void *content) {
 
 void damage_player(player_info *p, const spell *s) {
     p->health = fmax(p->health - s->damage, 0);
-    net_packet_player_update u = pkt_player_update(p->id, p->health, p->x, p->y);
+    if (s->effect != SE_NONE) {
+        p->effect = s->effect;
+        p->effect_round_left = s->effect_duration;
+    }
+    net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
 
     int alive_count = player_count;
@@ -88,12 +100,26 @@ void damage_player(player_info *p, const spell *s) {
 }
 
 void play_round(player_info *player) {
-    if (player->action == PA_SPELL) {
+    if (player->action == PA_CANT_PLAY) {
+        printf("Player %d can't play this round\n", player->id);
+        net_packet_player_update u = pkt_from_info(player);
+        broadcast(PKT_PLAYER_UPDATE, &u);
+        player->state = RS_PLAYING;
+    } else if (player->action == PA_SPELL) {
+        if (player->effect == SE_STUN) {
+            printf("Player can't do this action because he is stunned\n");
+            net_packet_player_update u = pkt_from_info(player);
+            broadcast(PKT_PLAYER_UPDATE, &u);
+            player->state = RS_PLAYING;
+            return;
+        }
+
+        // TODO: Check that the player really has this spell in his build
         printf("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
         const spell *s = &all_spells[player->spell];
         if (s->type == ST_MOVE) {
             for (int i = 0; i < player_count; i++) {
-                // The player tries to move on the same cell as another player so we cancel it 
+                // The player tries to move on the same cell as another player so we cancel it
                 // TODO: We could add a negative effect (stun ?)
                 if (players[i].x == player->ax && players[i].y == player->ay && players[i].id != player->id) {
                     return;
@@ -101,7 +127,7 @@ void play_round(player_info *player) {
             }
             player->x = player->ax;
             player->y = player->ay;
-            net_packet_player_update u = pkt_player_update(player->id, player->health, player->x, player->y);
+            net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
         } else if (s->type == ST_TARGET) {
             for (int i = 0; i < player_count; i++) {
@@ -177,8 +203,7 @@ void handle_message(int fd) {
             net_packet_join other_user_join = pkt_join(i, players[i].name);
             send_sock(PKT_JOIN, &other_user_join, fd);
 
-            net_packet_player_update u =
-                pkt_player_update(players[i].id, players[i].health, players[i].x, players[i].y);
+            net_packet_player_update u = pkt_from_info(&players[i]);
             send_sock(PKT_PLAYER_UPDATE, &u, fd);
         }
 
@@ -195,7 +220,7 @@ void handle_message(int fd) {
         players[last_player].y = spawn_positions[last_player][1];
 
         player_info *pi = &players[last_player];
-        net_packet_player_update u = pkt_player_update(pi->id, pi->health, pi->x, pi->y);
+        net_packet_player_update u = pkt_from_info(pi);
         broadcast(PKT_PLAYER_UPDATE, &u);
 
         net_packet_connected c = pkt_connected(last_player);
@@ -204,6 +229,7 @@ void handle_message(int fd) {
         // TODO: We should only recieved this packet before the game has started
         net_packet_player_build *b = (net_packet_player_build *)p.content;
         player_info *player = get_player_from_fd(fd);
+        // TODO: Store spells in player_info
         printf("Player %d has %d base health and is using following spells : ", player->id, b->base_health);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             printf("%d ", b->spells[i]);
@@ -211,7 +237,7 @@ void handle_message(int fd) {
         printf("\n");
         player->health = b->base_health;
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
-        net_packet_player_update u = pkt_player_update(player->id, player->health, player->x, player->y);
+        net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
     } else if (p.type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p.content;
@@ -234,6 +260,16 @@ void handle_message(int fd) {
             for (int i = 0; i < player_count; i++) {
                 play_round(&players[player_round_order[i]]);
                 usleep(500000);  // 0.5s sleep to show actions
+            }
+            for (int i = 0; i < player_count; i++) {
+                if (players[i].effect_round_left > 0) {
+                    players[i].effect_round_left--;
+                    if (players[i].effect_round_left == 0) {
+                        players[i].effect = SE_NONE;
+                    }
+                }
+                net_packet_player_update u = pkt_from_info(&players[i]);
+                broadcast(PKT_PLAYER_UPDATE, &u);
             }
             broadcast(PKT_ROUND_END, NULL);
         }
