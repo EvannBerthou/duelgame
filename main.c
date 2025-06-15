@@ -500,8 +500,8 @@ void handle_packet(net_packet *p) {
         printf("My ID is %d\n", c->id);
         current_player = c->id;
 
-        net_packet_player_build b = pkt_player_build(rand(), my_spells);
         memcpy(players[current_player].spells, my_spells, MAX_SPELL_COUNT);
+        net_packet_player_build b = pkt_player_build(rand(), players[current_player].spells);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
     } else if (p->type == PKT_GAME_START) {
         printf("Starting Game !!\n");

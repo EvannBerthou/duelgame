@@ -44,6 +44,9 @@ typedef enum {
     PKT_PLAYER_ACTION,
     PKT_ROUND_END,
     PKT_GAME_END,
+    PKT_ADMIN_CONNECT,
+    PKT_ADMIN_CONNECT_RESULT,
+    PKT_ADMIN_UPDATE_PLAYER_INFO,
     PKT_COUNT
 } net_packet_type_enum;
 
@@ -124,6 +127,42 @@ net_packet_game_end pkt_game_end(uint8_t winner_id) {
     return (net_packet_game_end) {winner_id};
 }
 
+typedef struct {
+    char password[8];
+} net_packet_admin_connect;
+
+net_packet_admin_connect pkt_admin_connect(const char *password) {
+    net_packet_admin_connect p = {0};
+    for (int i = 0; i < 8; i++) {
+        if (password[i] == '\0')
+            break;
+        p.password[i] = password[i];
+    }
+    return p;
+}
+
+typedef struct {
+    uint8_t success;
+} net_packet_admin_connect_result;
+
+net_packet_admin_connect_result pkt_admin_connect_result(uint8_t result) {
+    return (net_packet_admin_connect_result){result};
+}
+
+typedef enum {
+    PIP_HEALTH,
+} player_info_property;
+
+typedef struct {
+    uint8_t id;
+    uint8_t property;
+    uint8_t value;
+} net_packet_admin_update_player_info;
+
+net_packet_admin_update_player_info pkt_admin_update_player_info(uint8_t id, player_info_property prop, uint8_t value) {
+    return (net_packet_admin_update_player_info){id, (uint8_t)prop, value};
+}
+
 char *packu8(char *buf, uint8_t u) {
     *buf = u;
     return buf + sizeof(uint8_t);
@@ -180,6 +219,21 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
         case PKT_GAME_END: {
             net_packet_game_end *p = (net_packet_game_end*)content;
             buf = packu8(buf, p->winner_id);
+            return buf;
+        } break;
+        case PKT_ADMIN_CONNECT: {
+            net_packet_admin_connect *p = (net_packet_admin_connect*)content;
+            return packsv(buf, p->password, 8);
+        } break;
+        case PKT_ADMIN_CONNECT_RESULT: {
+            net_packet_admin_connect_result *p = (net_packet_admin_connect_result*)content;
+            return packu8(buf, p->success);
+        } break;
+        case PKT_ADMIN_UPDATE_PLAYER_INFO: {
+            net_packet_admin_update_player_info *p = (net_packet_admin_update_player_info*)content;
+            buf = packu8(buf, p->id);
+            buf = packu8(buf, p->property);
+            buf = packu8(buf, p->value);
             return buf;
         } break;
         default: exit(1);
@@ -241,6 +295,26 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             p->winner_id = buf[0];
             return p;
         } break;
+        case PKT_ADMIN_CONNECT: {
+            net_packet_admin_connect *p = malloc(sizeof(net_packet_admin_connect));
+            if (p == NULL) exit(1);
+            memcpy(p->password, buf, 8);
+            return p;
+        } break;
+        case PKT_ADMIN_CONNECT_RESULT: {
+            net_packet_admin_connect_result *p = malloc(sizeof(net_packet_admin_connect_result));
+            if (p == NULL) exit(1);
+            p->success = buf[0];
+            return p;
+        } break;
+        case PKT_ADMIN_UPDATE_PLAYER_INFO: {
+            net_packet_admin_update_player_info *p = malloc(sizeof(net_packet_admin_update_player_info));
+            if (p == NULL) exit(1);
+            p->id = buf[0];
+            p->property = buf[1];
+            p->value = buf[2];
+            return p;
+        } break;
         default: exit(1);
     }
 
@@ -297,10 +371,13 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_CONNECTED: return 1;
         case PKT_GAME_START: return 0;
         case PKT_PLAYER_UPDATE: return 6;
-        case PKT_PLAYER_BUILD: return 2;
+        case PKT_PLAYER_BUILD: return 1 + MAX_SPELL_COUNT;
         case PKT_PLAYER_ACTION: return 5;
         case PKT_ROUND_END: return 0;
         case PKT_GAME_END: return 1;
+        case PKT_ADMIN_CONNECT: return 8;
+        case PKT_ADMIN_CONNECT_RESULT: return 1;
+        case PKT_ADMIN_UPDATE_PLAYER_INFO: return 3;
         default: { fprintf(stderr, "Unknown type\n"); exit(1); }
     }
 }

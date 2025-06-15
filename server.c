@@ -13,6 +13,21 @@
 
 fd_set master_set, read_fds;
 
+// Admin stuff
+const char ADMIN_PASSWORD[8] = {'p', 'a', 's', 's'};
+#define MAX_ADMIN 4
+
+int admins[MAX_ADMIN] = {0};
+int admin_count = 0;
+
+bool is_admin(int fd) {
+    for (int i = 0; i < admin_count; i++) {
+        if (admins[i] == fd)
+            return true;
+    }
+    return false;
+}
+
 // Number of players required to have join the game in order to start
 #define LOBBY_FULL_COUNT 2
 
@@ -32,6 +47,9 @@ typedef struct {
     spell_effect effect;
     uint8_t effect_round_left;
 } player_info;
+
+int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
+int connection_count = 0;
 
 int clients[MAX_PLAYER_COUNT] = {0};
 player_info players[MAX_PLAYER_COUNT] = {0};
@@ -179,6 +197,10 @@ void sort_actions() {
     qsort(player_round_order, player_count, sizeof(int), &compare_players_action);
 }
 
+void start_game() {
+    broadcast(PKT_GAME_START, NULL);
+}
+
 void handle_message(int fd) {
     net_packet p = {0};
     if (packet_read(&p, fd) < 0) {
@@ -189,6 +211,9 @@ void handle_message(int fd) {
     }
 
     if (p.type == PKT_JOIN) {
+        clients[player_count] = fd;
+        player_count++;
+
         net_packet_join *j = (net_packet_join *)p.content;
         printf("[%d] Joined %.*s\n", fd, 8, j->username);
         for (int i = 0; i < player_count; i++) {
@@ -225,6 +250,10 @@ void handle_message(int fd) {
 
         net_packet_connected c = pkt_connected(last_player);
         send_sock(PKT_CONNECTED, &c, fd);
+
+        if (player_count == LOBBY_FULL_COUNT) {
+            start_game();
+        }
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: We should only recieved this packet before the game has started
         net_packet_player_build *b = (net_packet_player_build *)p.content;
@@ -273,13 +302,25 @@ void handle_message(int fd) {
             }
             broadcast(PKT_ROUND_END, NULL);
         }
+    } else if (p.type == PKT_ADMIN_CONNECT) {
+        net_packet_admin_connect *a = (net_packet_admin_connect *)p.content;
+        printf("%d is trying to connect as admin with password '%s'\n", fd, a->password);
+        net_packet_admin_connect_result result = pkt_admin_connect_result(memcmp(a->password, ADMIN_PASSWORD, 8) == 0);
+        send_sock(PKT_ADMIN_CONNECT_RESULT, &result, fd);
+        admins[admin_count] = fd;
+        admin_count++;
+    } else if (p.type == PKT_ADMIN_UPDATE_PLAYER_INFO) {
+        if (is_admin(fd)) {
+            net_packet_admin_update_player_info *info = (net_packet_admin_update_player_info *)p.content;
+            if (info->property == PIP_HEALTH) {
+                players[info->id].health = info->value;
+                net_packet_player_update u = pkt_from_info(&players[info->id]);
+                broadcast(PKT_PLAYER_UPDATE, &u);
+            }
+        }
     }
 
     free(p.content);
-}
-
-void start_game() {
-    broadcast(PKT_GAME_START, NULL);
 }
 
 int main() {
@@ -330,11 +371,8 @@ int main() {
                         FD_CLR(connfd, &master_set);
                         close(connfd);
                     } else {
-                        clients[player_count] = connfd;
-                        player_count++;
-                        if (player_count == LOBBY_FULL_COUNT) {
-                            start_game();
-                        }
+                        connections[connection_count] = connfd;
+                        connection_count++;
                     }
                 } else {
                     handle_message(i);

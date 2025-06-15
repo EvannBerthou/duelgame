@@ -1,1 +1,2 @@
 - Server side cooldown and spell checking
+- Check server side that moves are valid. The map should be sent by the server
