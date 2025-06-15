@@ -36,6 +36,13 @@ const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
 
+int MAP_VARIANTS[MAP_HEIGHT][MAP_WIDTH] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+};
+
 const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -49,6 +56,15 @@ int PROPS_ANIMATION[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
+
+#define WALL_ORIENTATION_COUNT 16
+
+// Each name states where the wall are.
+const char *wall_frames[WALL_ORIENTATION_COUNT] = {
+    "top_right_bottom_left", "top_right_left", "top_right_bottom", "top_right",
+    "top_bottom_left",       "top_left",       "top_bottom",       "top",
+    "right_bottom_left",     "right_left",     "right_bottom",     "right",
+    "bottom_left",           "left",           "bottom",           "mid"};
 
 typedef struct {
     bool active;
@@ -114,8 +130,10 @@ uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
 
-Texture2D floor_texture = {0};
-Texture2D wall_texture = {0};
+#define FLOOR_TEXTURE_COUNT 8
+Texture2D floor_textures[FLOOR_TEXTURE_COUNT] = {0};
+
+Texture2D wall_textures[WALL_ORIENTATION_COUNT] = {0};
 
 #define PLAYER_ANIMATION_COUNT 4
 Texture2D player_textures[PLAYER_ANIMATION_COUNT] = {0};
@@ -125,13 +143,37 @@ Texture2D wall_torch[WALL_TORCH_ANIMATION_COUNT] = {0};
 int torch_anim = 0;
 
 void load_assets() {
-    floor_texture = LoadTexture("assets/sprites/floor_1.png");
-    wall_texture = LoadTexture("assets/sprites/wall_left.png");
+    for (int i = 0; i < FLOOR_TEXTURE_COUNT; i++) {
+        floor_textures[i] = LoadTexture(TextFormat("assets/sprites/floor_%d.png", i + 1));
+    }
+    for (int i = 0; i < WALL_ORIENTATION_COUNT; i++) {
+        wall_textures[i] = LoadTexture(TextFormat("assets/sprites/walls/wall_%s.png", wall_frames[i]));
+    }
     for (int i = 0; i < PLAYER_ANIMATION_COUNT; i++) {
         player_textures[i] = LoadTexture(TextFormat("assets/sprites/wizzard_f_idle_anim_f%d.png", i));
     }
     for (int i = 0; i < WALL_TORCH_ANIMATION_COUNT; i++) {
         wall_torch[i] = LoadTexture(TextFormat("assets/sprites/wall_torch_anim_f%d.png", i));
+    }
+}
+
+void compute_map_variants() {
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (MAP[y][x] == 0) {
+                if (rand() % 100 > 90) { //10% of chance to have a random floor cell texture
+                    MAP_VARIANTS[y][x] = (rand() % FLOOR_TEXTURE_COUNT - 1) + 1;
+                }
+            }
+            // TODO: Check bounds
+            if (MAP[y][x] == 1) {
+                MAP_VARIANTS[y][x] = 0;
+                MAP_VARIANTS[y][x] |= (MAP[y + 1][x] == 1) << 0;
+                MAP_VARIANTS[y][x] |= (MAP[y][x - 1] == 1) << 1;
+                MAP_VARIANTS[y][x] |= (MAP[y][x + 1] == 1) << 2;
+                MAP_VARIANTS[y][x] |= (MAP[y - 1][x] == 1) << 3;
+            }
+        }
     }
 }
 
@@ -212,11 +254,12 @@ bool is_over_cell(int x, int y) {
     return CheckCollisionPointRec(GetMousePosition(), cell_rect);
 }
 
-Texture2D get_cell_texture(int cell_type) {
+Texture2D get_cell_texture(int x, int y) {
+    int cell_type = MAP[y][x];
     if (cell_type == 0)
-        return floor_texture;
+        return floor_textures[MAP_VARIANTS[y][x]];
     if (cell_type == 1)
-        return wall_texture;
+        return wall_textures[MAP_VARIANTS[y][x]];
     return (Texture2D){0};
 }
 
@@ -239,7 +282,7 @@ void render_map() {
         for (int x = 0; x < MAP_WIDTH; x++) {
             const int x_pos = base_x_offset + x * CELL_SIZE;
             const int y_pos = base_y_offset + y * CELL_SIZE;
-            Texture2D t = get_cell_texture(MAP[y][x]);
+            Texture2D t = get_cell_texture(x, y);
             if (t.id != 0) {
                 Color tint = is_over_cell(x_pos, y_pos) ? RED : WHITE;
                 DrawTextureEx(t, (Vector2){x_pos, y_pos}, 0, 4, tint);
@@ -455,10 +498,12 @@ void handle_packet(net_packet *p) {
 }
 
 int main() {
+    srand(time(NULL));
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     SetTargetFPS(60);
 
     load_assets();
+    compute_map_variants();
 
     if (connect_to_server("127.0.0.1", 3000) < 0) {
         fprintf(stderr, "Could not connect to server\n");
@@ -501,7 +546,6 @@ int main() {
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
 
-    srand(time(NULL));
     net_packet_join join = {0};
     memcpy(join.username, TextFormat("User %d", rand()), 8);
     send_sock(PKT_JOIN, &join, client_fd);
