@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define MAX_SPELL_COUNT 3
+#define MAX_SPELL_COUNT 8
 
 typedef enum {
     ST_MOVE,
@@ -25,6 +25,7 @@ typedef struct {
     uint8_t speed;
 } spell;
 
+//TODO: Add spells with effects (stun, root, DOT, kb)
 const spell all_spells[] = {
     {.id = 0, .name = "Move", .icon = 0, .type = ST_MOVE, .range = 1, .speed = 100},
     {.id = 1, .name = "Target", .icon = 1, .type = ST_TARGET, .damage = 25, .range = 1, .zone_size = 3, .speed = 90},

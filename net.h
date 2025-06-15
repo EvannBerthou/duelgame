@@ -32,7 +32,7 @@ typedef enum {
     PA_SPELL,
 } player_action;
 
-//TODO: Fix type IDs for the protocol
+//TODO: Fixed type IDs for the protocol when more mature
 typedef enum {
     PKT_PING,
     PKT_JOIN,

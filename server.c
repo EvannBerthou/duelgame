@@ -82,8 +82,6 @@ void damage_player(player_info *p, const spell *s) {
     // No winner
     else if (alive_count == 0) {
         printf("Nobody won the game...\n");
-        ;
-        ;
         net_packet_game_end e = pkt_game_end(255);
         broadcast(PKT_GAME_END, &e);
     }
@@ -94,6 +92,13 @@ void play_round(player_info *player) {
         printf("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
         const spell *s = &all_spells[player->spell];
         if (s->type == ST_MOVE) {
+            for (int i = 0; i < player_count; i++) {
+                // The player tries to move on the same cell as another player so we cancel it 
+                // TODO: We could add a negative effect (stun ?)
+                if (players[i].x == player->ax && players[i].y == player->ay && players[i].id != player->id) {
+                    return;
+                }
+            }
             player->x = player->ax;
             player->y = player->ay;
             net_packet_player_update u = pkt_player_update(player->id, player->health, player->x, player->y);
@@ -113,7 +118,7 @@ void play_round(player_info *player) {
     }
 }
 
-player_info *get_player(int fd) {
+player_info *get_player_from_fd(int fd) {
     for (int i = 0; i < player_count; i++) {
         if (clients[i] == fd) {
             return &players[i];
@@ -198,7 +203,7 @@ void handle_message(int fd) {
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: We should only recieved this packet before the game has started
         net_packet_player_build *b = (net_packet_player_build *)p.content;
-        player_info *player = get_player(fd);
+        player_info *player = get_player_from_fd(fd);
         printf("Player %d has %d base health and is using following spells : ", player->id, b->base_health);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             printf("%d ", b->spells[i]);
@@ -228,7 +233,7 @@ void handle_message(int fd) {
             sort_actions();
             for (int i = 0; i < player_count; i++) {
                 play_round(&players[player_round_order[i]]);
-                usleep(500000); // 0.5s sleep to show actions
+                usleep(500000);  // 0.5s sleep to show actions
             }
             broadcast(PKT_ROUND_END, NULL);
         }

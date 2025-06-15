@@ -18,6 +18,8 @@
 
 #define CELL_SIZE 64.0
 
+#define MAX_ANIMATION_POOL 16
+
 Color icons[] = {
     {0xFF, 0x00, 0x00, 0xFF},
     {0x0, 0xFF, 0x00, 0xFF},
@@ -34,6 +36,54 @@ const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
 
+const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+};
+
+int PROPS_ANIMATION[MAP_HEIGHT][MAP_WIDTH] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+};
+
+typedef struct {
+    bool active;
+
+    double current_time;
+    double animation_time;
+
+    int current_frame;
+    int max_frame;
+} animation;
+
+animation anim_pool[MAX_ANIMATION_POOL] = {0};
+
+int new_animation(double animation_time, int max_frame) {
+    for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
+        if (anim_pool[i].active == false) {
+            anim_pool[i].active = true;
+            anim_pool[i].current_time = 0;
+            anim_pool[i].animation_time = animation_time;
+            anim_pool[i].current_frame = 0;
+            anim_pool[i].max_frame = max_frame;
+            return i;
+        }
+    }
+    printf("Animation pool is full\n");
+    exit(1);
+}
+
+int get_frame(int anim_id) {
+    if (anim_id >= MAX_ANIMATION_POOL) {
+        printf("Invalid ID (%d > %d)\n", anim_id, MAX_ANIMATION_POOL);
+    }
+    return anim_pool[anim_id].current_frame;
+}
+
 typedef struct {
     // Position in grid space
     Vector2 position;
@@ -43,6 +93,8 @@ typedef struct {
     uint8_t spells[1];
     player_action action;
     uint8_t selected_spell;
+
+    int animation;
 } player;
 
 typedef struct {
@@ -61,6 +113,27 @@ int winner_id = 0;
 uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
+
+Texture2D floor_texture = {0};
+Texture2D wall_texture = {0};
+
+#define PLAYER_ANIMATION_COUNT 4
+Texture2D player_textures[PLAYER_ANIMATION_COUNT] = {0};
+
+#define WALL_TORCH_ANIMATION_COUNT 8
+Texture2D wall_torch[WALL_TORCH_ANIMATION_COUNT] = {0};
+int torch_anim = 0;
+
+void load_assets() {
+    floor_texture = LoadTexture("assets/sprites/floor_1.png");
+    wall_texture = LoadTexture("assets/sprites/wall_left.png");
+    for (int i = 0; i < PLAYER_ANIMATION_COUNT; i++) {
+        player_textures[i] = LoadTexture(TextFormat("assets/sprites/wizzard_f_idle_anim_f%d.png", i));
+    }
+    for (int i = 0; i < WALL_TORCH_ANIMATION_COUNT; i++) {
+        wall_torch[i] = LoadTexture(TextFormat("assets/sprites/wall_torch_anim_f%d.png", i));
+    }
+}
 
 void draw_cell(int x, int y, Color c) {
     DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, c);
@@ -126,8 +199,6 @@ player_move player_exec_action(player *p) {
     const Vector2 g = screen2grid(GetMousePosition());
     if (IsMouseButtonPressed(0)) {
         if (p->action == PA_SPELL) {
-            // TODO: Player should be able to cast a spell even if there is nobody on the clicked cell
-            // But it should check if the player has the range to cast a spell here
             if (player_cast_spell(p, g)) {
                 return (player_move){.action = PA_SPELL, .position = g};
             }
@@ -141,6 +212,14 @@ bool is_over_cell(int x, int y) {
     return CheckCollisionPointRec(GetMousePosition(), cell_rect);
 }
 
+Texture2D get_cell_texture(int cell_type) {
+    if (cell_type == 0)
+        return floor_texture;
+    if (cell_type == 1)
+        return wall_texture;
+    return (Texture2D){0};
+}
+
 Color get_cell_color(int cell_type) {
     if (cell_type == 0)
         return PURPLE;
@@ -149,14 +228,35 @@ Color get_cell_color(int cell_type) {
     return SKYBLUE;
 }
 
+Texture2D get_prop_texture(int prop_type, int anim_id) {
+    if (prop_type == 1)
+        return wall_torch[get_frame(anim_id)];
+    return (Texture2D){0};
+}
+
 void render_map() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             const int x_pos = base_x_offset + x * CELL_SIZE;
             const int y_pos = base_y_offset + y * CELL_SIZE;
-            Color c = is_over_cell(x_pos, y_pos) ? RED : get_cell_color(MAP[y][x]);
-            DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
-            DrawRectangleLines(x_pos, y_pos, CELL_SIZE, CELL_SIZE, BLACK);
+            Texture2D t = get_cell_texture(MAP[y][x]);
+            if (t.id != 0) {
+                Color tint = is_over_cell(x_pos, y_pos) ? RED : WHITE;
+                DrawTextureEx(t, (Vector2){x_pos, y_pos}, 0, 4, tint);
+            } else {
+                Color c = is_over_cell(x_pos, y_pos) ? RED : get_cell_color(MAP[y][x]);
+                DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
+                DrawRectangleLines(x_pos, y_pos, CELL_SIZE, CELL_SIZE, BLACK);
+            }
+        }
+    }
+
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            const int x_pos = base_x_offset + x * CELL_SIZE + 8;
+            const int y_pos = base_y_offset + y * CELL_SIZE - 8;
+            Texture2D texture = get_prop_texture(PROPS[y][x], PROPS_ANIMATION[y][x]);
+            DrawTextureEx(texture, (Vector2){x_pos, y_pos}, 0, 3, WHITE);
         }
     }
 }
@@ -164,9 +264,11 @@ void render_map() {
 void render_player(player *p) {
     if (p->health <= 0)
         return;
-    const int x_pos = base_x_offset + p->position.x * CELL_SIZE;
-    const int y_pos = base_y_offset + p->position.y * CELL_SIZE;
-    DrawCircle(x_pos + CELL_SIZE / 2, y_pos + CELL_SIZE / 2, 24, p->color);
+    const int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
+    const int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
+    Vector2 player_position = {x_pos, y_pos};
+    Texture2D player_texture = player_textures[get_frame(p->animation)];
+    DrawTextureEx(player_texture, player_position, 0, 3, WHITE);
 }
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s) {
@@ -231,10 +333,11 @@ void render_tooltip(const spell *s) {
     if (s->type == ST_MOVE) {
         DrawText("Moves the player", tooltip.x + 8, tooltip.y + 24, 18, BLACK);
         DrawText(TextFormat("Range = %d", s->range), tooltip.x + 8, tooltip.y + 42, 18, BLACK);
+        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x + 8, tooltip.y + 58, 18, BLACK);
     } else if (s->type == ST_TARGET || s->type == ST_ZONE) {
         DrawText(TextFormat("Damage = %d", s->damage), tooltip.x + 8, tooltip.y + 24, 18, BLACK);
         DrawText(TextFormat("Range = %d", s->range), tooltip.x + 8, tooltip.y + 42, 18, BLACK);
-        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x + 8, tooltip.y + 74, 18, BLACK);
+        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x + 8, tooltip.y + 58, 18, BLACK);
     }
 }
 
@@ -343,7 +446,7 @@ void handle_packet(net_packet *p) {
         printf("Round ended\n");
         state = RS_PLAYING;
     } else if (p->type == PKT_GAME_END) {
-        net_packet_game_end *e = (net_packet_game_end*)p->content;
+        net_packet_game_end *e = (net_packet_game_end *)p->content;
         winner_id = e->winner_id;
         gs = GS_ENDED;
     }
@@ -355,6 +458,8 @@ int main() {
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     SetTargetFPS(60);
 
+    load_assets();
+
     if (connect_to_server("127.0.0.1", 3000) < 0) {
         fprintf(stderr, "Could not connect to server\n");
         exit(1);
@@ -364,15 +469,28 @@ int main() {
 
     players[0].color = YELLOW;
     players[0].action = PA_SPELL;
+    players[0].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
 
     players[1].color = GREEN;
     players[1].action = PA_SPELL;
+    players[1].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
 
     players[2].color = BLUE;
     players[2].action = PA_SPELL;
+    players[2].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
 
     players[3].color = RED;
     players[3].action = PA_SPELL;
+    players[3].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
+
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (PROPS[y][x]) {
+                // TODO: Should be based on time
+                PROPS_ANIMATION[y][x] = new_animation(0.2f, WALL_TORCH_ANIMATION_COUNT);
+            }
+        }
+    }
 
     fd_set master_set;
     FD_ZERO(&master_set);
@@ -401,6 +519,18 @@ int main() {
                 exit(1);
             }
             handle_packet(&p);
+        }
+
+        double ft = GetFrameTime();
+        for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
+            if (anim_pool[i].active == false)
+                continue;
+            animation *a = &anim_pool[i];
+            a->current_time += ft;
+            if (a->current_time >= a->animation_time) {
+                a->current_frame = (a->current_frame + 1) % a->max_frame;
+                a->current_time = 0;
+            }
         }
 
         BeginDrawing();
