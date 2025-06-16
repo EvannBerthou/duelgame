@@ -250,10 +250,6 @@ void handle_message(int fd) {
 
         net_packet_connected c = pkt_connected(last_player);
         send_sock(PKT_CONNECTED, &c, fd);
-
-        if (player_count == LOBBY_FULL_COUNT) {
-            start_game();
-        }
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: We should only recieved this packet before the game has started
         net_packet_player_build *b = (net_packet_player_build *)p.content;
@@ -268,6 +264,11 @@ void handle_message(int fd) {
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
+
+        //TODO: We should only start the game when every player has sent his build
+        if (player_count == LOBBY_FULL_COUNT) {
+            start_game();
+        }
     } else if (p.type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p.content;
         printf("Player %d played : %d at %d %d\n", a->id, a->action, a->x, a->y);

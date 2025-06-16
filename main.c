@@ -66,26 +66,40 @@ const char *wall_frames[WALL_ORIENTATION_COUNT] = {
     "right_bottom_left",     "right_left",     "right_bottom",     "right",
     "bottom_left",           "left",           "bottom",           "mid"};
 
+typedef enum {
+    AT_LOOP,
+    AT_ONESHOT,
+} animation_type;
+
 typedef struct {
     bool active;
+
+    animation_type type;
 
     double current_time;
     double animation_time;
 
     int current_frame;
     int max_frame;
+
+    int finished;  // Only for oneshot. Is true on last frame of animation.
 } animation;
 
+#define NO_ANIMATION 255
 animation anim_pool[MAX_ANIMATION_POOL] = {0};
 
-int new_animation(double animation_time, int max_frame) {
+typedef int anim_id;
+
+int new_animation(animation_type type, double animation_time, int max_frame) {
     for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
         if (anim_pool[i].active == false) {
             anim_pool[i].active = true;
+            anim_pool[i].type = type;
             anim_pool[i].current_time = 0;
             anim_pool[i].animation_time = animation_time;
             anim_pool[i].current_frame = 0;
             anim_pool[i].max_frame = max_frame;
+            anim_pool[i].finished = false;
             return i;
         }
     }
@@ -96,11 +110,28 @@ int new_animation(double animation_time, int max_frame) {
 int get_frame(int anim_id) {
     if (anim_id >= MAX_ANIMATION_POOL) {
         printf("Invalid ID (%d > %d)\n", anim_id, MAX_ANIMATION_POOL);
+        return 0;
     }
     return anim_pool[anim_id].current_frame;
 }
 
+double get_process(int anim_id) {
+    if (anim_id >= MAX_ANIMATION_POOL) {
+        printf("Invalid ID (%d > %d)\n", anim_id, MAX_ANIMATION_POOL);
+        return 0;
+    }
+    double progress = anim_pool[anim_id].current_time / anim_pool[anim_id].animation_time;
+    return progress > 1 ? 1 : progress;
+}
+
+typedef enum {
+    PAS_NONE,
+    PAS_MOVING,
+    PAS_DAMAGE,
+} player_animation_state;
+
 typedef struct {
+    bool init;
     // Position in grid space
     Vector2 position;
     char name[9];
@@ -114,7 +145,10 @@ typedef struct {
     spell_effect effect;
     uint8_t effect_round_left;
 
-    int animation;
+    anim_id animation;
+    anim_id action_animation;
+    player_animation_state animation_state;
+    Vector2 moving_target;  // Where the player is trying to move. Used for animation
 } player;
 
 typedef struct {
@@ -179,6 +213,10 @@ void compute_map_variants() {
             }
         }
     }
+}
+
+float lerp(float a, float b, float f) {
+    return a + f * (b - a);
 }
 
 void draw_cell(int x, int y, Color c) {
@@ -317,11 +355,44 @@ void render_map() {
 void render_player(player *p) {
     if (p->health <= 0)
         return;
+
     const int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
     const int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
     Vector2 player_position = {x_pos, y_pos};
     Texture2D player_texture = player_textures[get_frame(p->animation)];
-    DrawTextureEx(player_texture, player_position, 0, 3, WHITE);
+    Color c = WHITE;
+
+    if (p->effect == SE_STUN) {
+        c = GRAY;
+        player_texture = player_textures[0];
+    }
+
+    // Player is doing the slide animation
+    if (p->animation_state == PAS_MOVING) {
+        animation *a = &anim_pool[p->action_animation];
+        double progress = get_process(p->animation_state);
+
+        const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
+        const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
+        player_position.x = lerp(x_pos, x_target, progress);
+        player_position.y = lerp(y_pos, y_target, progress);
+
+        if (a->finished) {
+            p->action_animation = NO_ANIMATION;
+            p->position.x = p->moving_target.x;
+            p->position.y = p->moving_target.y;
+            p->animation_state = PAS_NONE;
+        }
+    } else if (p->animation_state == PAS_DAMAGE) {
+        animation *a = &anim_pool[p->action_animation];
+        c = RED;
+        if (a->finished) {
+            p->action_animation = NO_ANIMATION;
+            p->animation_state = PAS_NONE;
+        }
+    }
+
+    DrawTextureEx(player_texture, player_position, 0, 3, c);
 }
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s) {
@@ -508,12 +579,31 @@ void handle_packet(net_packet *p) {
         gs = GS_STARTED;
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
-        players[u->id].health = u->health;
-        players[u->id].position.x = u->x;
-        players[u->id].position.y = u->y;
-        players[u->id].effect = u->effect;
-        players[u->id].effect_round_left = u->effect_round_left;
         printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
+        player *player = &players[u->id];
+        printf("gs=%d\n", gs);
+
+        if (gs == GS_WAITING) {
+            player->health = u->health;
+            player->position.x = u->x;
+            player->position.y = u->y;
+            player->effect = u->effect;
+            player->effect_round_left = u->effect_round_left;
+        } else {
+            // TODO: What should happen if a spell damages and moves the player (knockback + damage ?)
+            if (player->position.x != u->x || players[u->id].position.y != u->y) {
+                player->action_animation = new_animation(AT_ONESHOT, 0.5f, 1);
+                player->animation_state = PAS_MOVING;
+                player->moving_target = (Vector2){u->x, u->y};
+            } else if (player->health != u->health) {
+                player->action_animation = new_animation(AT_ONESHOT, 0.25f, 1);
+                player->animation_state = PAS_DAMAGE;
+            }
+
+            player->health = u->health;
+            player->effect = u->effect;
+            player->effect_round_left = u->effect_round_left;
+        }
     } else if (p->type == PKT_ROUND_END) {
         printf("Round ended\n");
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
@@ -548,24 +638,28 @@ int main() {
 
     players[0].color = YELLOW;
     players[0].action = PA_SPELL;
-    players[0].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
+    players[0].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[0].action_animation = NO_ANIMATION;
 
     players[1].color = GREEN;
     players[1].action = PA_SPELL;
-    players[1].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
+    players[1].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[1].action_animation = NO_ANIMATION;
 
     players[2].color = BLUE;
     players[2].action = PA_SPELL;
-    players[2].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
+    players[2].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[2].action_animation = NO_ANIMATION;
 
     players[3].color = RED;
     players[3].action = PA_SPELL;
-    players[3].animation = new_animation(0.5f, PLAYER_ANIMATION_COUNT);
+    players[3].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[3].action_animation = NO_ANIMATION;
 
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (PROPS[y][x]) {
-                PROPS_ANIMATION[y][x] = new_animation(0.2f, WALL_TORCH_ANIMATION_COUNT);
+                PROPS_ANIMATION[y][x] = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
             }
         }
     }
@@ -600,13 +694,20 @@ int main() {
 
         double ft = GetFrameTime();
         for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
-            if (anim_pool[i].active == false)
-                continue;
             animation *a = &anim_pool[i];
+            if (a->active == false) {
+                a->finished = false;
+                continue;
+            }
             a->current_time += ft;
             if (a->current_time >= a->animation_time) {
-                a->current_frame = (a->current_frame + 1) % a->max_frame;
-                a->current_time = 0;
+                if (a->type == AT_LOOP) {
+                    a->current_frame = (a->current_frame + 1) % a->max_frame;
+                    a->current_time = 0;
+                } else if (a->type == AT_ONESHOT) {
+                    a->active = false;
+                    a->finished = true;
+                }
             }
         }
 
