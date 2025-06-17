@@ -44,6 +44,7 @@ typedef enum {
     PKT_PLAYER_ACTION,
     PKT_ROUND_END,
     PKT_GAME_END,
+    PKT_GAME_RESET,
     PKT_ADMIN_CONNECT,
     PKT_ADMIN_CONNECT_RESULT,
     PKT_ADMIN_UPDATE_PLAYER_INFO,
@@ -221,6 +222,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, p->winner_id);
             return buf;
         } break;
+        case PKT_GAME_RESET: return buf;
         case PKT_ADMIN_CONNECT: {
             net_packet_admin_connect *p = (net_packet_admin_connect*)content;
             return packsv(buf, p->password, 8);
@@ -295,6 +297,7 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             p->winner_id = buf[0];
             return p;
         } break;
+        case PKT_GAME_RESET: return NULL;
         case PKT_ADMIN_CONNECT: {
             net_packet_admin_connect *p = malloc(sizeof(net_packet_admin_connect));
             if (p == NULL) exit(1);
@@ -375,6 +378,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_PLAYER_ACTION: return 5;
         case PKT_ROUND_END: return 0;
         case PKT_GAME_END: return 1;
+        case PKT_GAME_RESET: return 0;
         case PKT_ADMIN_CONNECT: return 8;
         case PKT_ADMIN_CONNECT_RESULT: return 1;
         case PKT_ADMIN_UPDATE_PLAYER_INFO: return 3;

@@ -1,4 +1,6 @@
 #include <asm-generic/socket.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -139,6 +141,7 @@ void play_round(player_info *player) {
             for (int i = 0; i < player_count; i++) {
                 // The player tries to move on the same cell as another player so we cancel it
                 // TODO: We could add a negative effect (stun ?)
+                // TODO: We should inform that there is someone here so it can do a bump animation
                 if (players[i].x == player->ax && players[i].y == player->ay && players[i].id != player->id) {
                     return;
                 }
@@ -148,6 +151,10 @@ void play_round(player_info *player) {
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
         } else if (s->type == ST_TARGET) {
+            net_packet_player_action action =
+                pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
+            broadcast(PKT_PLAYER_ACTION, &action);
+
             for (int i = 0; i < player_count; i++) {
                 player_info *other = &players[i];
                 if (other->x == player->ax && other->y == player->ay) {
@@ -265,7 +272,7 @@ void handle_message(int fd) {
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
 
-        //TODO: We should only start the game when every player has sent his build
+        // TODO: We should only start the game when every player has sent his build
         if (player_count == LOBBY_FULL_COUNT) {
             start_game();
         }
@@ -303,6 +310,14 @@ void handle_message(int fd) {
             }
             broadcast(PKT_ROUND_END, NULL);
         }
+    } else if (p.type == PKT_GAME_RESET) {
+        printf("Serv: game reset\n");
+        gs = GS_WAITING;
+        broadcast(PKT_GAME_RESET, NULL);
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            players[i] = (player_info){0};
+        }
+        player_count = 0;
     } else if (p.type == PKT_ADMIN_CONNECT) {
         net_packet_admin_connect *a = (net_packet_admin_connect *)p.content;
         printf("%d is trying to connect as admin with password '%s'\n", fd, a->password);
@@ -324,7 +339,22 @@ void handle_message(int fd) {
     free(p.content);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    int port = 3000;
+    POPARG(argc, argv);  // program name
+    while (argc > 0) {
+        const char *arg = POPARG(argc, argv);
+        if (strcmp(arg, "--port") == 0) {
+            const char *value = POPARG(argc, argv);
+            if (!strtoint(value, &port)) {
+                printf("Error parsing port to int '%s'\n", value);
+                exit(1);
+            }
+        } else {
+            printf("Unknown arg : '%s'\n", arg);
+        }
+    }
+
     int sockfd = ci(socket(AF_INET, SOCK_STREAM, 0));
     int yes = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
@@ -332,11 +362,13 @@ int main() {
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(3000);
+    addr.sin_port = htons(port);
     memset(&addr.sin_zero, 0, 8);
 
     ci(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)));
     ci(listen(sockfd, 5));
+
+    printf("Listening on port %d\n", port);
 
     FD_ZERO(&master_set);
     FD_ZERO(&read_fds);

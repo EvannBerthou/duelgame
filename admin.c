@@ -36,22 +36,11 @@
     do {                               \
     } while (0)
 
-int strtoint(const char *str, int *out) {
-    char *endptr = NULL;
-    errno = 0;
-    long val = strtol(str, &endptr, 10);
-    if (errno == ERANGE || val > INT_MAX || val < INT_MIN)
-        return 0;
-    if (endptr == str || *endptr != '\0')
-        return 0;
-
-    *out = (int)val;
-    return 1;
-}
-
 int client_fd = 0;
 
 int connect_to_server(const char *ip, uint16_t port) {
+    printf("Connecting to %s:%d\n", ip, port);
+
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return -1;
     }
@@ -76,8 +65,28 @@ bool streq(const char *a, const char *b) {
     return strcmp(a, b) == 0;
 }
 
-int main() {
-    if (connect_to_server("127.0.0.1", 3000) < 0) {
+int main(int argc, char **argv) {
+    char *ip = "127.0.0.1";
+    int port = 3000;
+
+    POPARG(argc, argv); // program name
+    while (argc > 0) {
+        const char *arg = POPARG(argc, argv);
+        if (strcmp(arg, "--ip") == 0) {
+            ip = POPARG(argc, argv);
+        } else if (strcmp(arg, "--port") == 0) {
+            const char *value = POPARG(argc, argv);
+            if (!strtoint(value, &port)) {
+                printf("Error parsing port to int '%s'\n", value);
+                exit(1);
+            }
+        } else {
+            printf("Unknown arg : '%s'\n", arg);
+            exit(1);
+        }
+    }
+
+    if (connect_to_server(ip, port) < 0) {
         fprintf(stderr, "Could not connect to server\n");
         exit(1);
     }

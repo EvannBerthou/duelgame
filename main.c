@@ -1,4 +1,6 @@
 #include <arpa/inet.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -107,21 +109,39 @@ int new_animation(animation_type type, double animation_time, int max_frame) {
     exit(1);
 }
 
-int get_frame(int anim_id) {
-    if (anim_id >= MAX_ANIMATION_POOL) {
-        printf("Invalid ID (%d > %d)\n", anim_id, MAX_ANIMATION_POOL);
+int get_frame(anim_id id) {
+    if (id >= MAX_ANIMATION_POOL) {
+        printf("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
         return 0;
     }
-    return anim_pool[anim_id].current_frame;
+    return anim_pool[id].current_frame;
 }
 
-double get_process(int anim_id) {
-    if (anim_id >= MAX_ANIMATION_POOL) {
-        printf("Invalid ID (%d > %d)\n", anim_id, MAX_ANIMATION_POOL);
+double get_process(anim_id id) {
+    if (id >= MAX_ANIMATION_POOL) {
+        printf("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
         return 0;
     }
-    double progress = anim_pool[anim_id].current_time / anim_pool[anim_id].animation_time;
+
+    animation *a = &anim_pool[id];
+    if (a->finished == true) {
+        return 1;
+    }
+
+    if (a->active == false) {
+        return 0;
+    }
+    double progress = a->current_time / a->animation_time;
     return progress > 1 ? 1 : progress;
+}
+
+bool anim_finished(anim_id id) {
+    if (id >= MAX_ANIMATION_POOL) {
+        printf("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        return false;
+    }
+
+    return anim_pool[id].finished;
 }
 
 typedef enum {
@@ -178,7 +198,12 @@ Texture2D player_textures[PLAYER_ANIMATION_COUNT] = {0};
 
 #define WALL_TORCH_ANIMATION_COUNT 8
 Texture2D wall_torch[WALL_TORCH_ANIMATION_COUNT] = {0};
-int torch_anim = 0;
+anim_id torch_anim = 0;
+
+#define SLASH_ANIMATION_COUNT 3
+Texture2D slash_attack[SLASH_ANIMATION_COUNT] = {0};
+anim_id slash_animation = NO_ANIMATION;
+Vector2 slash_cell = {0};
 
 void load_assets() {
     for (int i = 0; i < FLOOR_TEXTURE_COUNT; i++) {
@@ -192,6 +217,9 @@ void load_assets() {
     }
     for (int i = 0; i < WALL_TORCH_ANIMATION_COUNT; i++) {
         wall_torch[i] = LoadTexture(TextFormat("assets/sprites/wall_torch_anim_f%d.png", i));
+    }
+    for (int i = 0; i < SLASH_ANIMATION_COUNT; i++) {
+        slash_attack[i] = LoadTexture(TextFormat("assets/sprites/attacks/slash_%d.png", i));
     }
 }
 
@@ -369,24 +397,22 @@ void render_player(player *p) {
 
     // Player is doing the slide animation
     if (p->animation_state == PAS_MOVING) {
-        animation *a = &anim_pool[p->action_animation];
-        double progress = get_process(p->animation_state);
+        double progress = get_process(p->action_animation);
 
         const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
         const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
         player_position.x = lerp(x_pos, x_target, progress);
         player_position.y = lerp(y_pos, y_target, progress);
 
-        if (a->finished) {
+        if (anim_finished(p->action_animation)) {
             p->action_animation = NO_ANIMATION;
+            p->animation_state = PAS_NONE;
             p->position.x = p->moving_target.x;
             p->position.y = p->moving_target.y;
-            p->animation_state = PAS_NONE;
         }
     } else if (p->animation_state == PAS_DAMAGE) {
-        animation *a = &anim_pool[p->action_animation];
         c = RED;
-        if (a->finished) {
+        if (anim_finished(p->action_animation)) {
             p->action_animation = NO_ANIMATION;
             p->animation_state = PAS_NONE;
         }
@@ -537,6 +563,8 @@ void render_infos() {
 int client_fd = 0;
 
 int connect_to_server(const char *ip, uint16_t port) {
+    printf("Connecting to %s:%d\n", ip, port);
+
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return -1;
     }
@@ -555,6 +583,55 @@ int connect_to_server(const char *ip, uint16_t port) {
     }
 
     return 0;
+}
+
+void player_join() {
+    net_packet_join join = {0};
+    memcpy(join.username, TextFormat("User %d", rand()), 8);
+    send_sock(PKT_JOIN, &join, client_fd);
+}
+
+void reset_game() {
+    gs = GS_WAITING;
+    for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
+        anim_pool[i] = (animation){0};
+    }
+
+    player_count = 0;
+
+    players[0].color = YELLOW;
+    players[0].action = PA_SPELL;
+    players[0].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[0].action_animation = NO_ANIMATION;
+    players[0].animation_state = PAS_NONE;
+
+    players[1].color = GREEN;
+    players[1].action = PA_SPELL;
+    players[1].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[1].action_animation = NO_ANIMATION;
+    players[1].animation_state = PAS_NONE;
+
+    players[2].color = BLUE;
+    players[2].action = PA_SPELL;
+    players[2].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[2].action_animation = NO_ANIMATION;
+    players[2].animation_state = PAS_NONE;
+
+    players[3].color = RED;
+    players[3].action = PA_SPELL;
+    players[3].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+    players[3].action_animation = NO_ANIMATION;
+    players[3].animation_state = PAS_NONE;
+
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (PROPS[y][x]) {
+                PROPS_ANIMATION[y][x] = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
+            }
+        }
+    }
+
+    player_join();
 }
 
 void handle_packet(net_packet *p) {
@@ -581,7 +658,6 @@ void handle_packet(net_packet *p) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
         printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
         player *player = &players[u->id];
-        printf("gs=%d\n", gs);
 
         if (gs == GS_WAITING) {
             player->health = u->health;
@@ -604,6 +680,15 @@ void handle_packet(net_packet *p) {
             player->effect = u->effect;
             player->effect_round_left = u->effect_round_left;
         }
+    } else if (p->type == PKT_PLAYER_ACTION) {
+        net_packet_player_action *a = (net_packet_player_action*)p->content;
+        if (a->action == PA_SPELL) {
+            const spell *s = &all_spells[a->spell];
+            if (s->type == ST_TARGET) {
+                slash_animation = new_animation(AT_ONESHOT, 0.25f / 3.f, 3);
+                slash_cell = (Vector2){a->x, a->y};
+            }
+        }
     } else if (p->type == PKT_ROUND_END) {
         printf("Round ended\n");
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
@@ -616,12 +701,40 @@ void handle_packet(net_packet *p) {
         net_packet_game_end *e = (net_packet_game_end *)p->content;
         winner_id = e->winner_id;
         gs = GS_ENDED;
+
+        if (current_player == 0) {
+            sleep(1);
+            send_sock(PKT_GAME_RESET, NULL, client_fd);
+        }
+    } else if (p->type == PKT_GAME_RESET) {
+        printf("Client: game reset");
+        reset_game();
     }
 
     free(p->content);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    char *ip = "127.0.0.1";
+    int port = 3000;
+
+    POPARG(argc, argv);  // program name
+    while (argc > 0) {
+        const char *arg = POPARG(argc, argv);
+        if (strcmp(arg, "--ip") == 0) {
+            ip = POPARG(argc, argv);
+        } else if (strcmp(arg, "--port") == 0) {
+            const char *value = POPARG(argc, argv);
+            if (!strtoint(value, &port)) {
+                printf("Error parsing port to int '%s'\n", value);
+                exit(1);
+            }
+        } else {
+            printf("Unknown arg : '%s'\n", arg);
+            exit(1);
+        }
+    }
+
     srand(time(NULL));
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     SetTargetFPS(60);
@@ -629,40 +742,14 @@ int main() {
     load_assets();
     compute_map_variants();
 
-    if (connect_to_server("127.0.0.1", 3000) < 0) {
+    if (connect_to_server(ip, port) < 0) {
         fprintf(stderr, "Could not connect to server\n");
         exit(1);
     }
 
     printf("Connected to server !\n");
 
-    players[0].color = YELLOW;
-    players[0].action = PA_SPELL;
-    players[0].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[0].action_animation = NO_ANIMATION;
-
-    players[1].color = GREEN;
-    players[1].action = PA_SPELL;
-    players[1].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[1].action_animation = NO_ANIMATION;
-
-    players[2].color = BLUE;
-    players[2].action = PA_SPELL;
-    players[2].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[2].action_animation = NO_ANIMATION;
-
-    players[3].color = RED;
-    players[3].action = PA_SPELL;
-    players[3].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[3].action_animation = NO_ANIMATION;
-
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (PROPS[y][x]) {
-                PROPS_ANIMATION[y][x] = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
-            }
-        }
-    }
+    reset_game();
 
     fd_set master_set;
     FD_ZERO(&master_set);
@@ -672,10 +759,6 @@ int main() {
     struct timeval timeout;
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
-
-    net_packet_join join = {0};
-    memcpy(join.username, TextFormat("User %d", rand()), 8);
-    send_sock(PKT_JOIN, &join, client_fd);
 
     while (!WindowShouldClose()) {
         fd_set read_fds = master_set;
@@ -701,12 +784,15 @@ int main() {
             }
             a->current_time += ft;
             if (a->current_time >= a->animation_time) {
+                a->current_time = 0;
                 if (a->type == AT_LOOP) {
                     a->current_frame = (a->current_frame + 1) % a->max_frame;
-                    a->current_time = 0;
                 } else if (a->type == AT_ONESHOT) {
-                    a->active = false;
-                    a->finished = true;
+                    a->current_frame++;
+                    if (a->current_frame == a->max_frame) {
+                        a->active = false;
+                        a->finished = true;
+                    }
                 }
             }
         }
@@ -750,6 +836,17 @@ int main() {
                 }
                 if (state == RS_PLAYING) {
                     render_player_actions(&players[current_player]);
+                }
+                if (state == RS_WAITING) {
+                    if (slash_animation != NO_ANIMATION) {
+                        Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
+                        const int x_slash_pos = base_x_offset + slash_cell.x * CELL_SIZE;
+                        const int y_slash_pos = base_y_offset + slash_cell.y * CELL_SIZE;
+                        DrawTextureEx(slash_texture, (Vector2){x_slash_pos, y_slash_pos}, 0, 1, WHITE);
+                        if (anim_finished(slash_animation)) {
+                            slash_animation = NO_ANIMATION;
+                        }
+                    }
                 }
                 render_infos();
             } else if (gs == GS_ENDED) {

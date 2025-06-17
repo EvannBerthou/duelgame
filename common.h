@@ -2,6 +2,24 @@
 #define COMMON_H
 
 #include <stdint.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+
+int strtoint(const char *str, int *out) {
+    char *endptr = NULL;
+    errno = 0;
+    long val = strtol(str, &endptr, 10);
+    if (errno == ERANGE || val > INT_MAX || val < INT_MIN)
+        return 0;
+    if (endptr == str || *endptr != '\0')
+        return 0;
+
+    *out = (int)val;
+    return 1;
+}
+
+#define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)
 
 #define MAX_SPELL_COUNT 8
 
