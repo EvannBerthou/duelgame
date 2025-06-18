@@ -15,14 +15,16 @@
 #define MAX_PLAYER_COUNT 4
 
 typedef enum {
-    RS_PLAYING = 0,
-    RS_WAITING = 1,
+    RS_PLAYING,
+    RS_WAITING,
+    RS_WAITING_ANIMATIONS,
     RS_COUNT,
 } round_state;
 
 typedef enum {
     GS_WAITING,
     GS_STARTED,
+    GS_ENDING,
     GS_ENDED,
     GS_COUNT
 } game_state;

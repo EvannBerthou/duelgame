@@ -295,6 +295,8 @@ void handle_message(int fd) {
             sort_actions();
             for (int i = 0; i < player_count; i++) {
                 play_round(&players[player_round_order[i]]);
+                //TODO: Remove this.
+                //We should send every packets and let player handle round length on client side
                 usleep(500000);  // 0.5s sleep to show actions
             }
             for (int i = 0; i < player_count; i++) {

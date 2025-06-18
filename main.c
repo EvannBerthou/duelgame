@@ -91,6 +91,8 @@ typedef enum {
     AT_ONESHOT,
 } animation_type;
 
+typedef int anim_id;
+
 typedef struct {
     bool active;
 
@@ -108,9 +110,7 @@ typedef struct {
 #define NO_ANIMATION 255
 animation anim_pool[MAX_ANIMATION_POOL] = {0};
 
-typedef int anim_id;
-
-int new_animation(animation_type type, double animation_time, int max_frame) {
+anim_id new_animation(animation_type type, double animation_time, int max_frame) {
     for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
         if (anim_pool[i].active == false) {
             anim_pool[i].active = true;
@@ -125,6 +125,30 @@ int new_animation(animation_type type, double animation_time, int max_frame) {
     }
     printf("Animation pool is full\n");
     exit(1);
+}
+
+void step_animations() {
+    double ft = GetFrameTime();
+    for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
+        animation *a = &anim_pool[i];
+        if (a->active == false) {
+            a->finished = false;
+            continue;
+        }
+        a->current_time += ft;
+        if (a->current_time >= a->animation_time) {
+            a->current_time = 0;
+            if (a->type == AT_LOOP) {
+                a->current_frame = (a->current_frame + 1) % a->max_frame;
+            } else if (a->type == AT_ONESHOT) {
+                a->current_frame++;
+                if (a->current_frame == a->max_frame) {
+                    a->active = false;
+                    a->finished = true;
+                }
+            }
+        }
+    }
 }
 
 int get_frame(anim_id id) {
@@ -162,11 +186,22 @@ bool anim_finished(anim_id id) {
     return anim_pool[id].finished;
 }
 
+// Waits for all AT_ONESHOT animations to be finshed. Returns true when all animations have ended
+bool wait_for_animations() {
+    for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
+        if (anim_pool[i].active && anim_pool[i].type == AT_ONESHOT && anim_pool[i].finished == false) {
+            return false;
+        }
+    }
+    return true;
+}
+
 typedef enum {
     PAS_NONE,
     PAS_MOVING,
     PAS_DAMAGE,
     PAS_BUMPING,
+    PAS_DYING,
 } player_animation_state;
 
 typedef struct {
@@ -178,6 +213,7 @@ typedef struct {
     char name[9];
     Color color;
     float health;
+    float target_health;
     uint8_t spells[MAX_SPELL_COUNT];
     uint8_t cooldowns[MAX_SPELL_COUNT];
     player_action action;
@@ -403,7 +439,7 @@ void render_map() {
 }
 
 void render_player(player *p) {
-    if (p->health <= 0)
+    if (p->health <= 0 && p->animation_state == PAS_NONE)
         return;
 
     int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
@@ -438,6 +474,10 @@ void render_player(player *p) {
         if (anim_finished(p->action_animation)) {
             p->action_animation = NO_ANIMATION;
             p->animation_state = PAS_NONE;
+            if (p->health <= 0) {
+                p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
+                p->animation_state = PAS_DYING;
+            }
         }
     } else if (p->animation_state == PAS_BUMPING) {
         double progress = get_process(p->action_animation);
@@ -458,6 +498,8 @@ void render_player(player *p) {
             p->animation_state = PAS_NONE;
             p->moving_target = (Vector2){0};
         }
+    } else if (p->animation_state == PAS_DYING) {
+        c = GREEN;
     }
 
     DrawTextureEx(player_texture, player_position, 0, 3, c);
@@ -665,6 +707,7 @@ void reset_game() {
     player_join();
 }
 
+//TODO: We should buffer actions and updates and let the client handle the waiting for animations
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
         printf("PING\n");
@@ -699,7 +742,7 @@ void handle_packet(net_packet *p) {
         } else {
             // TODO: What should happen if a spell damages and moves the player (knockback + damage ?)
             if (player->position.x != u->x || players[u->id].position.y != u->y) {
-                player->action_animation = new_animation(AT_ONESHOT, 0.5f, 1);
+                player->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                 player->animation_state = PAS_MOVING;
                 player->moving_target = (Vector2){u->x, u->y};
             } else if (player->health != u->health) {
@@ -722,7 +765,7 @@ void handle_packet(net_packet *p) {
                 Vector2 target = {a->x, a->y};
                 for (int i = 0; i < player_count; i++) {
                     if (v2eq(players[i].position, target)) {
-                        players[a->id].action_animation = new_animation(AT_ONESHOT, 0.25f, 1);
+                        players[a->id].action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                         players[a->id].animation_state = PAS_BUMPING;
                         players[a->id].moving_target = target;
                         break;
@@ -734,18 +777,18 @@ void handle_packet(net_packet *p) {
             }
         }
     } else if (p->type == PKT_ROUND_END) {
+        // TODO: Wait for all animations to have ended before starting the round
         printf("Round ended\n");
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             if (players[current_player].cooldowns[i] > 0) {
                 players[current_player].cooldowns[i]--;
             }
         }
-        state = RS_PLAYING;
+        state = RS_WAITING_ANIMATIONS;
     } else if (p->type == PKT_GAME_END) {
-        //TODO: Wait for animations to be finished before showing end game screen
         net_packet_game_end *e = (net_packet_game_end *)p->content;
         winner_id = e->winner_id;
-        gs = GS_ENDED;
+        gs = GS_ENDING;
     } else if (p->type == PKT_GAME_RESET) {
         printf("Client: game reset");
         reset_game();
@@ -815,27 +858,7 @@ int main(int argc, char **argv) {
             handle_packet(&p);
         }
 
-        double ft = GetFrameTime();
-        for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
-            animation *a = &anim_pool[i];
-            if (a->active == false) {
-                a->finished = false;
-                continue;
-            }
-            a->current_time += ft;
-            if (a->current_time >= a->animation_time) {
-                a->current_time = 0;
-                if (a->type == AT_LOOP) {
-                    a->current_frame = (a->current_frame + 1) % a->max_frame;
-                } else if (a->type == AT_ONESHOT) {
-                    a->current_frame++;
-                    if (a->current_frame == a->max_frame) {
-                        a->active = false;
-                        a->finished = true;
-                    }
-                }
-            }
-        }
+        step_animations();
 
         BeginDrawing();
         {
@@ -843,7 +866,7 @@ int main(int argc, char **argv) {
 
             if (gs == GS_WAITING) {
                 DrawText("Waiting for game to start", 0, 0, 64, WHITE);
-            } else if (gs == GS_STARTED) {
+            } else if (gs == GS_STARTED || gs == GS_ENDING) {
                 if (state == RS_PLAYING) {
                     if (IsKeyPressed(KEY_Q)) {
                         players[current_player].action = PA_SPELL;
@@ -868,27 +891,36 @@ int main(int argc, char **argv) {
                     }
                 }
 
-                // When waiting, we should preview our action
+                // TODO: When waiting, we should preview our action
 
                 render_map();
                 for (int i = 0; i < player_count; i++) {
                     render_player(&players[i]);
                 }
+
+                 if (slash_animation != NO_ANIMATION) {
+                    Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
+                    Vector2 position = grid2screen(slash_cell);
+                    DrawTextureEx(slash_texture, position, 0, 1, WHITE);
+                    if (anim_finished(slash_animation)) {
+                        slash_animation = NO_ANIMATION;
+                    }
+                }
+
                 if (state == RS_PLAYING) {
                     render_player_actions(&players[current_player]);
-                }
-                if (state == RS_WAITING) {
-                    if (slash_animation != NO_ANIMATION) {
-                        Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
-                        const int x_slash_pos = base_x_offset + slash_cell.x * CELL_SIZE;
-                        const int y_slash_pos = base_y_offset + slash_cell.y * CELL_SIZE;
-                        DrawTextureEx(slash_texture, (Vector2){x_slash_pos, y_slash_pos}, 0, 1, WHITE);
-                        if (anim_finished(slash_animation)) {
-                            slash_animation = NO_ANIMATION;
-                        }
+                } else if (state == RS_WAITING) {
+                } else if (state == RS_WAITING_ANIMATIONS) {
+                    if (wait_for_animations()) {
+                        state = RS_PLAYING;
                     }
                 }
                 render_infos();
+
+                // Wait for all animations to finish before really ending the game
+                if (gs == GS_ENDING && wait_for_animations()) {
+                    gs = GS_ENDED;
+                }
             } else if (gs == GS_ENDED) {
                 if (IsKeyPressed(KEY_R)) {
                     if (current_player == 0) {
@@ -905,7 +937,6 @@ int main(int argc, char **argv) {
                 if (current_player == 0) {
                     DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
                 }
-
             }
         }
         EndDrawing();
