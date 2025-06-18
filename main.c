@@ -38,12 +38,30 @@ const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
 
+int get_map(int x, int y) {
+    if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
+        return 0;
+    return MAP[y][x];
+}
+
 int MAP_VARIANTS[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
+
+int get_map_variant(int x, int y) {
+    if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
+        return 0;
+    return MAP_VARIANTS[y][x];
+}
+
+void set_map_variant(int x, int y, int v) {
+    if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
+        return;
+    MAP_VARIANTS[y][x] = v;
+}
 
 const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
@@ -148,12 +166,15 @@ typedef enum {
     PAS_NONE,
     PAS_MOVING,
     PAS_DAMAGE,
+    PAS_BUMPING,
 } player_animation_state;
 
 typedef struct {
     bool init;
     // Position in grid space
     Vector2 position;
+    // Last position to lerp from while animating
+    Vector2 old_position;
     char name[9];
     Color color;
     float health;
@@ -226,18 +247,19 @@ void load_assets() {
 void compute_map_variants() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
-            if (MAP[y][x] == 0) {
+            if (get_map(x, y) == 0) {
                 if (rand() % 100 > 90) {  // 10% of chance to have a random floor cell texture
-                    MAP_VARIANTS[y][x] = (rand() % FLOOR_TEXTURE_COUNT - 1) + 1;
+                    set_map_variant(x, y, (rand() % FLOOR_TEXTURE_COUNT - 1) + 1);
                 }
             }
-            // TODO: Check bounds
-            if (MAP[y][x] == 1) {
-                MAP_VARIANTS[y][x] = 0;
-                MAP_VARIANTS[y][x] |= (MAP[y + 1][x] == 1) << 0;
-                MAP_VARIANTS[y][x] |= (MAP[y][x - 1] == 1) << 1;
-                MAP_VARIANTS[y][x] |= (MAP[y][x + 1] == 1) << 2;
-                MAP_VARIANTS[y][x] |= (MAP[y - 1][x] == 1) << 3;
+
+            if (get_map(x, y) == 1) {
+                int value = 0;
+                value |= (get_map(x, y + 1) == 1) << 0;
+                value |= (get_map(x - 1, y) == 1) << 1;
+                value |= (get_map(x + 1, y) == 1) << 2;
+                value |= (get_map(x, y - 1) == 1) << 3;
+                set_map_variant(x, y, value);
             }
         }
     }
@@ -268,7 +290,7 @@ Vector2 screen2grid(Vector2 s) {
 }
 
 bool is_walkable(int x, int y) {
-    return MAP[y][x] != 1;
+    return get_map(x, y) != 1;
 }
 
 // TODO: Implement BFS or A* to check if moves are valid
@@ -331,11 +353,11 @@ bool is_over_cell(int x, int y) {
 }
 
 Texture2D get_cell_texture(int x, int y) {
-    int cell_type = MAP[y][x];
+    int cell_type = get_map(x, y);
     if (cell_type == 0)
-        return floor_textures[MAP_VARIANTS[y][x]];
+        return floor_textures[get_map_variant(x, y)];
     if (cell_type == 1)
-        return wall_textures[MAP_VARIANTS[y][x]];
+        return wall_textures[get_map_variant(x, y)];
     return (Texture2D){0};
 }
 
@@ -363,7 +385,7 @@ void render_map() {
                 Color tint = is_over_cell(x_pos, y_pos) ? RED : WHITE;
                 DrawTextureEx(t, (Vector2){x_pos, y_pos}, 0, 4, tint);
             } else {
-                Color c = is_over_cell(x_pos, y_pos) ? RED : get_cell_color(MAP[y][x]);
+                Color c = is_over_cell(x_pos, y_pos) ? RED : get_cell_color(get_map(x, y));
                 DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
                 DrawRectangleLines(x_pos, y_pos, CELL_SIZE, CELL_SIZE, BLACK);
             }
@@ -384,8 +406,8 @@ void render_player(player *p) {
     if (p->health <= 0)
         return;
 
-    const int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
-    const int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
+    int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
+    int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
     Vector2 player_position = {x_pos, y_pos};
     Texture2D player_texture = player_textures[get_frame(p->animation)];
     Color c = WHITE;
@@ -399,6 +421,9 @@ void render_player(player *p) {
     if (p->animation_state == PAS_MOVING) {
         double progress = get_process(p->action_animation);
 
+        int x_pos = base_x_offset + p->old_position.x * CELL_SIZE + 8;
+        int y_pos = base_y_offset + p->old_position.y * CELL_SIZE - 24;
+
         const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
         const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
         player_position.x = lerp(x_pos, x_target, progress);
@@ -407,8 +432,6 @@ void render_player(player *p) {
         if (anim_finished(p->action_animation)) {
             p->action_animation = NO_ANIMATION;
             p->animation_state = PAS_NONE;
-            p->position.x = p->moving_target.x;
-            p->position.y = p->moving_target.y;
         }
     } else if (p->animation_state == PAS_DAMAGE) {
         c = RED;
@@ -416,13 +439,32 @@ void render_player(player *p) {
             p->action_animation = NO_ANIMATION;
             p->animation_state = PAS_NONE;
         }
+    } else if (p->animation_state == PAS_BUMPING) {
+        double progress = get_process(p->action_animation);
+        if (progress < 0.5f) {  // Moving forward
+            const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
+            const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
+            player_position.x = lerp(x_pos, x_target, progress * 2);
+            player_position.y = lerp(y_pos, y_target, progress * 2);
+        } else {  // Moving backwards
+            const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
+            const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
+            player_position.x = lerp(x_target, x_pos, (progress - 0.5) * 2);
+            player_position.y = lerp(y_target, y_pos, (progress - 0.5) * 2);
+        }
+
+        if (anim_finished(p->action_animation)) {
+            p->action_animation = NO_ANIMATION;
+            p->animation_state = PAS_NONE;
+            p->moving_target = (Vector2){0};
+        }
     }
 
     DrawTextureEx(player_texture, player_position, 0, 3, c);
 }
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s) {
-    if (cell.x < 0 || cell.x >= MAP_WIDTH || cell.y < 0 || cell.y >= MAP_HEIGHT || MAP[(int)cell.y][(int)cell.x] == 1)
+    if (is_walkable(cell.x, cell.y))
         return false;
 
     const int player_d = fabsf(player.x - cell.x) + fabsf(player.y - cell.y);
@@ -600,28 +642,17 @@ void reset_game() {
     player_count = 0;
 
     players[0].color = YELLOW;
-    players[0].action = PA_SPELL;
-    players[0].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[0].action_animation = NO_ANIMATION;
-    players[0].animation_state = PAS_NONE;
-
     players[1].color = GREEN;
-    players[1].action = PA_SPELL;
-    players[1].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[1].action_animation = NO_ANIMATION;
-    players[1].animation_state = PAS_NONE;
-
     players[2].color = BLUE;
-    players[2].action = PA_SPELL;
-    players[2].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[2].action_animation = NO_ANIMATION;
-    players[2].animation_state = PAS_NONE;
-
     players[3].color = RED;
-    players[3].action = PA_SPELL;
-    players[3].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
-    players[3].action_animation = NO_ANIMATION;
-    players[3].animation_state = PAS_NONE;
+
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        players[i].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+        players[i].action_animation = NO_ANIMATION;
+        players[i].animation_state = PAS_NONE;
+        players[i].action = PA_SPELL;
+        players[i].selected_spell = 0;
+    }
 
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
@@ -676,15 +707,28 @@ void handle_packet(net_packet *p) {
                 player->animation_state = PAS_DAMAGE;
             }
 
+            player->old_position = player->position;
+            player->position.x = u->x;
+            player->position.y = u->y;
             player->health = u->health;
             player->effect = u->effect;
             player->effect_round_left = u->effect_round_left;
         }
     } else if (p->type == PKT_PLAYER_ACTION) {
-        net_packet_player_action *a = (net_packet_player_action*)p->content;
+        net_packet_player_action *a = (net_packet_player_action *)p->content;
         if (a->action == PA_SPELL) {
             const spell *s = &all_spells[a->spell];
-            if (s->type == ST_TARGET) {
+            if (s->type == ST_MOVE) {
+                Vector2 target = {a->x, a->y};
+                for (int i = 0; i < player_count; i++) {
+                    if (v2eq(players[i].position, target)) {
+                        players[a->id].action_animation = new_animation(AT_ONESHOT, 0.25f, 1);
+                        players[a->id].animation_state = PAS_BUMPING;
+                        players[a->id].moving_target = target;
+                        break;
+                    }
+                }
+            } else if (s->type == ST_TARGET) {
                 slash_animation = new_animation(AT_ONESHOT, 0.25f / 3.f, 3);
                 slash_cell = (Vector2){a->x, a->y};
             }
@@ -698,14 +742,10 @@ void handle_packet(net_packet *p) {
         }
         state = RS_PLAYING;
     } else if (p->type == PKT_GAME_END) {
+        //TODO: Wait for animations to be finished before showing end game screen
         net_packet_game_end *e = (net_packet_game_end *)p->content;
         winner_id = e->winner_id;
         gs = GS_ENDED;
-
-        if (current_player == 0) {
-            sleep(1);
-            send_sock(PKT_GAME_RESET, NULL, client_fd);
-        }
     } else if (p->type == PKT_GAME_RESET) {
         printf("Client: game reset");
         reset_game();
@@ -850,11 +890,22 @@ int main(int argc, char **argv) {
                 }
                 render_infos();
             } else if (gs == GS_ENDED) {
+                if (IsKeyPressed(KEY_R)) {
+                    if (current_player == 0) {
+                        send_sock(PKT_GAME_RESET, NULL, client_fd);
+                    }
+                }
+
                 if (winner_id == 255) {
                     DrawText("Game draw", 0, 0, 64, WHITE);
                 } else {
                     DrawText(TextFormat("%s won the game !", players[winner_id].name), 0, 0, 64, WHITE);
                 }
+
+                if (current_player == 0) {
+                    DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
+                }
+
             }
         }
         EndDrawing();

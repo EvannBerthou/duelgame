@@ -100,7 +100,7 @@ void damage_player(player_info *p, const spell *s) {
             alive_count--;
         }
     }
-    // One player won
+    // One player won.
     if (alive_count == 1) {
         for (int i = 0; i < player_count; i++) {
             if (players[i].health > 0) {
@@ -137,12 +137,15 @@ void play_round(player_info *player) {
         // TODO: Check that the player really has this spell in his build
         printf("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
         const spell *s = &all_spells[player->spell];
+        net_packet_player_action action =
+            pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
+        broadcast(PKT_PLAYER_ACTION, &action);
         if (s->type == ST_MOVE) {
             for (int i = 0; i < player_count; i++) {
                 // The player tries to move on the same cell as another player so we cancel it
                 // TODO: We could add a negative effect (stun ?)
-                // TODO: We should inform that there is someone here so it can do a bump animation
                 if (players[i].x == player->ax && players[i].y == player->ay && players[i].id != player->id) {
+                    player->state = RS_PLAYING;
                     return;
                 }
             }
@@ -151,10 +154,6 @@ void play_round(player_info *player) {
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
         } else if (s->type == ST_TARGET) {
-            net_packet_player_action action =
-                pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
-            broadcast(PKT_PLAYER_ACTION, &action);
-
             for (int i = 0; i < player_count; i++) {
                 player_info *other = &players[i];
                 if (other->x == player->ax && other->y == player->ay) {
