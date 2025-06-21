@@ -10,6 +10,6 @@ killall main_game || true
 
 ./server &
 sleep 1
-./main_game &
+./main_game > /dev/null &
 sleep 1
-./main_game &
+./main_game 

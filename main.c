@@ -1,5 +1,6 @@
+// TODO: Unify int/uint8_t
+
 #include <arpa/inet.h>
-#include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <netdb.h>
@@ -22,6 +23,7 @@
 
 #define MAX_ANIMATION_POOL 16
 
+//TODO: Use icons instead of colors
 Color icons[] = {
     {0xFF, 0x00, 0x00, 0xFF},
     {0x0, 0xFF, 0x00, 0xFF},
@@ -31,6 +33,7 @@ Color icons[] = {
 const int base_x_offset = (WIDTH - (CELL_SIZE * MAP_WIDTH)) / 2;
 const int base_y_offset = (HEIGHT - (CELL_SIZE * MAP_HEIGHT)) / 2;
 
+//TODO: Map should be sent by the server
 const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
     {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
@@ -208,12 +211,9 @@ typedef struct {
     bool init;
     // Position in grid space
     Vector2 position;
-    // Last position to lerp from while animating
-    Vector2 old_position;
     char name[9];
     Color color;
-    float health;
-    float target_health;
+    uint8_t health;
     uint8_t spells[MAX_SPELL_COUNT];
     uint8_t cooldowns[MAX_SPELL_COUNT];
     player_action action;
@@ -235,6 +235,29 @@ typedef struct {
 
 player players[MAX_PLAYER_COUNT] = {0};
 int player_count = 0;
+
+typedef struct {
+    int player;
+    player_action action;
+    Vector2 target;
+    int spell;
+} player_round_action;
+
+// Buffer of actions to display
+#define MAX_PLAYER_ROUND_ACTION_COUNT 4
+player_round_action actions[MAX_PLAYER_ROUND_ACTION_COUNT] = {0};
+int action_count = 0;
+int action_step = 0;
+
+typedef struct {
+    int player;
+    Vector2 position;
+    int health;
+    spell_effect effect;
+    int effect_round_left;
+} player_round_update;
+
+player_round_update updates[MAX_PLAYER_COUNT] = {0};
 
 int current_player = 0;
 round_state state = RS_PLAYING;
@@ -374,8 +397,10 @@ player_move player_exec_action(player *p) {
     if (IsMouseButtonPressed(0)) {
         if (p->action == PA_SPELL) {
             if (p->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
-                // Set spell on cooldown
                 p->cooldowns[p->selected_spell] = get_selected_spell()->cooldown;
+                if (p->cooldowns[p->selected_spell] > 0) {
+                    p->selected_spell = 0;
+                }
                 return (player_move){.action = PA_SPELL, .position = g};
             }
         }
@@ -457,8 +482,8 @@ void render_player(player *p) {
     if (p->animation_state == PAS_MOVING) {
         double progress = get_process(p->action_animation);
 
-        int x_pos = base_x_offset + p->old_position.x * CELL_SIZE + 8;
-        int y_pos = base_y_offset + p->old_position.y * CELL_SIZE - 24;
+        int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
+        int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
 
         const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
         const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
@@ -468,6 +493,7 @@ void render_player(player *p) {
         if (anim_finished(p->action_animation)) {
             p->action_animation = NO_ANIMATION;
             p->animation_state = PAS_NONE;
+            p->position = p->moving_target;
         }
     } else if (p->animation_state == PAS_DAMAGE) {
         c = RED;
@@ -707,7 +733,9 @@ void reset_game() {
     player_join();
 }
 
-//TODO: We should buffer actions and updates and let the client handle the waiting for animations
+// We do not use pkt_player_update to set health and other things. I think a better way is to only use
+//  PKT_PLAYER_ACTION to simulate the round and maybe resend a pkt_player_update at the end of the round to resync.
+//  PKT_PLAYER_UPDATE could also be used just to force player informations when an admin updates it.
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
         printf("PING\n");
@@ -740,53 +768,28 @@ void handle_packet(net_packet *p) {
             player->effect = u->effect;
             player->effect_round_left = u->effect_round_left;
         } else {
-            // TODO: What should happen if a spell damages and moves the player (knockback + damage ?)
-            if (player->position.x != u->x || players[u->id].position.y != u->y) {
-                player->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-                player->animation_state = PAS_MOVING;
-                player->moving_target = (Vector2){u->x, u->y};
-            } else if (player->health != u->health) {
-                player->action_animation = new_animation(AT_ONESHOT, 0.25f, 1);
-                player->animation_state = PAS_DAMAGE;
-            }
-
-            player->old_position = player->position;
-            player->position.x = u->x;
-            player->position.y = u->y;
-            player->health = u->health;
-            player->effect = u->effect;
-            player->effect_round_left = u->effect_round_left;
+            updates[u->id].position = (Vector2){u->x, u->y};
+            updates[u->id].health = u->health;
+            updates[u->id].effect = u->effect;
+            updates[u->id].effect_round_left = u->effect_round_left;
         }
     } else if (p->type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p->content;
-        if (a->action == PA_SPELL) {
-            const spell *s = &all_spells[a->spell];
-            if (s->type == ST_MOVE) {
-                Vector2 target = {a->x, a->y};
-                for (int i = 0; i < player_count; i++) {
-                    if (v2eq(players[i].position, target)) {
-                        players[a->id].action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-                        players[a->id].animation_state = PAS_BUMPING;
-                        players[a->id].moving_target = target;
-                        break;
-                    }
-                }
-            } else if (s->type == ST_TARGET) {
-                slash_animation = new_animation(AT_ONESHOT, 0.25f / 3.f, 3);
-                slash_cell = (Vector2){a->x, a->y};
-            }
-        }
+        printf("New action: %d %d\n", a->id, a->spell);
+        player_round_action *action = &actions[action_count];
+        action->player = a->id;
+        action->action = a->action;
+        action->target = (Vector2){a->x, a->y};
+        action->spell = a->spell;
+        action_count++;
     } else if (p->type == PKT_ROUND_END) {
         // TODO: Wait for all animations to have ended before starting the round
+        // TODO: Cooldown should be decreased when it's the player turn
         printf("Round ended\n");
-        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-            if (players[current_player].cooldowns[i] > 0) {
-                players[current_player].cooldowns[i]--;
-            }
-        }
-        state = RS_WAITING_ANIMATIONS;
+        state = RS_PLAYING_ROUND;
     } else if (p->type == PKT_GAME_END) {
         net_packet_game_end *e = (net_packet_game_end *)p->content;
+        // TODO: Wait for animations to finish
         winner_id = e->winner_id;
         gs = GS_ENDING;
     } else if (p->type == PKT_GAME_RESET) {
@@ -795,6 +798,66 @@ void handle_packet(net_packet *p) {
     }
 
     free(p->content);
+}
+
+void play_round() {
+    player_round_action *a = &actions[action_step];
+    player *p = &players[a->player];
+
+    if (a->action == PA_SPELL) {
+        if (p->effect == SE_STUN) {
+            return;
+        }
+        const spell *s = &all_spells[a->spell];
+
+        player *target = NULL;
+        for (int i = 0; i < player_count; i++) {
+            if (v2eq(a->target, players[i].position)) {
+                target = &players[i];
+                break;
+            }
+        }
+
+        if (s->type == ST_MOVE) {
+            p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+            p->moving_target = a->target;
+            p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
+        } else if (s->type == ST_TARGET) {
+            if (s->effect == SE_STUN) {
+                if (target != NULL) {
+                    target->effect = SE_STUN;
+                    target->effect_round_left = s->effect_duration;
+                    target->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+                    target->animation_state = PAS_DAMAGE;
+                }
+            } else {
+                slash_animation = new_animation(AT_ONESHOT, 5.f / 3.f, 3);
+                slash_cell = a->target;
+                if (target != NULL) {
+                    target->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+                    target->animation_state = PAS_DAMAGE;
+                    target->health -= s->damage;
+                }
+            }
+        }
+    } else if (a->action == PA_CANT_PLAY) {
+        if (p->effect_round_left > 0) {
+            p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+            p->animation_state = PAS_DAMAGE;  // TODO: Do another animation maybe?
+            p->effect_round_left--;
+        }
+    }
+}
+
+void end_round() {
+    for (int i = 0; i < player_count; i++) {
+        players[i].health = updates[i].health;
+        players[i].position = updates[i].position;
+        players[i].effect = updates[i].effect;
+        players[i].effect_round_left = updates[i].effect_round_left;
+    }
+    action_step = 0;
+    action_count = 0;
 }
 
 int main(int argc, char **argv) {
@@ -898,7 +961,7 @@ int main(int argc, char **argv) {
                     render_player(&players[i]);
                 }
 
-                 if (slash_animation != NO_ANIMATION) {
+                if (slash_animation != NO_ANIMATION) {
                     Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
                     Vector2 position = grid2screen(slash_cell);
                     DrawTextureEx(slash_texture, position, 0, 1, WHITE);
@@ -910,9 +973,18 @@ int main(int argc, char **argv) {
                 if (state == RS_PLAYING) {
                     render_player_actions(&players[current_player]);
                 } else if (state == RS_WAITING) {
+                } else if (state == RS_PLAYING_ROUND) {
+                    play_round();
+                    state = RS_WAITING_ANIMATIONS;
                 } else if (state == RS_WAITING_ANIMATIONS) {
                     if (wait_for_animations()) {
-                        state = RS_PLAYING;
+                        if (action_step < action_count) {
+                            action_step++;
+                            state = RS_PLAYING_ROUND;
+                        } else {
+                            end_round();
+                            state = RS_PLAYING;
+                        }
                     }
                 }
                 render_infos();

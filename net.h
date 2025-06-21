@@ -17,6 +17,7 @@
 typedef enum {
     RS_PLAYING,
     RS_WAITING,
+    RS_PLAYING_ROUND,
     RS_WAITING_ANIMATIONS,
     RS_COUNT,
 } round_state;

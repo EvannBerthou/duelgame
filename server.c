@@ -124,6 +124,8 @@ void play_round(player_info *player) {
         printf("Player %d can't play this round\n", player->id);
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
+        net_packet_player_action action = pkt_player_action(player->id, player->action, player->x, player->y, 0);
+        broadcast(PKT_PLAYER_ACTION, &action);
         player->state = RS_PLAYING;
     } else if (player->action == PA_SPELL) {
         if (player->effect == SE_STUN) {
@@ -212,7 +214,7 @@ void handle_message(int fd) {
     if (packet_read(&p, fd) < 0) {
         FD_CLR(fd, &master_set);
         printf("Player %d left\n", fd);
-        // TODO: Handle this
+        // TODO: Handle player disconnect
         return;
     }
 
@@ -295,9 +297,6 @@ void handle_message(int fd) {
             sort_actions();
             for (int i = 0; i < player_count; i++) {
                 play_round(&players[player_round_order[i]]);
-                //TODO: Remove this.
-                //We should send every packets and let player handle round length on client side
-                usleep(500000);  // 0.5s sleep to show actions
             }
             for (int i = 0; i < player_count; i++) {
                 if (players[i].effect_round_left > 0) {

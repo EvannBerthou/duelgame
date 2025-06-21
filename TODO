@@ -1,2 +1,4 @@
 - Server side cooldown and spell checking
 - Check server side that moves are valid. The map should be sent by the server
+- Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
+- Some kind of runes
