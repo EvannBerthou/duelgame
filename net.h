@@ -83,18 +83,16 @@ net_packet_connected pkt_connected(uint8_t id) {
 }
 
 typedef struct {
-} net_packet_game_start;
-
-typedef struct {
     uint8_t id;
     uint8_t health;
+    uint8_t max_health;
     uint8_t x, y;
     uint8_t effect;
     uint8_t effect_round_left;
 } net_packet_player_update;
 
-net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t x, uint8_t y, uint8_t effect, uint8_t erl) {
-    return (net_packet_player_update){id, health, x, y, effect, erl};
+net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t x, uint8_t y, uint8_t effect, uint8_t erl) {
+    return (net_packet_player_update){id, health, max_health, x, y, effect, erl};
 }
 
 // Player build
@@ -196,6 +194,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             net_packet_player_update *p = (net_packet_player_update*)content;
             buf = packu8(buf, p->id);
             buf = packu8(buf, p->health);
+            buf = packu8(buf, p->max_health);
             buf = packu8(buf, p->x);
             buf = packu8(buf, p->y);
             buf = packu8(buf, p->effect);
@@ -268,10 +267,11 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             if (p == NULL) exit(1);
             p->id = buf[0];
             p->health = buf[1];
-            p->x = buf[2];
-            p->y = buf[3];
-            p->effect = buf[4];
-            p->effect_round_left = buf[5];
+            p->max_health = buf[2];
+            p->x = buf[3];
+            p->y = buf[4];
+            p->effect = buf[5];
+            p->effect_round_left = buf[6];
             return p;
         } break;
         case PKT_PLAYER_BUILD: {
@@ -376,7 +376,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_JOIN: return 9;
         case PKT_CONNECTED: return 1;
         case PKT_GAME_START: return 0;
-        case PKT_PLAYER_UPDATE: return 6;
+        case PKT_PLAYER_UPDATE: return 7;
         case PKT_PLAYER_BUILD: return 1 + MAX_SPELL_COUNT;
         case PKT_PLAYER_ACTION: return 5;
         case PKT_ROUND_END: return 0;

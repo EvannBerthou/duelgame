@@ -40,6 +40,7 @@ typedef struct {
     char name[9];
     uint8_t x, y;
     uint8_t health;
+    uint8_t max_health;
 
     round_state state;
     player_action action;
@@ -76,7 +77,7 @@ int ci(int a) {
 }
 
 net_packet_player_update pkt_from_info(player_info *p) {
-    return pkt_player_update(p->id, p->health, p->x, p->y, p->effect, p->effect_round_left);
+    return pkt_player_update(p->id, p->health, p->max_health, p->x, p->y, p->effect, p->effect_round_left);
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
@@ -132,6 +133,8 @@ void play_round(player_info *player) {
             printf("Player can't do this action because he is stunned\n");
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
+            net_packet_player_action action = pkt_player_action(player->id, PA_CANT_PLAY, player->x, player->y, 0);
+            broadcast(PKT_PLAYER_ACTION, &action);
             player->state = RS_PLAYING;
             return;
         }
@@ -268,7 +271,8 @@ void handle_message(int fd) {
             printf("%d ", b->spells[i]);
         }
         printf("\n");
-        player->health = b->base_health;
+        player->max_health = b->base_health;
+        player->health = player->max_health;
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);

@@ -23,7 +23,17 @@
 
 #define MAX_ANIMATION_POOL 16
 
-//TODO: Use icons instead of colors
+// UI
+
+Font font = {0};
+Texture2D box_side = {0};
+Texture2D box_mid = {0};
+Texture2D spell_box = {0};
+Texture2D spell_box_select = {0};
+Texture2D game_slot = {0};
+Texture2D life_bar_bg = {0};
+
+// TODO: Use icons instead of colors
 Color icons[] = {
     {0xFF, 0x00, 0x00, 0xFF},
     {0x0, 0xFF, 0x00, 0xFF},
@@ -33,7 +43,7 @@ Color icons[] = {
 const int base_x_offset = (WIDTH - (CELL_SIZE * MAP_WIDTH)) / 2;
 const int base_y_offset = (HEIGHT - (CELL_SIZE * MAP_HEIGHT)) / 2;
 
-//TODO: Map should be sent by the server
+// TODO: Map should be sent by the server
 const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
     {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
@@ -43,7 +53,7 @@ const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
 
 int get_map(int x, int y) {
     if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
-        return 0;
+        return -1;
     return MAP[y][x];
 }
 
@@ -214,6 +224,7 @@ typedef struct {
     char name[9];
     Color color;
     uint8_t health;
+    uint8_t max_health;
     uint8_t spells[MAX_SPELL_COUNT];
     uint8_t cooldowns[MAX_SPELL_COUNT];
     player_action action;
@@ -231,6 +242,7 @@ typedef struct {
 typedef struct {
     player_action action;
     Vector2 position;
+    int spell;
 } player_move;
 
 player players[MAX_PLAYER_COUNT] = {0};
@@ -253,6 +265,7 @@ typedef struct {
     int player;
     Vector2 position;
     int health;
+    int max_health;
     spell_effect effect;
     int effect_round_left;
 } player_round_update;
@@ -286,6 +299,14 @@ anim_id slash_animation = NO_ANIMATION;
 Vector2 slash_cell = {0};
 
 void load_assets() {
+    font = LoadFont("assets/fonts/default.ttf");
+    box_side = LoadTexture("assets/sprites/ui/box_side.png");
+    box_mid = LoadTexture("assets/sprites/ui/box_mid.png");
+    spell_box = LoadTexture("assets/sprites/ui/spell_box.png");
+    spell_box_select = LoadTexture("assets/sprites/ui/spell_box_select.png");
+    game_slot = LoadTexture("assets/sprites/ui/game_slot.png");
+    life_bar_bg = LoadTexture("assets/sprites/ui/life_bar_bg.png");
+
     for (int i = 0; i < FLOOR_TEXTURE_COUNT; i++) {
         floor_textures[i] = LoadTexture(TextFormat("assets/sprites/floor_%d.png", i + 1));
     }
@@ -329,11 +350,15 @@ float lerp(float a, float b, float f) {
 }
 
 void draw_cell(int x, int y, Color c) {
-    DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, c);
+    Rectangle source = {0, 0, spell_box.width, spell_box.height};
+    Rectangle dest = {x, y, CELL_SIZE, CELL_SIZE};
+    DrawTexturePro(spell_box, source, dest, (Vector2){0}, 0, c);
 }
 
-void draw_cell_lines(int x, int y, int t, Color c) {
-    DrawRectangleLinesEx((Rectangle){x, y, CELL_SIZE, CELL_SIZE}, t, c);
+void draw_cell_lines(int x, int y) {
+    Rectangle source = {0, 0, spell_box_select.width, spell_box_select.height};
+    Rectangle dest = {x - 8, y - 8, CELL_SIZE + 16, CELL_SIZE + 16};
+    DrawTexturePro(spell_box_select, source, dest, (Vector2){0}, 0, WHITE);
 }
 
 bool v2eq(Vector2 a, Vector2 b) {
@@ -345,6 +370,9 @@ Vector2 grid2screen(Vector2 g) {
 }
 
 Vector2 screen2grid(Vector2 s) {
+    if (s.x - base_x_offset < 0 || s.y - base_y_offset < 0) {
+        return (Vector2){-1, -1};
+    }
     return (Vector2){(int)((s.x - base_x_offset) / CELL_SIZE), (int)((s.y - base_y_offset) / CELL_SIZE)};
 }
 
@@ -394,14 +422,15 @@ player_move player_exec_action(player *p) {
     }
 
     const Vector2 g = screen2grid(GetMousePosition());
-    if (IsMouseButtonPressed(0)) {
+    if (get_map(g.x, g.y) != -1 && IsMouseButtonPressed(0)) {
         if (p->action == PA_SPELL) {
             if (p->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
+                int selected_spell = p->spells[p->selected_spell];
                 p->cooldowns[p->selected_spell] = get_selected_spell()->cooldown;
                 if (p->cooldowns[p->selected_spell] > 0) {
                     p->selected_spell = 0;
                 }
-                return (player_move){.action = PA_SPELL, .position = g};
+                return (player_move){.action = PA_SPELL, .position = g, .spell = selected_spell};
             }
         }
     }
@@ -542,6 +571,12 @@ bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *
     return true;
 }
 
+void render_game_slot(Vector2 pos) {
+    Rectangle source = {0, 0, game_slot.width, game_slot.height};
+    Rectangle dest = {pos.x, pos.y, CELL_SIZE, CELL_SIZE};
+    DrawTexturePro(game_slot, source, dest, (Vector2){0}, 0, WHITE);
+}
+
 void render_spell_actions(player *p) {
     const spell *s = get_selected_spell();
     if (s->type == ST_MOVE) {
@@ -551,7 +586,7 @@ void render_spell_actions(player *p) {
                 const int y_pos = p->position.y + y;
                 if (can_player_move(p, (Vector2){x_pos, y_pos}, s->range)) {
                     Vector2 s = grid2screen((Vector2){x_pos, y_pos});
-                    DrawRectangleLinesEx((Rectangle){s.x, s.y, CELL_SIZE, CELL_SIZE}, 8, p->color);
+                    render_game_slot(s);
                 }
             }
         }
@@ -563,7 +598,7 @@ void render_spell_actions(player *p) {
                 Vector2 g = {x_pos, y_pos};
                 if (can_player_move(p, g, s->range)) {
                     Vector2 s = grid2screen(g);
-                    DrawRectangleLinesEx((Rectangle){s.x, s.y, CELL_SIZE, CELL_SIZE}, 8, RED);
+                    render_game_slot(s);
                 }
             }
         }
@@ -574,7 +609,7 @@ void render_spell_actions(player *p) {
                 const Vector2 cell = {g.x + x, g.y + y};
                 if (is_cell_in_zone(p->position, g, cell, s)) {
                     Vector2 s = grid2screen(cell);
-                    DrawRectangleLinesEx((Rectangle){s.x, s.y, CELL_SIZE, CELL_SIZE}, 8, RED);
+                    render_game_slot(s);
                 }
             }
         }
@@ -615,21 +650,20 @@ void render_player_actions(player *p) {
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         const int x = base_x_offset + (CELL_SIZE + 8) * i;
         const int y = toolbar_y;
+
         bool on_cooldown = p->cooldowns[i] > 0;
+        Color c = on_cooldown ? GRAY : icons[all_spells[p->spells[i]].icon];
+        draw_cell(x, y, c);
+
         if (on_cooldown) {
-            Color c = GRAY;
-            draw_cell(x, y, c);
             const char *text = TextFormat("%d", p->cooldowns[i]);
             Vector2 size = MeasureTextEx(GetFontDefault(), text, 56, 0);
             DrawText(text, x + (CELL_SIZE - size.x) / 2, y + (CELL_SIZE - size.y) / 2, 56, WHITE);
-        } else {
-            Color c = icons[all_spells[p->spells[i]].icon];
-            draw_cell(x, y, c);
         }
     }
 
     if (p->action == PA_SPELL) {
-        draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_y, 4, BLACK);
+        draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_y);
     }
 
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
@@ -650,23 +684,82 @@ void render_player_actions(player *p) {
     }
 }
 
+Rectangle render_box(int x, int y, int w, int h) {
+    // Left side
+    Rectangle source_left = {0, 0, box_side.width, box_side.height};
+    float scale_factor_h = (float)h / (float)box_side.height;
+    Rectangle dest_left = {x, y, box_side.width * scale_factor_h, h};
+    DrawTexturePro(box_side, source_left, dest_left, (Vector2){0}, 0, WHITE);
+
+    // Right side
+    Rectangle source_right = {0, 0, -box_side.width, box_side.height};
+    Rectangle dest_right = {x + w - box_side.width * scale_factor_h, y, box_side.width * scale_factor_h, h};
+    DrawTexturePro(box_side, source_right, dest_right, (Vector2){0}, 0, WHITE);
+
+    // Mid
+    Rectangle source_mid = {0, 0, box_mid.width, box_mid.height};
+    Rectangle dest_mid = {x + dest_left.width, y, dest_right.x - dest_left.x - dest_left.width, h};
+    DrawTexturePro(box_mid, source_mid, dest_mid, (Vector2){0}, 0, WHITE);
+
+    Rectangle res = {0};
+    res.x = dest_mid.x;
+    res.y = dest_mid.y + 7 * scale_factor_h;
+    res.width = dest_right.x - dest_mid.x;
+    res.height = (dest_mid.height - res.y) - 5 * scale_factor_h;
+    return res;
+}
+
+Rectangle render_life_bar(int x, int y, int w, int health, int max_health) {
+    Rectangle source = {0, 0, life_bar_bg.width, life_bar_bg.height};
+    float ratio = (float)w / life_bar_bg.width;
+    Rectangle dest = {x, y, 0.35 * w, life_bar_bg.height * ratio * 0.35};
+    DrawTexturePro(life_bar_bg, source, dest, (Vector2){0}, 0, WHITE);
+
+    int percent = ((float)health / (float)max_health) * 100;
+
+    // TODO: Better way than fixed offsets
+    for (int i = 0; i < 10; i++) {
+        Rectangle life_cell = {x + 22 + 14 * i, y + 14, 8, 12};
+        Color c = i * 10 <= percent ? RED : BLUE;
+        DrawRectangleRec(life_cell, c);
+    }
+    return dest;
+}
+
 void render_infos() {
-    DrawRectangleRec((Rectangle){base_x_offset, 0, MAP_WIDTH * CELL_SIZE, base_y_offset}, GRAY);
+    int over_player = -1;
+
     const int player_info_width = (MAP_WIDTH * CELL_SIZE) / player_count;
     for (int i = 0; i < player_count; i++) {
-        const int x = base_x_offset + player_info_width * i;
-        DrawRectangleLines(x, 0, player_info_width, base_y_offset, RED);
-        DrawCircle(x + 8 + 8, 16, 12, players[i].color);
+        int start_x = base_x_offset + player_info_width * i;
+        Rectangle inner = render_box(start_x, 0, player_info_width, base_y_offset);
+        const int x = inner.x;
+        const int y = inner.y;
+
         if (i == current_player) {
-            DrawText(TextFormat("%s (you)", players[i].name), x + 32, 8, 24, BLACK);
+            DrawTextEx(font, TextFormat("%s (you)", players[i].name), (Vector2){x, y}, 24, 1, BLACK);
         } else {
-            DrawText(TextFormat("%s", players[i].name), x + 32, 8, 24, BLACK);
+            DrawTextEx(font, TextFormat("%s", players[i].name), (Vector2){x, y}, 24, 1, BLACK);
         }
-        DrawText(TextFormat("Health: %d", (int)players[i].health), x + 8, 32, 24, BLACK);
+        int life_bar_width = 0.35 * player_info_width;
+        Rectangle life_bar_box = render_life_bar(x + inner.width - life_bar_width, y + 2, player_info_width,
+                                                 players[i].health, players[i].max_health);
+
         if (players[i].effect_round_left > 0) {
-            DrawText(TextFormat("Effect %d : %d rounds left", players[i].effect, players[i].effect_round_left), x + 8,
-                     52, 24, BLACK);
+            // TODO: Display an icon instead
+            DrawText(TextFormat("Effect %d : %d rounds left", players[i].effect, players[i].effect_round_left), x,
+                     y + 24, 24, BLACK);
         }
+
+        if (CheckCollisionPointRec(GetMousePosition(), life_bar_box)) {
+            over_player = i;
+        }
+    }
+    if (over_player != -1) {
+        player *p = &players[over_player];
+        Vector2 mp = GetMousePosition();
+        mp.y -= 36;
+        DrawTextEx(GetFontDefault(), TextFormat("%d/%d", p->health, p->max_health), mp, 38, 1, BLACK);
     }
 }
 
@@ -730,6 +823,9 @@ void reset_game() {
         }
     }
 
+    action_count = 0;
+    action_step = 0;
+
     player_join();
 }
 
@@ -763,6 +859,7 @@ void handle_packet(net_packet *p) {
 
         if (gs == GS_WAITING) {
             player->health = u->health;
+            player->max_health = u->max_health;
             player->position.x = u->x;
             player->position.y = u->y;
             player->effect = u->effect;
@@ -770,6 +867,7 @@ void handle_packet(net_packet *p) {
         } else {
             updates[u->id].position = (Vector2){u->x, u->y};
             updates[u->id].health = u->health;
+            updates[u->id].max_health = u->max_health;
             updates[u->id].effect = u->effect;
             updates[u->id].effect_round_left = u->effect_round_left;
         }
@@ -783,14 +881,12 @@ void handle_packet(net_packet *p) {
         action->spell = a->spell;
         action_count++;
     } else if (p->type == PKT_ROUND_END) {
-        // TODO: Wait for all animations to have ended before starting the round
-        // TODO: Cooldown should be decreased when it's the player turn
         printf("Round ended\n");
         state = RS_PLAYING_ROUND;
     } else if (p->type == PKT_GAME_END) {
         net_packet_game_end *e = (net_packet_game_end *)p->content;
-        // TODO: Wait for animations to finish
         winner_id = e->winner_id;
+        state = RS_PLAYING_ROUND;
         gs = GS_ENDING;
     } else if (p->type == PKT_GAME_RESET) {
         printf("Client: game reset");
@@ -802,13 +898,12 @@ void handle_packet(net_packet *p) {
 
 void play_round() {
     player_round_action *a = &actions[action_step];
+    printf("Playing round %d/%d for %d\n", action_step, action_count, a->player);
     player *p = &players[a->player];
 
     if (a->action == PA_SPELL) {
-        if (p->effect == SE_STUN) {
-            return;
-        }
         const spell *s = &all_spells[a->spell];
+        printf("Casting %s\n", s->name);
 
         player *target = NULL;
         for (int i = 0; i < player_count; i++) {
@@ -827,14 +922,12 @@ void play_round() {
                 if (target != NULL) {
                     target->effect = SE_STUN;
                     target->effect_round_left = s->effect_duration;
-                    target->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-                    target->animation_state = PAS_DAMAGE;
                 }
             } else {
-                slash_animation = new_animation(AT_ONESHOT, 5.f / 3.f, 3);
+                slash_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, 3);
                 slash_cell = a->target;
                 if (target != NULL) {
-                    target->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+                    target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                     target->animation_state = PAS_DAMAGE;
                     target->health -= s->damage;
                 }
@@ -844,7 +937,6 @@ void play_round() {
         if (p->effect_round_left > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             p->animation_state = PAS_DAMAGE;  // TODO: Do another animation maybe?
-            p->effect_round_left--;
         }
     }
 }
@@ -855,6 +947,11 @@ void end_round() {
         players[i].position = updates[i].position;
         players[i].effect = updates[i].effect;
         players[i].effect_round_left = updates[i].effect_round_left;
+        for (int j = 0; j < MAX_SPELL_COUNT; j++) {
+            if (players[i].cooldowns[j] > 0) {
+                players[i].cooldowns[j]--;
+            }
+        }
     }
     action_step = 0;
     action_count = 0;
@@ -949,7 +1046,7 @@ int main(int argc, char **argv) {
                         state = RS_WAITING;
                         // Send action to server
                         net_packet_player_action a = pkt_player_action(current_player, move.action, move.position.x,
-                                                                       move.position.y, get_selected_spell()->id);
+                                                                       move.position.y, move.spell);
                         send_sock(PKT_PLAYER_ACTION, &a, client_fd);
                     }
                 }
@@ -978,7 +1075,7 @@ int main(int argc, char **argv) {
                     state = RS_WAITING_ANIMATIONS;
                 } else if (state == RS_WAITING_ANIMATIONS) {
                     if (wait_for_animations()) {
-                        if (action_step < action_count) {
+                        if (action_step < action_count - 1) {
                             action_step++;
                             state = RS_PLAYING_ROUND;
                         } else {
@@ -990,11 +1087,13 @@ int main(int argc, char **argv) {
                 render_infos();
 
                 // Wait for all animations to finish before really ending the game
+                // TODO: Broken
                 if (gs == GS_ENDING && wait_for_animations()) {
                     gs = GS_ENDED;
                 }
             } else if (gs == GS_ENDED) {
                 if (IsKeyPressed(KEY_R)) {
+                    // TODO: Should be checked server side
                     if (current_player == 0) {
                         send_sock(PKT_GAME_RESET, NULL, client_fd);
                     }
