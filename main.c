@@ -16,15 +16,17 @@
 #include "net.h"
 #include "raylib.h"
 
+extern const spell all_spells[];
+
 #define WIDTH 1280
 #define HEIGHT 720
 
+// TODO: Cell size should be given by the map
 #define CELL_SIZE 64.0
 
 #define MAX_ANIMATION_POOL 16
 
 // UI
-
 Font font = {0};
 Texture2D box_side = {0};
 Texture2D box_mid = {0};
@@ -43,52 +45,10 @@ Color icons[] = {
 const int base_x_offset = (WIDTH - (CELL_SIZE * MAP_WIDTH)) / 2;
 const int base_y_offset = (HEIGHT - (CELL_SIZE * MAP_HEIGHT)) / 2;
 
-// TODO: Map should be sent by the server
-const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
-    {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0},
-    {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
-
-int get_map(int x, int y) {
-    if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
-        return -1;
-    return MAP[y][x];
-}
-
-int MAP_VARIANTS[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
-
-int get_map_variant(int x, int y) {
-    if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
-        return 0;
-    return MAP_VARIANTS[y][x];
-}
-
-void set_map_variant(int x, int y, int v) {
-    if (x >= MAP_WIDTH || x < 0 || y >= MAP_HEIGHT || y < 0)
-        return;
-    MAP_VARIANTS[y][x] = v;
-}
-
-const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
-
-int PROPS_ANIMATION[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
+map_layer game_map = {0};
+map_layer variants = {0};
+map_layer props = {0};
+map_layer props_animations = {0};
 
 #define WALL_ORIENTATION_COUNT 16
 
@@ -325,21 +285,35 @@ void load_assets() {
 }
 
 void compute_map_variants() {
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (get_map(x, y) == 0) {
+    init_map(&variants, game_map.width, game_map.height, NULL);
+    for (int y = 0; y < game_map.height; y++) {
+        for (int x = 0; x < game_map.width; x++) {
+            if (get_map(&game_map, x, y) == 0) {
                 if (rand() % 100 > 90) {  // 10% of chance to have a random floor cell texture
-                    set_map_variant(x, y, (rand() % FLOOR_TEXTURE_COUNT - 1) + 1);
+                    set_map(&variants, x, y, (rand() % FLOOR_TEXTURE_COUNT - 1) + 1);
+                } else {
+                    set_map(&variants, x, y, 0);
                 }
             }
-
-            if (get_map(x, y) == 1) {
+            if (get_map(&game_map, x, y) == 1) {
                 int value = 0;
-                value |= (get_map(x, y + 1) == 1) << 0;
-                value |= (get_map(x - 1, y) == 1) << 1;
-                value |= (get_map(x + 1, y) == 1) << 2;
-                value |= (get_map(x, y - 1) == 1) << 3;
-                set_map_variant(x, y, value);
+                value |= (get_map(&game_map, x, y + 1) == 1) << 0;
+                value |= (get_map(&game_map, x - 1, y) == 1) << 1;
+                value |= (get_map(&game_map, x + 1, y) == 1) << 2;
+                value |= (get_map(&game_map, x, y - 1) == 1) << 3;
+                set_map(&variants, x, y, value);
+            }
+        }
+    }
+}
+
+void set_props_animations() {
+    init_map(&props_animations, game_map.width, game_map.height, NULL);
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (get_map(&props, x, y)) {
+                anim_id id = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
+                set_map(&props_animations, x, y, id);
             }
         }
     }
@@ -377,7 +351,7 @@ Vector2 screen2grid(Vector2 s) {
 }
 
 bool is_walkable(int x, int y) {
-    return get_map(x, y) != 1;
+    return get_map(&game_map, x, y) != 1;
 }
 
 // TODO: Implement BFS or A* to check if moves are valid
@@ -422,7 +396,7 @@ player_move player_exec_action(player *p) {
     }
 
     const Vector2 g = screen2grid(GetMousePosition());
-    if (get_map(g.x, g.y) != -1 && IsMouseButtonPressed(0)) {
+    if (get_map(&game_map, g.x, g.y) != -1 && IsMouseButtonPressed(0)) {
         if (p->action == PA_SPELL) {
             if (p->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
                 int selected_spell = p->spells[p->selected_spell];
@@ -443,11 +417,11 @@ bool is_over_cell(int x, int y) {
 }
 
 Texture2D get_cell_texture(int x, int y) {
-    int cell_type = get_map(x, y);
+    int cell_type = get_map(&game_map, x, y);
     if (cell_type == 0)
-        return floor_textures[get_map_variant(x, y)];
+        return floor_textures[get_map(&variants, x, y)];
     if (cell_type == 1)
-        return wall_textures[get_map_variant(x, y)];
+        return wall_textures[get_map(&variants, x, y)];
     return (Texture2D){0};
 }
 
@@ -466,8 +440,8 @@ Texture2D get_prop_texture(int prop_type, int anim_id) {
 }
 
 void render_map() {
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int y = 0; y < game_map.height; y++) {
+        for (int x = 0; x < game_map.width; x++) {
             const int x_pos = base_x_offset + x * CELL_SIZE;
             const int y_pos = base_y_offset + y * CELL_SIZE;
             Texture2D t = get_cell_texture(x, y);
@@ -475,7 +449,7 @@ void render_map() {
                 Color tint = is_over_cell(x_pos, y_pos) ? RED : WHITE;
                 DrawTextureEx(t, (Vector2){x_pos, y_pos}, 0, 4, tint);
             } else {
-                Color c = is_over_cell(x_pos, y_pos) ? RED : get_cell_color(get_map(x, y));
+                Color c = PURPLE;
                 DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
                 DrawRectangleLines(x_pos, y_pos, CELL_SIZE, CELL_SIZE, BLACK);
             }
@@ -486,7 +460,7 @@ void render_map() {
         for (int x = 0; x < MAP_WIDTH; x++) {
             const int x_pos = base_x_offset + x * CELL_SIZE + 8;
             const int y_pos = base_y_offset + y * CELL_SIZE - 8;
-            Texture2D texture = get_prop_texture(PROPS[y][x], PROPS_ANIMATION[y][x]);
+            Texture2D texture = get_prop_texture(get_map(&props, x, y), get_map(&props_animations, x, y));
             DrawTextureEx(texture, (Vector2){x_pos, y_pos}, 0, 3, WHITE);
         }
     }
@@ -796,6 +770,12 @@ void player_join() {
 
 void reset_game() {
     gs = GS_WAITING;
+
+    free_map(&game_map);
+    free_map(&variants);
+    free_map(&props);
+    free_map(&props_animations);
+
     for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
         anim_pool[i] = (animation){0};
     }
@@ -813,14 +793,6 @@ void reset_game() {
         players[i].animation_state = PAS_NONE;
         players[i].action = PA_SPELL;
         players[i].selected_spell = 0;
-    }
-
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (PROPS[y][x]) {
-                PROPS_ANIMATION[y][x] = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
-            }
-        }
     }
 
     action_count = 0;
@@ -849,6 +821,19 @@ void handle_packet(net_packet *p) {
         memcpy(players[current_player].spells, my_spells, MAX_SPELL_COUNT);
         net_packet_player_build b = pkt_player_build(rand(), players[current_player].spells);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
+    } else if (p->type == PKT_MAP) {
+        net_packet_map *m = (net_packet_map *)p->content;
+        printf("Map is %d/%d\n", m->width, m->height);
+        if (m->type == MLT_BACKGROUND) {
+            init_map(&game_map, m->width, m->height, m->content);
+            compute_map_variants();
+        } else if (m->type == MLT_PROPS) {
+            init_map(&props, m->width, m->height, m->content);
+            set_props_animations();
+        } else {
+            printf("Unknown map layer\n");
+            exit(1);
+        }
     } else if (p->type == PKT_GAME_START) {
         printf("Starting Game !!\n");
         gs = GS_STARTED;
@@ -983,7 +968,6 @@ int main(int argc, char **argv) {
     SetTargetFPS(60);
 
     load_assets();
-    compute_map_variants();
 
     if (connect_to_server(ip, port) < 0) {
         fprintf(stderr, "Could not connect to server\n");

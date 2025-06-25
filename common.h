@@ -6,18 +6,7 @@
 #include <limits.h>
 #include <stdlib.h>
 
-int strtoint(const char *str, int *out) {
-    char *endptr = NULL;
-    errno = 0;
-    long val = strtol(str, &endptr, 10);
-    if (errno == ERANGE || val > INT_MAX || val < INT_MIN)
-        return 0;
-    if (endptr == str || *endptr != '\0')
-        return 0;
-
-    *out = (int)val;
-    return 1;
-}
+int strtoint(const char *str, int *out);
 
 #define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)
 
@@ -53,50 +42,20 @@ typedef struct {
     uint8_t effect_duration;  // Number of turn left before the effect is gone
 } spell;
 
-// TODO: Add spells with effects (stun, root, DOT, kb)
-const spell all_spells[] = {
-    {
-        .id = 0,
-        .name = "Move",
-        .icon = 0,
-        .type = ST_MOVE,
-        .range = 1,
-        .speed = 100,
-        .cooldown = 0,
-    },
-    {.id = 1,
-     .name = "Target",
-     .icon = 1,
-     .type = ST_TARGET,
-     .damage = 25,
-     .range = 1,
-     .zone_size = 3,
-     .speed = 90,
-     .cooldown = 0},
-    {.id = 2,
-     .name = "Zone",
-     .icon = 2,
-     .type = ST_TARGET,
-     .damage = 50,
-     .range = 2,
-     .speed = 80,
-     .cooldown = 0},
-    {.id = 3,
-     .name = "Move Slow",
-     .icon = 0,
-     .type = ST_MOVE,
-     .range = 1,
-     .speed = 50,
-     .cooldown = 0},
-    {.id = 4,
-     .name = "Stun",
-     .icon = 0,
-     .type = ST_TARGET,
-     .range = 1,
-     .speed = 150,
-     .cooldown = 4,
-     .effect = SE_STUN,
-     .effect_duration = 3},
-};
+typedef enum {
+    MLT_BACKGROUND,
+    MLT_PROPS,
+} map_layer_type;
+
+typedef struct {
+    uint8_t width, height;
+    map_layer_type type;
+    uint8_t *content;
+} map_layer;
+
+void init_map(map_layer *m, int width, int height, uint8_t *copy);
+int get_map(map_layer *m, int x, int y);
+void set_map(map_layer *m, int x, int y, int v);
+void free_map(map_layer *m);
 
 #endif

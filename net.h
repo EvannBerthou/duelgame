@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include "common.h"
 
@@ -41,6 +42,7 @@ typedef enum {
     PKT_PING,
     PKT_JOIN,
     PKT_CONNECTED,
+    PKT_MAP,
     PKT_GAME_START,
     PKT_PLAYER_UPDATE,
     PKT_PLAYER_BUILD,
@@ -80,6 +82,16 @@ typedef struct {
 
 net_packet_connected pkt_connected(uint8_t id) {
     return (net_packet_connected){id};
+}
+
+typedef struct {
+    uint8_t width, height;
+    uint8_t type;
+    uint8_t *content;
+} net_packet_map;
+
+net_packet_map pkt_map(uint8_t width, uint8_t height, uint8_t type, uint8_t *content) {
+    return (net_packet_map){width, height, type, content};
 }
 
 typedef struct {
@@ -190,6 +202,16 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             return packu8(buf, p->id);
         } break;
         case PKT_GAME_START: return buf;
+        case PKT_MAP: {
+            net_packet_map *p = (net_packet_map*)content;
+            buf = packu8(buf, p->width);
+            buf = packu8(buf, p->height);
+            buf = packu8(buf, p->type);
+            for (int i = 0; i < p->width * p->height; i++) {
+                buf = packu8(buf, p->content[i]);
+            }
+            return buf;
+        }
         case PKT_PLAYER_UPDATE: {
             net_packet_player_update *p = (net_packet_player_update*)content;
             buf = packu8(buf, p->id);
@@ -262,6 +284,18 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             return p;
         } break;
         case PKT_GAME_START: return NULL;
+        case PKT_MAP: {
+            net_packet_map *p = malloc(sizeof(net_packet_map));
+            if (p == NULL) exit(1);
+            p->width = buf[0];
+            p->height = buf[1];
+            p->type = buf[2];
+            p->content = malloc(p->width * p->height);
+            for (int i = 0; i < p->width * p->height; i++) {
+                p->content[i] = buf[3 + i];
+            }
+            return p;
+        }
         case PKT_PLAYER_UPDATE: {
             net_packet_player_update *p = malloc(sizeof(net_packet_player_update));
             if (p == NULL) exit(1);
@@ -328,7 +362,7 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
 }
 
 void write_packet(net_packet *p, int fd) {
-    char buf[20] = {0};
+    static char buf[256] = {0};
     char *b = buf;
     b = packu8(b, p->len);
     b = packu8(b, p->type);
@@ -376,6 +410,11 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_JOIN: return 9;
         case PKT_CONNECTED: return 1;
         case PKT_GAME_START: return 0;
+        case PKT_MAP: {
+            net_packet_map *map = (net_packet_map*)p;
+            int map_length = map->width * map->height;
+            return 3 + map_length;
+        }
         case PKT_PLAYER_UPDATE: return 7;
         case PKT_PLAYER_BUILD: return 1 + MAX_SPELL_COUNT;
         case PKT_PLAYER_ACTION: return 5;

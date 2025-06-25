@@ -2,4 +2,4 @@
 
 set -xe
 
-gcc -Wall -Wextra server.c -o server -lm
+gcc -Wall -Wextra server.c common.c -o server -lm

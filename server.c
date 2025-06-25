@@ -1,5 +1,4 @@
 #include <asm-generic/socket.h>
-#include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <netdb.h>
@@ -12,6 +11,8 @@
 #include <unistd.h>
 #include "common.h"
 #include "net.h"
+
+extern const spell all_spells[];
 
 fd_set master_set, read_fds;
 
@@ -59,6 +60,20 @@ player_info players[MAX_PLAYER_COUNT] = {0};
 // Stores the order in which players will do their actions
 int player_round_order[MAX_PLAYER_COUNT] = {0};
 int player_count = 0;
+
+const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
+    {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0},
+    {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+};
+
+const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+};
 
 int spawn_positions[][2] = {
     {0, 0},
@@ -261,6 +276,24 @@ void handle_message(int fd) {
 
         net_packet_connected c = pkt_connected(last_player);
         send_sock(PKT_CONNECTED, &c, fd);
+
+        uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
+        for (int i = 0; i < MAP_HEIGHT; i++) {
+            for (int j = 0; j < MAP_WIDTH; j++) {
+                map[i * MAP_WIDTH + j] = MAP[i][j];
+            }
+        }
+        net_packet_map m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
+        send_sock(PKT_MAP, &m, fd);
+
+        uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
+        for (int i = 0; i < MAP_HEIGHT; i++) {
+            for (int j = 0; j < MAP_WIDTH; j++) {
+                props[i * MAP_WIDTH + j] = PROPS[i][j];
+            }
+        }
+        net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
+        send_sock(PKT_MAP, &p, fd);
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: We should only recieved this packet before the game has started
         net_packet_player_build *b = (net_packet_player_build *)p.content;
