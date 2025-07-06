@@ -173,9 +173,16 @@ typedef enum {
     PAS_NONE,
     PAS_MOVING,
     PAS_DAMAGE,
+    PAS_BURNING,
     PAS_BUMPING,
     PAS_DYING,
 } player_animation_state;
+
+typedef struct {
+    player_action action;
+    Vector2 position;
+    int spell;
+} player_move;
 
 typedef struct {
     bool init;
@@ -189,8 +196,13 @@ typedef struct {
     uint8_t cooldowns[MAX_SPELL_COUNT];
     player_action action;
     uint8_t selected_spell;
+    map_layer action_range;
+
+    player_move round_move;
+    bool waiting;
 
     spell_effect effect;
+    const spell *spell_effect;
     uint8_t effect_round_left;
 
     anim_id animation;
@@ -198,12 +210,6 @@ typedef struct {
     player_animation_state animation_state;
     Vector2 moving_target;  // Where the player is trying to move. Used for animation
 } player;
-
-typedef struct {
-    player_action action;
-    Vector2 position;
-    int spell;
-} player_move;
 
 player players[MAX_PLAYER_COUNT] = {0};
 int player_count = 0;
@@ -237,7 +243,7 @@ round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
 
-uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3, 4, 0, 0, 0, 0};
+uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3, 4, 5, 0, 0, 0};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
 
@@ -354,24 +360,8 @@ bool is_walkable(int x, int y) {
     return get_map(&game_map, x, y) != 1;
 }
 
-// TODO: Implement BFS or A* to check if moves are valid
-bool can_player_move(player *p, Vector2 cell, int range) {
-    // Check bounds
-    if (cell.x < 0 || cell.x >= MAP_WIDTH || cell.y < 0 || cell.y >= MAP_HEIGHT) {
-        return false;
-    }
-
-    if (!is_walkable(cell.x, cell.y)) {
-        return false;
-    }
-
-    // Check if cell is in range
-    if (fabs(p->position.x - cell.x) + fabs(p->position.y - cell.y) > range) {
-        return false;
-    }
-
-    // Check if there is any wall between the cell and the player using A* or BFS. For now only supports 1 range
-    return true;
+bool can_player_move(player *p, Vector2 cell) {
+    return get_map(&p->action_range, cell.x, cell.y) == 1;
 }
 
 const spell *get_selected_spell() {
@@ -379,10 +369,51 @@ const spell *get_selected_spell() {
     return &all_spells[p->spells[p->selected_spell]];
 }
 
+typedef struct {
+    int x, y, dist;
+} Node;
+
+typedef struct {
+    Node *nodes;
+    int front, rear;
+} Queue;
+
+void compute_spell_range(player *p) {
+    Queue q = {.front = 0, .rear = 0};
+    q.nodes = calloc(game_map.width * game_map.height, sizeof(Node));
+    q.nodes[q.rear++] = (Node){p->position.x, p->position.y, 0};
+    clear_map(&p->action_range);
+    set_map(&p->action_range, p->position.x, p->position.y, 1);
+
+    int range = get_selected_spell()->range;
+    int dx[] = {-1, 1, 0, 0};
+    int dy[] = {0, 0, -1, 1};
+
+    while (q.front != q.rear) {
+        Node current = q.nodes[q.front++];
+
+        if (current.dist == range) {
+            continue;
+        }
+
+        for (int i = 0; i < 4; i++) {
+            int nx = current.x + dx[i];
+            int ny = current.y + dy[i];
+
+            if (get_map(&game_map, nx, ny) == 0 && get_map(&p->action_range, nx, ny) == 0) {
+                set_map(&p->action_range, nx, ny, 1);
+                q.nodes[q.rear++] = (Node){nx, ny, current.dist + 1};
+            }
+        }
+    }
+
+    free(q.nodes);
+}
+
 int player_cast_spell(player *p, Vector2 origin) {
     const spell *s = get_selected_spell();
     if (s->type == ST_MOVE || s->type == ST_TARGET) {
-        return can_player_move(p, origin, s->range);
+        return can_player_move(p, origin);
     } else {
         printf("not implemented\n");
         exit(1);
@@ -391,7 +422,7 @@ int player_cast_spell(player *p, Vector2 origin) {
 }
 
 player_move player_exec_action(player *p) {
-    if (p->effect != SE_NONE) {
+    if (p->effect == SE_STUN) {
         return (player_move){.action = PA_CANT_PLAY, .position = (Vector2){0, 0}};
     }
 
@@ -494,20 +525,18 @@ void render_player(player *p) {
         player_position.y = lerp(y_pos, y_target, progress);
 
         if (anim_finished(p->action_animation)) {
-            p->action_animation = NO_ANIMATION;
-            p->animation_state = PAS_NONE;
             p->position = p->moving_target;
         }
     } else if (p->animation_state == PAS_DAMAGE) {
         c = RED;
         if (anim_finished(p->action_animation)) {
-            p->action_animation = NO_ANIMATION;
-            p->animation_state = PAS_NONE;
             if (p->health <= 0) {
                 p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
                 p->animation_state = PAS_DYING;
             }
         }
+    } else if (p->animation_state == PAS_BURNING) {
+        c = ORANGE;
     } else if (p->animation_state == PAS_BUMPING) {
         double progress = get_process(p->action_animation);
         if (progress < 0.5f) {  // Moving forward
@@ -523,12 +552,15 @@ void render_player(player *p) {
         }
 
         if (anim_finished(p->action_animation)) {
-            p->action_animation = NO_ANIMATION;
-            p->animation_state = PAS_NONE;
             p->moving_target = (Vector2){0};
         }
     } else if (p->animation_state == PAS_DYING) {
         c = GREEN;
+    }
+
+    if (p->animation_state != PAS_NONE && anim_finished(p->action_animation)) {
+        p->action_animation = NO_ANIMATION;
+        p->animation_state = PAS_NONE;
     }
 
     DrawTextureEx(player_texture, player_position, 0, 3, c);
@@ -551,14 +583,19 @@ void render_game_slot(Vector2 pos) {
     DrawTexturePro(game_slot, source, dest, (Vector2){0}, 0, WHITE);
 }
 
+void set_selected_spell(player *p, int spell) {
+    p->selected_spell = spell;
+    compute_spell_range(p);
+}
+
 void render_spell_actions(player *p) {
     const spell *s = get_selected_spell();
     if (s->type == ST_MOVE) {
-        for (int x = -1; x <= 1; x++) {
-            for (int y = -1; y <= 1; y++) {
+        for (int x = -s->range; x <= s->range; x++) {
+            for (int y = -s->range; y <= s->range; y++) {
                 const int x_pos = p->position.x + x;
                 const int y_pos = p->position.y + y;
-                if (can_player_move(p, (Vector2){x_pos, y_pos}, s->range)) {
+                if (can_player_move(p, (Vector2){x_pos, y_pos})) {
                     Vector2 s = grid2screen((Vector2){x_pos, y_pos});
                     render_game_slot(s);
                 }
@@ -570,7 +607,7 @@ void render_spell_actions(player *p) {
                 const int x_pos = p->position.x + x;
                 const int y_pos = p->position.y + y;
                 Vector2 g = {x_pos, y_pos};
-                if (can_player_move(p, g, s->range)) {
+                if (can_player_move(p, g)) {
                     Vector2 s = grid2screen(g);
                     render_game_slot(s);
                 }
@@ -590,23 +627,47 @@ void render_spell_actions(player *p) {
     }
 }
 
+// TODO: Border should have a fixed size and not scale with the content
+Rectangle render_box(int x, int y, int w, int h) {
+    // Left side
+    Rectangle source_left = {0, 0, box_side.width, box_side.height};
+    float scale_factor_h = (float)h / (float)box_side.height;
+    Rectangle dest_left = {x, y, box_side.width * scale_factor_h, h};
+    DrawTexturePro(box_side, source_left, dest_left, (Vector2){0}, 0, WHITE);
+
+    // Right side
+    Rectangle source_right = {0, 0, -box_side.width, box_side.height};
+    Rectangle dest_right = {x + w - box_side.width * scale_factor_h, y, box_side.width * scale_factor_h, h};
+    DrawTexturePro(box_side, source_right, dest_right, (Vector2){0}, 0, WHITE);
+
+    // Mid
+    Rectangle source_mid = {0, 0, box_mid.width, box_mid.height};
+    Rectangle dest_mid = {x + dest_left.width, y, dest_right.x - dest_left.x - dest_left.width, h};
+    DrawTexturePro(box_mid, source_mid, dest_mid, (Vector2){0}, 0, WHITE);
+
+    Rectangle res = {0};
+    res.x = dest_mid.x;
+    res.y = dest_mid.y + 7 * scale_factor_h;
+    res.width = dest_right.x - dest_mid.x;
+    res.height = (dest_mid.height - res.y) - 5 * scale_factor_h;
+    return res;
+}
+
 void render_tooltip(const spell *s) {
     Vector2 mouse = GetMousePosition();
-    const int tooltip_width = 250;
-    const int tooltip_height = 150;
-    Rectangle tooltip = {mouse.x, mouse.y - tooltip_height, tooltip_width, tooltip_height};
-    DrawRectangleRec(tooltip, RAYWHITE);
-    DrawRectangleLinesEx(tooltip, 5, BLACK);
-    DrawText(s->name, tooltip.x + 8, tooltip.y + 8, 18, BLACK);
+    const int tooltip_width = 300;
+    const int tooltip_height = 200;
+    Rectangle tooltip = render_box(mouse.x, mouse.y - tooltip_height, tooltip_width, tooltip_height);
+    DrawText(s->name, tooltip.x, tooltip.y, 18, BLACK);
 
     if (s->type == ST_MOVE) {
-        DrawText("Moves the player", tooltip.x + 8, tooltip.y + 24, 18, BLACK);
-        DrawText(TextFormat("Range = %d", s->range), tooltip.x + 8, tooltip.y + 42, 18, BLACK);
-        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x + 8, tooltip.y + 58, 18, BLACK);
+        DrawText("Moves the player", tooltip.x, tooltip.y + 20, 18, BLACK);
+        DrawText(TextFormat("Range = %d", s->range), tooltip.x, tooltip.y + 40, 18, BLACK);
+        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x, tooltip.y + 60, 18, BLACK);
     } else if (s->type == ST_TARGET || s->type == ST_ZONE) {
-        DrawText(TextFormat("Damage = %d", s->damage), tooltip.x + 8, tooltip.y + 24, 18, BLACK);
-        DrawText(TextFormat("Range = %d", s->range), tooltip.x + 8, tooltip.y + 42, 18, BLACK);
-        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x + 8, tooltip.y + 58, 18, BLACK);
+        DrawText(TextFormat("Damage = %d", s->damage), tooltip.x, tooltip.y + 20, 18, BLACK);
+        DrawText(TextFormat("Range = %d", s->range), tooltip.x, tooltip.y + 40, 18, BLACK);
+        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x, tooltip.y + 60, 18, BLACK);
     }
 }
 
@@ -658,29 +719,18 @@ void render_player_actions(player *p) {
     }
 }
 
-Rectangle render_box(int x, int y, int w, int h) {
-    // Left side
-    Rectangle source_left = {0, 0, box_side.width, box_side.height};
-    float scale_factor_h = (float)h / (float)box_side.height;
-    Rectangle dest_left = {x, y, box_side.width * scale_factor_h, h};
-    DrawTexturePro(box_side, source_left, dest_left, (Vector2){0}, 0, WHITE);
+void render_preview_move(Vector2 pos) {
+    Rectangle source = {0, 0, game_slot.width, game_slot.height};
+    Rectangle dest = {pos.x, pos.y, CELL_SIZE, CELL_SIZE};
+    DrawTexturePro(game_slot, source, dest, (Vector2){0}, 0, GRAY);
+}
 
-    // Right side
-    Rectangle source_right = {0, 0, -box_side.width, box_side.height};
-    Rectangle dest_right = {x + w - box_side.width * scale_factor_h, y, box_side.width * scale_factor_h, h};
-    DrawTexturePro(box_side, source_right, dest_right, (Vector2){0}, 0, WHITE);
-
-    // Mid
-    Rectangle source_mid = {0, 0, box_mid.width, box_mid.height};
-    Rectangle dest_mid = {x + dest_left.width, y, dest_right.x - dest_left.x - dest_left.width, h};
-    DrawTexturePro(box_mid, source_mid, dest_mid, (Vector2){0}, 0, WHITE);
-
-    Rectangle res = {0};
-    res.x = dest_mid.x;
-    res.y = dest_mid.y + 7 * scale_factor_h;
-    res.width = dest_right.x - dest_mid.x;
-    res.height = (dest_mid.height - res.y) - 5 * scale_factor_h;
-    return res;
+// TODO: Preview animation
+void render_player_move(player_move *move) {
+    if (move->action == PA_SPELL) {
+        Vector2 pos = grid2screen(move->position);
+        render_preview_move(pos);
+    }
 }
 
 Rectangle render_life_bar(int x, int y, int w, int health, int max_health) {
@@ -729,6 +779,7 @@ void render_infos() {
             over_player = i;
         }
     }
+
     if (over_player != -1) {
         player *p = &players[over_player];
         Vector2 mp = GetMousePosition();
@@ -826,6 +877,7 @@ void handle_packet(net_packet *p) {
         printf("Map is %d/%d\n", m->width, m->height);
         if (m->type == MLT_BACKGROUND) {
             init_map(&game_map, m->width, m->height, m->content);
+            init_map(&players[current_player].action_range, game_map.width, game_map.height, NULL);
             compute_map_variants();
         } else if (m->type == MLT_PROPS) {
             init_map(&props, m->width, m->height, m->content);
@@ -837,6 +889,7 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_GAME_START) {
         printf("Starting Game !!\n");
         gs = GS_STARTED;
+        set_selected_spell(&players[current_player], 0);
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
         printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
@@ -899,14 +952,15 @@ void play_round() {
         }
 
         if (s->type == ST_MOVE) {
-            p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+            p->action_animation = new_animation(AT_ONESHOT, .3f, 1);
             p->moving_target = a->target;
             p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
         } else if (s->type == ST_TARGET) {
-            if (s->effect == SE_STUN) {
+            if (s->effect != SE_NONE) {
                 if (target != NULL) {
-                    target->effect = SE_STUN;
+                    target->effect = s->effect;
                     target->effect_round_left = s->effect_duration;
+                    target->spell_effect = s;
                 }
             } else {
                 slash_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, 3);
@@ -922,6 +976,18 @@ void play_round() {
         if (p->effect_round_left > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             p->animation_state = PAS_DAMAGE;  // TODO: Do another animation maybe?
+        }
+    }
+    p->waiting = false;
+}
+
+void play_effects() {
+    for (int i = 0; i < player_count; i++) {
+        players[i].position = updates[i].position;
+        if (players[i].effect == SE_BURN) {
+            players[i].health -= players[i].spell_effect->damage;
+            players[i].action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+            players[i].animation_state = PAS_BURNING;  // TODO: Do another animation maybe?
         }
     }
 }
@@ -940,6 +1006,7 @@ void end_round() {
     }
     action_step = 0;
     action_count = 0;
+    compute_spell_range(&players[current_player]);
 }
 
 int main(int argc, char **argv) {
@@ -1011,33 +1078,56 @@ int main(int argc, char **argv) {
             if (gs == GS_WAITING) {
                 DrawText("Waiting for game to start", 0, 0, 64, WHITE);
             } else if (gs == GS_STARTED || gs == GS_ENDING) {
+                round_state next_state = state;
                 if (state == RS_PLAYING) {
                     if (IsKeyPressed(KEY_Q)) {
                         players[current_player].action = PA_SPELL;
-                        players[current_player].selected_spell = 0;
+                        set_selected_spell(&players[current_player], 0);
                     } else if (IsKeyPressed(KEY_W)) {
                         players[current_player].action = PA_SPELL;
-                        players[current_player].selected_spell = 1;
+                        set_selected_spell(&players[current_player], 1);
                     } else if (IsKeyPressed(KEY_E)) {
                         players[current_player].action = PA_SPELL;
-                        players[current_player].selected_spell = 2;
+                        set_selected_spell(&players[current_player], 2);
                     }
                 }
 
                 if (state == RS_PLAYING) {
                     player_move move = player_exec_action(&players[current_player]);
                     if (move.action != PA_NONE) {
-                        state = RS_WAITING;
+                        next_state = RS_WAITING;
                         // Send action to server
                         net_packet_player_action a = pkt_player_action(current_player, move.action, move.position.x,
                                                                        move.position.y, move.spell);
                         send_sock(PKT_PLAYER_ACTION, &a, client_fd);
+                        players[current_player].round_move = move;
+                        players[current_player].waiting = true;
+                    }
+                } else if (state == RS_PLAYING_ROUND) {
+                    play_round();
+                    next_state = RS_WAITING_ANIMATIONS;
+                } else if (state == RS_WAITING_ANIMATIONS) {
+                    if (wait_for_animations()) {
+                        if (action_step < action_count - 1) {
+                            action_step++;
+                            next_state = RS_PLAYING_ROUND;
+                        } else {
+                            play_effects();
+                            next_state = RS_PLAYING_EFFECTS;
+                        }
+                    }
+                } else if (state == RS_PLAYING_EFFECTS) {
+                    if (wait_for_animations()) {
+                        end_round();
+                        next_state = RS_PLAYING;
                     }
                 }
 
                 // TODO: When waiting, we should preview our action
 
                 render_map();
+
+                // TODO: Always render currently animation player on top
                 for (int i = 0; i < player_count; i++) {
                     render_player(&players[i]);
                 }
@@ -1054,18 +1144,10 @@ int main(int argc, char **argv) {
                 if (state == RS_PLAYING) {
                     render_player_actions(&players[current_player]);
                 } else if (state == RS_WAITING) {
-                } else if (state == RS_PLAYING_ROUND) {
-                    play_round();
-                    state = RS_WAITING_ANIMATIONS;
-                } else if (state == RS_WAITING_ANIMATIONS) {
-                    if (wait_for_animations()) {
-                        if (action_step < action_count - 1) {
-                            action_step++;
-                            state = RS_PLAYING_ROUND;
-                        } else {
-                            end_round();
-                            state = RS_PLAYING;
-                        }
+                    render_player_move(&players[current_player].round_move);
+                } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
+                    if (players[current_player].waiting) {
+                        render_player_move(&players[current_player].round_move);
                     }
                 }
                 render_infos();
@@ -1075,6 +1157,7 @@ int main(int argc, char **argv) {
                 if (gs == GS_ENDING && wait_for_animations()) {
                     gs = GS_ENDED;
                 }
+                state = next_state;
             } else if (gs == GS_ENDED) {
                 if (IsKeyPressed(KEY_R)) {
                     // TODO: Should be checked server side

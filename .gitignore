@@ -1,4 +1,5 @@
-main
+main_game
 server
 assets/*
 !assets/sprites
+!assets/fonts

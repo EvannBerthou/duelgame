@@ -20,19 +20,11 @@ const spell all_spells[] = {
         .name = "Move",
         .icon = 0,
         .type = ST_MOVE,
-        .range = 1,
+        .range = 3,
         .speed = 100,
         .cooldown = 0,
     },
-    {.id = 1,
-     .name = "Target",
-     .icon = 1,
-     .type = ST_TARGET,
-     .damage = 25,
-     .range = 1,
-     .zone_size = 3,
-     .speed = 90,
-     .cooldown = 0},
+    {.id = 1, .name = "Target", .icon = 1, .type = ST_TARGET, .damage = 25, .range = 3, .speed = 90, .cooldown = 0},
     {.id = 2, .name = "Zone", .icon = 2, .type = ST_TARGET, .damage = 50, .range = 2, .speed = 80, .cooldown = 0},
     {.id = 3, .name = "Move Slow", .icon = 0, .type = ST_MOVE, .range = 1, .speed = 50, .cooldown = 0},
     {.id = 4,
@@ -43,6 +35,16 @@ const spell all_spells[] = {
      .speed = 150,
      .cooldown = 4,
      .effect = SE_STUN,
+     .effect_duration = 3},
+    {.id = 5,
+     .name = "Burn",
+     .icon = 0,
+     .type = ST_TARGET,
+     .damage = 5,
+     .range = 1,
+     .speed = 150,
+     .cooldown = 4,
+     .effect = SE_BURN,
      .effect_duration = 3},
 };
 
@@ -57,6 +59,8 @@ void init_map(map_layer *m, int width, int height, uint8_t *copy) {
         for (int i = 0; i < width * height; i++) {
             m->content[i] = copy[i];
         }
+    } else {
+        clear_map(m);
     }
 }
 
@@ -70,6 +74,12 @@ void set_map(map_layer *m, int x, int y, int v) {
     if (x >= m->width || x < 0 || y >= m->height || y < 0)
         return;
     m->content[y * m->width + x] = v;
+}
+
+void clear_map(map_layer *m) {
+    for (int i = 0; i < m->width * m->height; i++) {
+        m->content[i] = 0;
+    }
 }
 
 void free_map(map_layer *m) {

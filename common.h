@@ -21,6 +21,7 @@ typedef enum {
 typedef enum {
     SE_NONE,
     SE_STUN,
+    SE_BURN,
     SE_COUNT,
 } spell_effect;
 
@@ -56,6 +57,7 @@ typedef struct {
 void init_map(map_layer *m, int width, int height, uint8_t *copy);
 int get_map(map_layer *m, int x, int y);
 void set_map(map_layer *m, int x, int y, int v);
+void clear_map(map_layer *m);
 void free_map(map_layer *m);
 
 #endif

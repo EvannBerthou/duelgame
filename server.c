@@ -50,6 +50,7 @@ typedef struct {
 
     spell_effect effect;
     uint8_t effect_round_left;
+    const spell *spell_effect;
 } player_info;
 
 int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
@@ -77,10 +78,9 @@ const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
 
 int spawn_positions[][2] = {
     {0, 0},
-    //{MAP_WIDTH - 1, 0},
     {1, 0},
-    {0, MAP_HEIGHT - 1},
-    {MAP_WIDTH - 1, MAP_HEIGHT - 1},
+    {2, 0},
+    {3, 0},
 };
 
 int ci(int a) {
@@ -106,7 +106,9 @@ void damage_player(player_info *p, const spell *s) {
     if (s->effect != SE_NONE) {
         p->effect = s->effect;
         p->effect_round_left = s->effect_duration;
+        p->spell_effect = s;
     }
+
     net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
 
@@ -326,8 +328,9 @@ void handle_message(int fd) {
 
         int all_played = true;
         for (int i = 0; i < player_count; i++) {
-            if (players[i].state == RS_PLAYING)
+            if (players[i].state == RS_PLAYING) {
                 all_played = false;
+            }
         }
 
         if (all_played) {
@@ -336,6 +339,9 @@ void handle_message(int fd) {
                 play_round(&players[player_round_order[i]]);
             }
             for (int i = 0; i < player_count; i++) {
+                if (players[i].effect == SE_BURN) {
+                    players[i].health -= players[i].spell_effect->damage;
+                }
                 if (players[i].effect_round_left > 0) {
                     players[i].effect_round_left--;
                     if (players[i].effect_round_left == 0) {
