@@ -10,9 +10,6 @@
 #include <unistd.h>
 #include "common.h"
 
-#define MAP_WIDTH 16
-#define MAP_HEIGHT 8
-
 #define MAX_PLAYER_COUNT 4
 
 typedef enum {

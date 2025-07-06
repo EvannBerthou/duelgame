@@ -42,8 +42,8 @@ Color icons[] = {
     {0x0, 0x00, 0xFF, 0xFF},
 };
 
-const int base_x_offset = (WIDTH - (CELL_SIZE * MAP_WIDTH)) / 2;
-const int base_y_offset = (HEIGHT - (CELL_SIZE * MAP_HEIGHT)) / 2;
+int base_x_offset = 0;
+int base_y_offset = 0;
 
 map_layer game_map = {0};
 map_layer variants = {0};
@@ -173,6 +173,7 @@ typedef enum {
     PAS_NONE,
     PAS_MOVING,
     PAS_DAMAGE,
+    PAS_STUNNED,
     PAS_BURNING,
     PAS_BUMPING,
     PAS_DYING,
@@ -190,8 +191,10 @@ typedef struct {
     Vector2 position;
     char name[9];
     Color color;
-    uint8_t health;
+    int health;
     uint8_t max_health;
+    bool dead;
+
     uint8_t spells[MAX_SPELL_COUNT];
     uint8_t cooldowns[MAX_SPELL_COUNT];
     player_action action;
@@ -201,6 +204,7 @@ typedef struct {
     player_move round_move;
     bool waiting;
 
+    //TODO: We should be able to stack effects (stun + burn)
     spell_effect effect;
     const spell *spell_effect;
     uint8_t effect_round_left;
@@ -315,8 +319,8 @@ void compute_map_variants() {
 
 void set_props_animations() {
     init_map(&props_animations, game_map.width, game_map.height, NULL);
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int y = 0; y < game_map.height; y++) {
+        for (int x = 0; x < game_map.width; x++) {
             if (get_map(&props, x, y)) {
                 anim_id id = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
                 set_map(&props_animations, x, y, id);
@@ -487,8 +491,8 @@ void render_map() {
         }
     }
 
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int y = 0; y < game_map.height; y++) {
+        for (int x = 0; x < game_map.width; x++) {
             const int x_pos = base_x_offset + x * CELL_SIZE + 8;
             const int y_pos = base_y_offset + y * CELL_SIZE - 8;
             Texture2D texture = get_prop_texture(get_map(&props, x, y), get_map(&props_animations, x, y));
@@ -506,11 +510,6 @@ void render_player(player *p) {
     Vector2 player_position = {x_pos, y_pos};
     Texture2D player_texture = player_textures[get_frame(p->animation)];
     Color c = WHITE;
-
-    if (p->effect == SE_STUN) {
-        c = GRAY;
-        player_texture = player_textures[0];
-    }
 
     // Player is doing the slide animation
     if (p->animation_state == PAS_MOVING) {
@@ -535,6 +534,9 @@ void render_player(player *p) {
                 p->animation_state = PAS_DYING;
             }
         }
+    } else if (p->animation_state == PAS_STUNNED) {
+        c = GRAY;
+        player_texture = player_textures[0];
     } else if (p->animation_state == PAS_BURNING) {
         c = ORANGE;
     } else if (p->animation_state == PAS_BUMPING) {
@@ -556,6 +558,9 @@ void render_player(player *p) {
         }
     } else if (p->animation_state == PAS_DYING) {
         c = GREEN;
+        if (anim_finished(p->action_animation)) {
+            p->dead = true;
+        }
     }
 
     if (p->animation_state != PAS_NONE && anim_finished(p->action_animation)) {
@@ -672,7 +677,7 @@ void render_tooltip(const spell *s) {
 }
 
 bool is_over_toolbar_cell(uint8_t cell_id) {
-    int toolbar_y = base_y_offset + CELL_SIZE * MAP_HEIGHT + 16;
+    int toolbar_y = base_y_offset + CELL_SIZE * game_map.height + 16;
     Rectangle cell = {base_x_offset + (CELL_SIZE + 8) * cell_id, toolbar_y, CELL_SIZE, CELL_SIZE};
     Vector2 mouse = GetMousePosition();
     return CheckCollisionPointRec(mouse, cell);
@@ -680,7 +685,7 @@ bool is_over_toolbar_cell(uint8_t cell_id) {
 
 void render_player_actions(player *p) {
     // Toolbar rendering
-    int toolbar_y = base_y_offset + CELL_SIZE * MAP_HEIGHT + 16;
+    int toolbar_y = base_y_offset + CELL_SIZE * game_map.height + 16;
 
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         const int x = base_x_offset + (CELL_SIZE + 8) * i;
@@ -753,7 +758,7 @@ Rectangle render_life_bar(int x, int y, int w, int health, int max_health) {
 void render_infos() {
     int over_player = -1;
 
-    const int player_info_width = (MAP_WIDTH * CELL_SIZE) / player_count;
+    const int player_info_width = (game_map.width * CELL_SIZE) / player_count;
     for (int i = 0; i < player_count; i++) {
         int start_x = base_x_offset + player_info_width * i;
         Rectangle inner = render_box(start_x, 0, player_info_width, base_y_offset);
@@ -870,7 +875,7 @@ void handle_packet(net_packet *p) {
         current_player = c->id;
 
         memcpy(players[current_player].spells, my_spells, MAX_SPELL_COUNT);
-        net_packet_player_build b = pkt_player_build(rand(), players[current_player].spells);
+        net_packet_player_build b = pkt_player_build(100, players[current_player].spells);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
     } else if (p->type == PKT_MAP) {
         net_packet_map *m = (net_packet_map *)p->content;
@@ -879,6 +884,8 @@ void handle_packet(net_packet *p) {
             init_map(&game_map, m->width, m->height, m->content);
             init_map(&players[current_player].action_range, game_map.width, game_map.height, NULL);
             compute_map_variants();
+            base_x_offset = (WIDTH - (CELL_SIZE * game_map.width)) / 2;
+            base_y_offset = (HEIGHT - (CELL_SIZE * game_map.height)) / 2;
         } else if (m->type == MLT_PROPS) {
             init_map(&props, m->width, m->height, m->content);
             set_props_animations();
@@ -926,6 +933,7 @@ void handle_packet(net_packet *p) {
         winner_id = e->winner_id;
         state = RS_PLAYING_ROUND;
         gs = GS_ENDING;
+        printf("Game last round\n");
     } else if (p->type == PKT_GAME_RESET) {
         printf("Client: game reset");
         reset_game();
@@ -956,26 +964,23 @@ void play_round() {
             p->moving_target = a->target;
             p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
         } else if (s->type == ST_TARGET) {
-            if (s->effect != SE_NONE) {
-                if (target != NULL) {
+            slash_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, 3);
+            slash_cell = a->target;
+            if (target != NULL) {
+                target->health -= s->damage;
+                target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+                target->animation_state = PAS_DAMAGE;
+                if (s->effect != SE_NONE) {
                     target->effect = s->effect;
                     target->effect_round_left = s->effect_duration;
                     target->spell_effect = s;
-                }
-            } else {
-                slash_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, 3);
-                slash_cell = a->target;
-                if (target != NULL) {
-                    target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-                    target->animation_state = PAS_DAMAGE;
-                    target->health -= s->damage;
                 }
             }
         }
     } else if (a->action == PA_CANT_PLAY) {
         if (p->effect_round_left > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-            p->animation_state = PAS_DAMAGE;  // TODO: Do another animation maybe?
+            p->animation_state = PAS_STUNNED;
         }
     }
     p->waiting = false;
@@ -986,8 +991,9 @@ void play_effects() {
         players[i].position = updates[i].position;
         if (players[i].effect == SE_BURN) {
             players[i].health -= players[i].spell_effect->damage;
+            printf("player took a tick of burn and has %d hp left\n", players[i].health);
             players[i].action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-            players[i].animation_state = PAS_BURNING;  // TODO: Do another animation maybe?
+            players[i].animation_state = PAS_BURNING;
         }
     }
 }
@@ -1007,6 +1013,9 @@ void end_round() {
     action_step = 0;
     action_count = 0;
     compute_spell_range(&players[current_player]);
+    if (gs == GS_ENDING) {
+        gs = GS_ENDED;
+    }
 }
 
 int main(int argc, char **argv) {
@@ -1075,20 +1084,17 @@ int main(int argc, char **argv) {
         {
             ClearBackground(GetColor(0x181818FF));
 
+            const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
             if (gs == GS_WAITING) {
                 DrawText("Waiting for game to start", 0, 0, 64, WHITE);
             } else if (gs == GS_STARTED || gs == GS_ENDING) {
                 round_state next_state = state;
                 if (state == RS_PLAYING) {
-                    if (IsKeyPressed(KEY_Q)) {
-                        players[current_player].action = PA_SPELL;
-                        set_selected_spell(&players[current_player], 0);
-                    } else if (IsKeyPressed(KEY_W)) {
-                        players[current_player].action = PA_SPELL;
-                        set_selected_spell(&players[current_player], 1);
-                    } else if (IsKeyPressed(KEY_E)) {
-                        players[current_player].action = PA_SPELL;
-                        set_selected_spell(&players[current_player], 2);
+                    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+                        if (IsKeyPressed(keybinds[i])) {
+                            players[current_player].action = PA_SPELL;
+                            set_selected_spell(&players[current_player], i);
+                        }
                     }
                 }
 
@@ -1117,6 +1123,20 @@ int main(int argc, char **argv) {
                         }
                     }
                 } else if (state == RS_PLAYING_EFFECTS) {
+                    for (int i = 0; i < player_count; i++) {
+                        if (players[i].animation_state == PAS_DYING && anim_finished(players[i].action_animation)) {
+                            players[i].dead = true;
+                        }
+                    }
+                    if (wait_for_animations()) {
+                        for (int i = 0; i < player_count; i++) {
+                            if (players[i].health <= 0 && players[i].dead == false) {
+                                players[i].action_animation = new_animation(AT_ONESHOT, 3.f, 1);
+                                players[i].animation_state = PAS_DYING;
+                            }
+                        }
+                    }
+
                     if (wait_for_animations()) {
                         end_round();
                         next_state = RS_PLAYING;
@@ -1151,12 +1171,6 @@ int main(int argc, char **argv) {
                     }
                 }
                 render_infos();
-
-                // Wait for all animations to finish before really ending the game
-                // TODO: Broken
-                if (gs == GS_ENDING && wait_for_animations()) {
-                    gs = GS_ENDED;
-                }
                 state = next_state;
             } else if (gs == GS_ENDED) {
                 if (IsKeyPressed(KEY_R)) {

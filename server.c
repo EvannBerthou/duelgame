@@ -12,6 +12,9 @@
 #include "common.h"
 #include "net.h"
 
+#define MAP_WIDTH 16
+#define MAP_HEIGHT 8
+
 extern const spell all_spells[];
 
 fd_set master_set, read_fds;
@@ -40,7 +43,7 @@ typedef struct {
     uint8_t id;
     char name[9];
     uint8_t x, y;
-    uint8_t health;
+    int health;
     uint8_t max_health;
 
     round_state state;
@@ -70,10 +73,10 @@ const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
 };
 
 const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0},
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0}, {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 };
 
 int spawn_positions[][2] = {
@@ -92,7 +95,8 @@ int ci(int a) {
 }
 
 net_packet_player_update pkt_from_info(player_info *p) {
-    return pkt_player_update(p->id, p->health, p->max_health, p->x, p->y, p->effect, p->effect_round_left);
+    uint8_t health = p->health >= 0 ? p->health : 0;
+    return pkt_player_update(p->id, health, p->max_health, p->x, p->y, p->effect, p->effect_round_left);
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
@@ -111,30 +115,6 @@ void damage_player(player_info *p, const spell *s) {
 
     net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
-
-    int alive_count = player_count;
-    for (int i = 0; i < player_count; i++) {
-        if (players[i].health <= 0) {
-            alive_count--;
-        }
-    }
-    // One player won.
-    if (alive_count == 1) {
-        for (int i = 0; i < player_count; i++) {
-            if (players[i].health > 0) {
-                printf("Player %s won the game !\n", players[i].name);
-                net_packet_game_end e = pkt_game_end(players[i].id);
-                broadcast(PKT_GAME_END, &e);
-                break;
-            }
-        }
-    }
-    // No winner
-    else if (alive_count == 0) {
-        printf("Nobody won the game...\n");
-        net_packet_game_end e = pkt_game_end(255);
-        broadcast(PKT_GAME_END, &e);
-    }
 }
 
 void play_round(player_info *player) {
@@ -351,7 +331,31 @@ void handle_message(int fd) {
                 net_packet_player_update u = pkt_from_info(&players[i]);
                 broadcast(PKT_PLAYER_UPDATE, &u);
             }
+
             broadcast(PKT_ROUND_END, NULL);
+            int alive_count = player_count;
+            for (int i = 0; i < player_count; i++) {
+                if (players[i].health <= 0) {
+                    alive_count--;
+                }
+            }
+            // One player won.
+            if (alive_count == 1) {
+                for (int i = 0; i < player_count; i++) {
+                    if (players[i].health > 0) {
+                        printf("Player %s won the game !\n", players[i].name);
+                        net_packet_game_end e = pkt_game_end(players[i].id);
+                        broadcast(PKT_GAME_END, &e);
+                        break;
+                    }
+                }
+            }
+            // No winner
+            else if (alive_count == 0) {
+                printf("Nobody won the game...\n");
+                net_packet_game_end e = pkt_game_end(255);
+                broadcast(PKT_GAME_END, &e);
+            }
         }
     } else if (p.type == PKT_GAME_RESET) {
         printf("Serv: game reset\n");
