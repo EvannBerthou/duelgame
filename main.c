@@ -15,8 +15,10 @@
 #include "common.h"
 #include "net.h"
 #include "raylib.h"
+#include "ui.h"
 
 extern const spell all_spells[];
+extern const int spell_count;
 
 #define WIDTH 1280
 #define HEIGHT 720
@@ -25,6 +27,15 @@ extern const spell all_spells[];
 #define CELL_SIZE 64.0
 
 #define MAX_ANIMATION_POOL 16
+
+// Scenes
+
+typedef enum {
+    SCENE_MAIN_MENU,
+    SCENE_IN_GAME,
+} game_scene;
+
+game_scene active_scene = SCENE_MAIN_MENU;
 
 // UI
 Font font = {0};
@@ -186,6 +197,7 @@ typedef struct {
 } player_move;
 
 typedef struct {
+    int id;
     bool init;
     // Position in grid space
     Vector2 position;
@@ -204,7 +216,7 @@ typedef struct {
     player_move round_move;
     bool waiting;
 
-    //TODO: We should be able to stack effects (stun + burn)
+    // TODO: We should be able to stack effects (stun + burn)
     spell_effect effect;
     const spell *spell_effect;
     uint8_t effect_round_left;
@@ -217,6 +229,8 @@ typedef struct {
 
 player players[MAX_PLAYER_COUNT] = {0};
 int player_count = 0;
+char current_player_username[8] = {0};
+slider health_bars[MAX_PLAYER_COUNT] = {0};
 
 typedef struct {
     int player;
@@ -247,7 +261,8 @@ round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
 
-uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 3, 4, 5, 0, 0, 0};
+uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 2, 3};
+button toolbar_spells_buttons[MAX_SPELL_COUNT] = {0};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
 
@@ -685,35 +700,34 @@ bool is_over_toolbar_cell(uint8_t cell_id) {
 
 void render_player_actions(player *p) {
     // Toolbar rendering
-    int toolbar_y = base_y_offset + CELL_SIZE * game_map.height + 16;
-
+    int hoverred_button = -1;
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-        const int x = base_x_offset + (CELL_SIZE + 8) * i;
-        const int y = toolbar_y;
-
+        button *b = &toolbar_spells_buttons[i];
         bool on_cooldown = p->cooldowns[i] > 0;
         Color c = on_cooldown ? GRAY : icons[all_spells[p->spells[i]].icon];
-        draw_cell(x, y, c);
-
         if (on_cooldown) {
             const char *text = TextFormat("%d", p->cooldowns[i]);
-            Vector2 size = MeasureTextEx(GetFontDefault(), text, 56, 0);
-            DrawText(text, x + (CELL_SIZE - size.x) / 2, y + (CELL_SIZE - size.y) / 2, 56, WHITE);
+            toolbar_spells_buttons[i].text = text;
+        }
+
+        b->color = c;
+        button_render(b);
+
+        if (button_hover(b)) {
+            hoverred_button = p->spells[i];
+        }
+        if (button_clicked(b)) {
+            p->action = PA_SPELL;
+            p->selected_spell = i;
         }
     }
 
     if (p->action == PA_SPELL) {
-        draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_y);
+        draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_spells_buttons[0].rec.y);
     }
 
-    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-        if (is_over_toolbar_cell(i)) {
-            render_tooltip(&all_spells[p->spells[i]]);
-            if (IsMouseButtonPressed(0)) {
-                p->action = PA_SPELL;
-                p->selected_spell = i;
-            }
-        }
+    if (hoverred_button != -1) {
+        render_tooltip(&all_spells[hoverred_button]);
     }
 
     // In-game rendering
@@ -738,23 +752,6 @@ void render_player_move(player_move *move) {
     }
 }
 
-Rectangle render_life_bar(int x, int y, int w, int health, int max_health) {
-    Rectangle source = {0, 0, life_bar_bg.width, life_bar_bg.height};
-    float ratio = (float)w / life_bar_bg.width;
-    Rectangle dest = {x, y, 0.35 * w, life_bar_bg.height * ratio * 0.35};
-    DrawTexturePro(life_bar_bg, source, dest, (Vector2){0}, 0, WHITE);
-
-    int percent = ((float)health / (float)max_health) * 100;
-
-    // TODO: Better way than fixed offsets
-    for (int i = 0; i < 10; i++) {
-        Rectangle life_cell = {x + 22 + 14 * i, y + 14, 8, 12};
-        Color c = i * 10 <= percent ? RED : BLUE;
-        DrawRectangleRec(life_cell, c);
-    }
-    return dest;
-}
-
 void render_infos() {
     int over_player = -1;
 
@@ -770,18 +767,16 @@ void render_infos() {
         } else {
             DrawTextEx(font, TextFormat("%s", players[i].name), (Vector2){x, y}, 24, 1, BLACK);
         }
-        int life_bar_width = 0.35 * player_info_width;
-        Rectangle life_bar_box = render_life_bar(x + inner.width - life_bar_width, y + 2, player_info_width,
-                                                 players[i].health, players[i].max_health);
+
+        slider_render(&health_bars[i]);
+        if (slider_hover(&health_bars[i])) {
+            over_player = i;
+        }
 
         if (players[i].effect_round_left > 0) {
             // TODO: Display an icon instead
             DrawText(TextFormat("Effect %d : %d rounds left", players[i].effect, players[i].effect_round_left), x,
                      y + 24, 24, BLACK);
-        }
-
-        if (CheckCollisionPointRec(GetMousePosition(), life_bar_box)) {
-            over_player = i;
         }
     }
 
@@ -820,7 +815,7 @@ int connect_to_server(const char *ip, uint16_t port) {
 
 void player_join() {
     net_packet_join join = {0};
-    memcpy(join.username, TextFormat("User %d", rand()), 8);
+    memcpy(join.username, current_player_username, 8);
     send_sock(PKT_JOIN, &join, client_fd);
 }
 
@@ -855,6 +850,30 @@ void reset_game() {
     action_step = 0;
 
     player_join();
+}
+
+void init_in_game_ui() {
+    int toolbar_y = base_y_offset + CELL_SIZE * game_map.height + 16;
+    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+        int x = base_x_offset + (CELL_SIZE + 8) * i;
+        toolbar_spells_buttons[i].rec = (Rectangle){x, toolbar_y, CELL_SIZE, CELL_SIZE};
+        toolbar_spells_buttons[i].color = icons[all_spells[my_spells[i]].icon];
+        toolbar_spells_buttons[i].font_size = 56;
+        toolbar_spells_buttons[i].text = NULL;
+    }
+
+    const int player_info_width = (game_map.width * CELL_SIZE) / player_count;
+    for (int i = 0; i < player_count; i++) {
+        int y = 35;
+        int life_bar_width = 0.35 * player_info_width;
+        int height = life_bar_bg.height * ((float)life_bar_width / life_bar_bg.width);
+        int x = base_x_offset + player_info_width * (i + 1) - life_bar_width * 1.25f;
+        health_bars[i].rec = (Rectangle){x, y, life_bar_width, height};
+        health_bars[i].color = RED;
+        health_bars[i].max = players[i].max_health;
+        health_bars[i].value = players[i].max_health;
+        health_bars[i].step = 10;
+    }
 }
 
 // We do not use pkt_player_update to set health and other things. I think a better way is to only use
@@ -897,6 +916,7 @@ void handle_packet(net_packet *p) {
         printf("Starting Game !!\n");
         gs = GS_STARTED;
         set_selected_spell(&players[current_player], 0);
+        init_in_game_ui();
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
         printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
@@ -968,6 +988,7 @@ void play_round() {
             slash_cell = a->target;
             if (target != NULL) {
                 target->health -= s->damage;
+                health_bars[target->id].value = target->health;
                 target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                 target->animation_state = PAS_DAMAGE;
                 if (s->effect != SE_NONE) {
@@ -1018,9 +1039,298 @@ void end_round() {
     }
 }
 
+fd_set master_set;
+int fd_count;
+struct timeval timeout;
+
+bool join_game(const char *ip, int port, const char *username) {
+    if (connect_to_server(ip, port) < 0) {
+        fprintf(stderr, "Could not connect to server\n");
+        return false;
+    }
+
+    printf("Connected to server !\n");
+
+    strncpy(current_player_username, username, 8);
+    reset_game();
+
+    FD_ZERO(&master_set);
+    FD_SET(client_fd, &master_set);
+    fd_count = client_fd;
+
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+
+    active_scene = SCENE_IN_GAME;
+    return true;
+}
+
+void render_scene_in_game() {
+    fd_set read_fds = master_set;
+    int activity = select(fd_count + 1, &read_fds, NULL, NULL, &timeout);
+    if (activity < 0) {
+        exit(1);
+    }
+
+    if (FD_ISSET(client_fd, &read_fds)) {
+        net_packet p = {0};
+        if (packet_read(&p, client_fd) < 0) {
+            exit(1);
+        }
+        handle_packet(&p);
+    }
+
+    step_animations();
+
+    BeginDrawing();
+    {
+        ClearBackground(GetColor(0x181818FF));
+
+        const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
+        if (gs == GS_WAITING) {
+            DrawText("Waiting for game to start", 0, 0, 64, WHITE);
+        } else if (gs == GS_STARTED || gs == GS_ENDING) {
+            round_state next_state = state;
+            if (state == RS_PLAYING) {
+                for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+                    if (IsKeyPressed(keybinds[i])) {
+                        players[current_player].action = PA_SPELL;
+                        set_selected_spell(&players[current_player], i);
+                    }
+                }
+            }
+
+            if (state == RS_PLAYING) {
+                player_move move = player_exec_action(&players[current_player]);
+                if (move.action != PA_NONE) {
+                    next_state = RS_WAITING;
+                    // Send action to server
+                    net_packet_player_action a =
+                        pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
+                    send_sock(PKT_PLAYER_ACTION, &a, client_fd);
+                    players[current_player].round_move = move;
+                    players[current_player].waiting = true;
+                }
+            } else if (state == RS_PLAYING_ROUND) {
+                play_round();
+                next_state = RS_WAITING_ANIMATIONS;
+            } else if (state == RS_WAITING_ANIMATIONS) {
+                if (wait_for_animations()) {
+                    if (action_step < action_count - 1) {
+                        action_step++;
+                        next_state = RS_PLAYING_ROUND;
+                    } else {
+                        play_effects();
+                        next_state = RS_PLAYING_EFFECTS;
+                    }
+                }
+            } else if (state == RS_PLAYING_EFFECTS) {
+                for (int i = 0; i < player_count; i++) {
+                    if (players[i].animation_state == PAS_DYING && anim_finished(players[i].action_animation)) {
+                        players[i].dead = true;
+                    }
+                }
+                if (wait_for_animations()) {
+                    for (int i = 0; i < player_count; i++) {
+                        if (players[i].health <= 0 && players[i].dead == false) {
+                            players[i].action_animation = new_animation(AT_ONESHOT, 3.f, 1);
+                            players[i].animation_state = PAS_DYING;
+                        }
+                    }
+                }
+
+                if (wait_for_animations()) {
+                    end_round();
+                    next_state = RS_PLAYING;
+                }
+            }
+
+            // TODO: When waiting, we should preview our action
+
+            render_map();
+
+            // TODO: Always render currently animation player on top
+            for (int i = 0; i < player_count; i++) {
+                render_player(&players[i]);
+            }
+
+            if (slash_animation != NO_ANIMATION) {
+                Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
+                Vector2 position = grid2screen(slash_cell);
+                DrawTextureEx(slash_texture, position, 0, 1, WHITE);
+                if (anim_finished(slash_animation)) {
+                    slash_animation = NO_ANIMATION;
+                }
+            }
+
+            if (state == RS_PLAYING) {
+                render_player_actions(&players[current_player]);
+            } else if (state == RS_WAITING) {
+                render_player_move(&players[current_player].round_move);
+            } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
+                if (players[current_player].waiting) {
+                    render_player_move(&players[current_player].round_move);
+                }
+            }
+            render_infos();
+            state = next_state;
+        } else if (gs == GS_ENDED) {
+            if (IsKeyPressed(KEY_R)) {
+                // TODO: Should be checked server side
+                if (current_player == 0) {
+                    send_sock(PKT_GAME_RESET, NULL, client_fd);
+                }
+            }
+
+            if (winner_id == 255) {
+                DrawText("Game draw", 0, 0, 64, WHITE);
+            } else {
+                DrawText(TextFormat("%s won the game !", players[winner_id].name), 0, 0, 64, WHITE);
+            }
+
+            if (current_player == 0) {
+                DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
+            }
+        }
+    }
+    EndDrawing();
+}
+
+input_buf ip_buf = {.prefix = "IP", .max_length = 32};
+input_buf port_buf = {.prefix = "Port", .max_length = 32};
+input_buf password_buf = {.prefix = "Password", .max_length = 32};
+input_buf username_buf = {.prefix = "Username", .max_length = 8};
+
+input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf};
+#define MAIN_MENU_INPUT_COUNT (int)(sizeof(inputs) / sizeof(inputs[0]))
+size_t selected_input = 0;
+
+const char *error = NULL;
+
+button confirm_button = {(Rectangle){5, MAIN_MENU_INPUT_COUNT * 38 + 8, 200, 50}, LIME, "Connect", 32};
+
+button *spell_select_buttons;
+bool *spell_selection;
+
+const char *try_join() {
+    int total = 0;
+    for (int i = 0; i < spell_count; i++) {
+        total += spell_selection[i] == true;
+    }
+
+    if (total != MAX_SPELL_COUNT) {
+        return "You need to select MAX_SPELL_COUNT spells";
+    }
+
+    int ptr = 0;
+    for (int i = 0; i < spell_count; i++) {
+        if (spell_selection[i]) {
+            my_spells[ptr] = i;
+            ptr++;
+        }
+    }
+
+    int port;
+    if (strtoint(input_to_text(&port_buf), &port) == false) {
+        return "Invalid port format";
+    }
+
+    if (input_is_blank(&username_buf)) {
+        return "No username";
+    }
+
+    input_trim(&username_buf);
+    const char *username = input_to_text(&username_buf);
+    if (join_game(input_to_text(&ip_buf), port, username) == false) {
+        return "Could not join server.";
+    }
+    return NULL;
+}
+
+void render_scene_main_menu() {
+    if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
+        input_erase(inputs[selected_input]);
+    } else if (IsKeyPressed(KEY_ENTER)) {
+        error = try_join();
+    } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && !IsKeyDown(KEY_LEFT_SHIFT)) {
+        selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
+    } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
+        if (selected_input == 0) {
+            selected_input = MAIN_MENU_INPUT_COUNT;
+        } else {
+            selected_input--;
+        }
+    }
+
+    int key;
+    while ((key = GetCharPressed())) {
+        input_write(inputs[selected_input], key);
+    }
+
+    for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
+        if (input_clicked(inputs[i])) {
+            selected_input = i;
+        }
+    }
+
+    if (button_clicked(&confirm_button)) {
+        error = try_join();
+    }
+
+    for (int i = 0; i < spell_count; i++) {
+        if (button_clicked(&spell_select_buttons[i])) {
+            int total = 0;
+            for (int j = 0; j < spell_count; j++) {
+                total += spell_selection[j] == true;
+            }
+            if (spell_selection[i] == false && total == MAX_SPELL_COUNT) {
+                error = "Spell selection limit reached";
+            } else {
+                spell_selection[i] = !spell_selection[i];
+                if (spell_selection[i]) {
+                    spell_select_buttons[i].text = "O";
+                } else {
+                    spell_select_buttons[i].text = "X";
+                }
+            }
+        }
+    }
+
+    BeginDrawing();
+    {
+        ClearBackground(GetColor(0x181818FF));
+        for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
+            input_render(inputs[i], i == selected_input);
+        }
+        button_render(&confirm_button);
+        if (error != NULL) {
+            DrawText(error, 0, 38 * 7 + 8, 32, RED);
+        }
+
+        int button_tooltip = -1;
+        int total = 0;
+        for (int i = 0; i < spell_count; i++) {
+            if (button_hover(&spell_select_buttons[i])) {
+                button_tooltip = i;
+            }
+            button_render(&spell_select_buttons[i]);
+            total += spell_selection[i] == true;
+        }
+        DrawText(TextFormat("Total : %d/%d", total, 4), spell_count * 60, 32 * 7 + 8, 32, WHITE);
+
+        if (button_tooltip != -1) {
+            render_tooltip(&all_spells[button_tooltip]);
+        }
+    }
+    EndDrawing();
+}
+
 int main(int argc, char **argv) {
-    char *ip = "127.0.0.1";
-    int port = 3000;
+    srand(time(NULL));
+
+    char *ip = NULL;
+    int port = 0;
+    const char *username = NULL;
 
     POPARG(argc, argv);  // program name
     while (argc > 0) {
@@ -1033,165 +1343,58 @@ int main(int argc, char **argv) {
                 printf("Error parsing port to int '%s'\n", value);
                 exit(1);
             }
+        } else if (strcmp(arg, "--username") == 0) {
+            username = POPARG(argc, argv);
         } else {
             printf("Unknown arg : '%s'\n", arg);
             exit(1);
         }
     }
 
-    srand(time(NULL));
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     SetTargetFPS(60);
 
     load_assets();
 
-    if (connect_to_server(ip, port) < 0) {
-        fprintf(stderr, "Could not connect to server\n");
-        exit(1);
+    if (username == NULL) {
+        username = TextFormat("User %d", rand());
     }
 
-    printf("Connected to server !\n");
+    if (ip != NULL) {
+        join_game(ip, port, username);
+    } else {
+        input_set_text(&ip_buf, "127.0.0.1");
+        input_set_text(&port_buf, "3000");
+        input_set_text(&username_buf, username);
 
-    reset_game();
+        for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
+            inputs[i]->rec = (Rectangle){2, 38 * i, 400, 36};
+            inputs[i]->color = WHITE;
+            inputs[i]->font_size = 32;
+        }
 
-    fd_set master_set;
-    FD_ZERO(&master_set);
-    FD_SET(client_fd, &master_set);
-    int fd_count = client_fd;
+        spell_select_buttons = malloc(sizeof(button) * spell_count);
+        spell_selection = malloc(sizeof(bool) * spell_count);
+        for (int i = 0; i < spell_count; i++) {
+            spell_select_buttons[i].rec = (Rectangle){i * (50 + 10), 32 * 7, 50, 50};
+            spell_select_buttons[i].color = icons[all_spells[i].icon];
+            spell_select_buttons[i].font_size = 32;
+            spell_select_buttons[i].text = "X";
+            spell_selection[i] = false;
+        }
+    }
 
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 0;
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        players[i].id = i;
+    }
 
     while (!WindowShouldClose()) {
-        fd_set read_fds = master_set;
-        int activity = select(fd_count + 1, &read_fds, NULL, NULL, &timeout);
-        if (activity < 0) {
-            exit(1);
+        if (active_scene == SCENE_MAIN_MENU) {
+            render_scene_main_menu();
+        } else if (active_scene == SCENE_IN_GAME) {
+            render_scene_in_game();
         }
-
-        if (FD_ISSET(client_fd, &read_fds)) {
-            net_packet p = {0};
-            if (packet_read(&p, client_fd) < 0) {
-                exit(1);
-            }
-            handle_packet(&p);
-        }
-
-        step_animations();
-
-        BeginDrawing();
-        {
-            ClearBackground(GetColor(0x181818FF));
-
-            const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
-            if (gs == GS_WAITING) {
-                DrawText("Waiting for game to start", 0, 0, 64, WHITE);
-            } else if (gs == GS_STARTED || gs == GS_ENDING) {
-                round_state next_state = state;
-                if (state == RS_PLAYING) {
-                    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                        if (IsKeyPressed(keybinds[i])) {
-                            players[current_player].action = PA_SPELL;
-                            set_selected_spell(&players[current_player], i);
-                        }
-                    }
-                }
-
-                if (state == RS_PLAYING) {
-                    player_move move = player_exec_action(&players[current_player]);
-                    if (move.action != PA_NONE) {
-                        next_state = RS_WAITING;
-                        // Send action to server
-                        net_packet_player_action a = pkt_player_action(current_player, move.action, move.position.x,
-                                                                       move.position.y, move.spell);
-                        send_sock(PKT_PLAYER_ACTION, &a, client_fd);
-                        players[current_player].round_move = move;
-                        players[current_player].waiting = true;
-                    }
-                } else if (state == RS_PLAYING_ROUND) {
-                    play_round();
-                    next_state = RS_WAITING_ANIMATIONS;
-                } else if (state == RS_WAITING_ANIMATIONS) {
-                    if (wait_for_animations()) {
-                        if (action_step < action_count - 1) {
-                            action_step++;
-                            next_state = RS_PLAYING_ROUND;
-                        } else {
-                            play_effects();
-                            next_state = RS_PLAYING_EFFECTS;
-                        }
-                    }
-                } else if (state == RS_PLAYING_EFFECTS) {
-                    for (int i = 0; i < player_count; i++) {
-                        if (players[i].animation_state == PAS_DYING && anim_finished(players[i].action_animation)) {
-                            players[i].dead = true;
-                        }
-                    }
-                    if (wait_for_animations()) {
-                        for (int i = 0; i < player_count; i++) {
-                            if (players[i].health <= 0 && players[i].dead == false) {
-                                players[i].action_animation = new_animation(AT_ONESHOT, 3.f, 1);
-                                players[i].animation_state = PAS_DYING;
-                            }
-                        }
-                    }
-
-                    if (wait_for_animations()) {
-                        end_round();
-                        next_state = RS_PLAYING;
-                    }
-                }
-
-                // TODO: When waiting, we should preview our action
-
-                render_map();
-
-                // TODO: Always render currently animation player on top
-                for (int i = 0; i < player_count; i++) {
-                    render_player(&players[i]);
-                }
-
-                if (slash_animation != NO_ANIMATION) {
-                    Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
-                    Vector2 position = grid2screen(slash_cell);
-                    DrawTextureEx(slash_texture, position, 0, 1, WHITE);
-                    if (anim_finished(slash_animation)) {
-                        slash_animation = NO_ANIMATION;
-                    }
-                }
-
-                if (state == RS_PLAYING) {
-                    render_player_actions(&players[current_player]);
-                } else if (state == RS_WAITING) {
-                    render_player_move(&players[current_player].round_move);
-                } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
-                    if (players[current_player].waiting) {
-                        render_player_move(&players[current_player].round_move);
-                    }
-                }
-                render_infos();
-                state = next_state;
-            } else if (gs == GS_ENDED) {
-                if (IsKeyPressed(KEY_R)) {
-                    // TODO: Should be checked server side
-                    if (current_player == 0) {
-                        send_sock(PKT_GAME_RESET, NULL, client_fd);
-                    }
-                }
-
-                if (winner_id == 255) {
-                    DrawText("Game draw", 0, 0, 64, WHITE);
-                } else {
-                    DrawText(TextFormat("%s won the game !", players[winner_id].name), 0, 0, 64, WHITE);
-                }
-
-                if (current_player == 0) {
-                    DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
-                }
-            }
-        }
-        EndDrawing();
     }
+
     CloseWindow();
 }

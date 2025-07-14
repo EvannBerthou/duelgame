@@ -48,6 +48,8 @@ const spell all_spells[] = {
      .effect_duration = 3},
 };
 
+const int spell_count = (int)(sizeof(all_spells) / sizeof(all_spells[0]));
+
 void init_map(map_layer *m, int width, int height, uint8_t *copy) {
     m->width = width;
     m->height = height;
