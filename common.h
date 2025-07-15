@@ -28,6 +28,7 @@ typedef enum {
 typedef struct {
     uint8_t id;
     const char* name;
+    const char *description;
     uint8_t icon;
 
     spell_type_enum type;

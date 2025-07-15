@@ -47,7 +47,29 @@ typedef struct {
     int step;
 } slider;
 
+bool slider_decrement(slider *s);
+bool slider_increment(slider *s);
 bool slider_hover(slider *s);
 void slider_render(slider *s);
+
+// Butonned slider
+
+typedef struct {
+    Rectangle rec;
+    button minus;
+    button plus;
+    slider slider;
+    int step;
+} buttoned_slider;
+
+bool buttoned_slider_decrement(buttoned_slider *s);
+bool buttoned_slider_increment(buttoned_slider *s);
+void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step);
+void buttoned_slider_render(buttoned_slider *bs);
+
+// Tooltip
+
+Rectangle render_box(int x, int y, int w, int h);
+void render_tooltip(Rectangle rec, const char *title, const char *description);
 
 #endif

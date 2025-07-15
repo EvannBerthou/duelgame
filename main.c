@@ -647,48 +647,11 @@ void render_spell_actions(player *p) {
     }
 }
 
-// TODO: Border should have a fixed size and not scale with the content
-Rectangle render_box(int x, int y, int w, int h) {
-    // Left side
-    Rectangle source_left = {0, 0, box_side.width, box_side.height};
-    float scale_factor_h = (float)h / (float)box_side.height;
-    Rectangle dest_left = {x, y, box_side.width * scale_factor_h, h};
-    DrawTexturePro(box_side, source_left, dest_left, (Vector2){0}, 0, WHITE);
-
-    // Right side
-    Rectangle source_right = {0, 0, -box_side.width, box_side.height};
-    Rectangle dest_right = {x + w - box_side.width * scale_factor_h, y, box_side.width * scale_factor_h, h};
-    DrawTexturePro(box_side, source_right, dest_right, (Vector2){0}, 0, WHITE);
-
-    // Mid
-    Rectangle source_mid = {0, 0, box_mid.width, box_mid.height};
-    Rectangle dest_mid = {x + dest_left.width, y, dest_right.x - dest_left.x - dest_left.width, h};
-    DrawTexturePro(box_mid, source_mid, dest_mid, (Vector2){0}, 0, WHITE);
-
-    Rectangle res = {0};
-    res.x = dest_mid.x;
-    res.y = dest_mid.y + 7 * scale_factor_h;
-    res.width = dest_right.x - dest_mid.x;
-    res.height = (dest_mid.height - res.y) - 5 * scale_factor_h;
-    return res;
-}
-
-void render_tooltip(const spell *s) {
-    Vector2 mouse = GetMousePosition();
-    const int tooltip_width = 300;
-    const int tooltip_height = 200;
-    Rectangle tooltip = render_box(mouse.x, mouse.y - tooltip_height, tooltip_width, tooltip_height);
-    DrawText(s->name, tooltip.x, tooltip.y, 18, BLACK);
-
-    if (s->type == ST_MOVE) {
-        DrawText("Moves the player", tooltip.x, tooltip.y + 20, 18, BLACK);
-        DrawText(TextFormat("Range = %d", s->range), tooltip.x, tooltip.y + 40, 18, BLACK);
-        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x, tooltip.y + 60, 18, BLACK);
-    } else if (s->type == ST_TARGET || s->type == ST_ZONE) {
-        DrawText(TextFormat("Damage = %d", s->damage), tooltip.x, tooltip.y + 20, 18, BLACK);
-        DrawText(TextFormat("Range = %d", s->range), tooltip.x, tooltip.y + 40, 18, BLACK);
-        DrawText(TextFormat("Speed = %d", s->speed), tooltip.x, tooltip.y + 60, 18, BLACK);
-    }
+void render_spell_tooltip(const spell *s) {
+    Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 600, 300};
+    const char *description =
+        TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage, s->range, s->speed);
+    render_tooltip(rec, s->name, description);
 }
 
 bool is_over_toolbar_cell(uint8_t cell_id) {
@@ -727,7 +690,7 @@ void render_player_actions(player *p) {
     }
 
     if (hoverred_button != -1) {
-        render_tooltip(&all_spells[hoverred_button]);
+        render_spell_tooltip(&all_spells[hoverred_button]);
     }
 
     // In-game rendering
@@ -782,9 +745,9 @@ void render_infos() {
 
     if (over_player != -1) {
         player *p = &players[over_player];
-        Vector2 mp = GetMousePosition();
-        mp.y -= 36;
-        DrawTextEx(GetFontDefault(), TextFormat("%d/%d", p->health, p->max_health), mp, 38, 1, BLACK);
+        Rectangle rec ={GetMousePosition().x, GetMousePosition().y, 200, 75};
+        const char *description = TextFormat("%d/%d", p->health, p->max_health);
+        render_tooltip(rec, "Health", description);
     }
 }
 
@@ -979,6 +942,7 @@ void play_round() {
             }
         }
 
+        // TODO: We should do pathfinding instead of sliding across the map
         if (s->type == ST_MOVE) {
             p->action_animation = new_animation(AT_ONESHOT, .3f, 1);
             p->moving_target = a->target;
@@ -1247,6 +1211,20 @@ const char *try_join() {
     return NULL;
 }
 
+buttoned_slider health_slider = {0};
+buttoned_slider physic_power_slider = {0};
+buttoned_slider magic_power_slider = {0};
+buttoned_slider *stat_sliders[] = {&health_slider, &physic_power_slider, &magic_power_slider};
+const int stat_sliders_count = (int)(sizeof(stat_sliders) / sizeof(stat_sliders[0]));
+
+int get_total_stats() {
+    int stat_total = 0;
+    stat_total += health_slider.slider.value;
+    stat_total += physic_power_slider.slider.value;
+    stat_total += magic_power_slider.slider.value;
+    return stat_total;
+}
+
 void render_scene_main_menu() {
     if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
         input_erase(inputs[selected_input]);
@@ -1296,6 +1274,18 @@ void render_scene_main_menu() {
         }
     }
 
+    for (int i = 0; i < stat_sliders_count; i++) {
+        buttoned_slider *b = stat_sliders[i];
+        if (button_clicked(&b->minus)) {
+            buttoned_slider_decrement(b);
+        }
+        if (button_clicked(&b->plus)) {
+            if (get_total_stats() < 150) {
+                buttoned_slider_increment(b);
+            }
+        }
+    }
+
     BeginDrawing();
     {
         ClearBackground(GetColor(0x181818FF));
@@ -1318,8 +1308,22 @@ void render_scene_main_menu() {
         }
         DrawText(TextFormat("Total : %d/%d", total, 4), spell_count * 60, 32 * 7 + 8, 32, WHITE);
 
+        DrawText(TextFormat("Health: %d", (int)health_slider.slider.value),
+                 health_slider.rec.x + health_slider.rec.width + 8, health_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&health_slider);
+
+        DrawText(TextFormat("AD: %d", (int)physic_power_slider.slider.value),
+                 physic_power_slider.rec.x + physic_power_slider.rec.width + 8, physic_power_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&physic_power_slider);
+
+        DrawText(TextFormat("AP: %d", (int)magic_power_slider.slider.value),
+                 magic_power_slider.rec.x + magic_power_slider.rec.width + 8, magic_power_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&magic_power_slider);
+
+        DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), 0, 38 * 11, 32, WHITE);
+
         if (button_tooltip != -1) {
-            render_tooltip(&all_spells[button_tooltip]);
+            render_spell_tooltip(&all_spells[button_tooltip]);
         }
     }
     EndDrawing();
@@ -1382,6 +1386,10 @@ int main(int argc, char **argv) {
             spell_select_buttons[i].text = "X";
             spell_selection[i] = false;
         }
+
+        buttoned_slider_init(&health_slider, (Rectangle){0, 38 * 8, 300, 32}, 100, 10);
+        buttoned_slider_init(&physic_power_slider, (Rectangle){0, 38 * 9, 300, 32}, 100, 10);
+        buttoned_slider_init(&magic_power_slider, (Rectangle){0, 38 * 10, 300, 32}, 100, 10);
     }
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {

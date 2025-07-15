@@ -18,6 +18,7 @@ const spell all_spells[] = {
     {
         .id = 0,
         .name = "Move",
+        .description = "Moves the player",
         .icon = 0,
         .type = ST_MOVE,
         .range = 3,
