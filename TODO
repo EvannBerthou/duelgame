@@ -3,5 +3,4 @@
 - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
 - Some kind of runes ?
 - Better battle logging
-- Login screen
 - Make game window resizable

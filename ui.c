@@ -11,6 +11,11 @@ int get_width_center(Rectangle rec, const char *text, int font_size) {
     return rec.x + (rec.width - text_width) / 2;
 }
 
+void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c) {
+    int center = get_width_center(rec, text, font_size);
+    DrawText(text, center, rec.y + font_size / 2.f, font_size, c);
+}
+
 // Input
 
 bool input_write(input_buf *b, char c) {
@@ -78,12 +83,23 @@ bool input_clicked(input_buf *b) {
 }
 
 void input_render(input_buf *b, int active) {
+    DrawRectangleRec(b->rec, UI_BEIGE);
+    NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
+                        .left = simple_border_size,
+                        .top = simple_border_size,
+                        .right = simple_border_size,
+                        .bottom = simple_border_size,
+                        .layout = NPATCH_NINE_PATCH};
+    DrawTextureNPatch(simple_border, patch, b->rec, (Vector2){0, 0}, 0.0f, WHITE);
+
     const char *text = TextFormat("%s: %s", b->prefix, input_to_text(b));
-    DrawRectangleLinesEx(b->rec, 1, b->color);
-    DrawText(text, b->rec.x + 2, b->rec.y + 2, b->font_size, b->color);
+    int font_size = b->rec.height * 0.5f;
+    int inner_x = b->rec.x + simple_border_size;
+    int inner_y = b->rec.y + (b->rec.height - font_size) / 2.f;
+    DrawText(text, inner_x, inner_y, font_size, BLACK);
     if (active) {
-        int text_width = MeasureText(text, 32);
-        DrawRectangle(b->rec.x + text_width + 4, b->rec.y, 2, b->font_size, b->color);
+        int text_width = MeasureText(text, font_size);
+        DrawRectangle(inner_x + text_width + 2, inner_y, 2, font_size, BLACK);
     }
 }
 
@@ -100,18 +116,28 @@ bool button_clicked(button *b) {
 void button_render(button *b) {
     Color c = b->color;
     if (CheckCollisionPointRec(GetMousePosition(), b->rec)) {
-        c = ColorTint(c, GRAY);
+        if (IsMouseButtonDown(0)) {
+            c = ColorTint(c, DARKGRAY);
+        } else {
+            c = ColorTint(c, GRAY);
+        }
     }
     DrawRectangleRec(b->rec, c);
 
     int width = MeasureText(b->text, b->font_size);
     DrawText(b->text, b->rec.x + (b->rec.width - width) / 2, b->rec.y + (b->rec.height - b->font_size) / 2,
              b->font_size, WHITE);
+
+    NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
+                        .left = simple_border_size,
+                        .top = simple_border_size,
+                        .right = simple_border_size,
+                        .bottom = simple_border_size,
+                        .layout = NPATCH_NINE_PATCH};
+    DrawTextureNPatch(simple_border, patch, b->rec, (Vector2){0, 0}, 0.0f, WHITE);
 }
 
 // Slider
-
-extern Texture2D life_bar_bg;
 
 bool slider_decrement(slider *s) {
     if (s->value == 0) {
@@ -133,22 +159,25 @@ bool slider_hover(slider *s) {
     return CheckCollisionPointRec(GetMousePosition(), s->rec);
 }
 
+int slider_border = 16;
 void slider_render(slider *s) {
-    Rectangle source = {0, 0, life_bar_bg.width, life_bar_bg.height};
-    DrawTexturePro(life_bar_bg, source, s->rec, (Vector2){0}, 0, WHITE);
+    NPatchInfo patch = {.source = {0, 0, life_bar_bg.width, life_bar_bg.height},
+                        .left = slider_border,
+                        .top = slider_border,
+                        .right = slider_border,
+                        .bottom = slider_border,
+                        .layout = NPATCH_NINE_PATCH};
+    DrawTextureNPatch(life_bar_bg, patch, s->rec, (Vector2){0, 0}, 0.0f, WHITE);
 
-    int percent = s->value / s->max * 100;
+    float percent = s->value / s->max;
+    int cell_height = s->rec.height - slider_border;
 
-    int cell_width = (s->rec.width - s->step * 11) / (s->step + 2);
-    int cell_height = s->rec.height / 3;
-    int y = s->rec.y + cell_height;
+    int inner_x = s->rec.x + slider_border;
+    int inner_y = s->rec.y + slider_border / 2.f;
 
-    for (int i = 0; i < s->step; i++) {
-        int x = s->rec.x + (cell_width + 8) * (i + 2);
-        Rectangle life_cell = {x, y, cell_width, cell_height};
-        Color c = i * 10 < percent ? RED : BLUE;
-        DrawRectangleRec(life_cell, c);
-    }
+    int width = percent * (s->rec.width - slider_border * 2);
+    Rectangle final_rect = {inner_x, inner_y, width, cell_height};
+    DrawRectangleRec(final_rect, UI_RED);
 }
 
 // Buttonned slider
@@ -181,19 +210,18 @@ void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step)
     bs->slider.rec = slider;
     bs->plus.rec = plus;
 
-    bs->minus.font_size = 32;
+    bs->minus.font_size = 28;
     bs->minus.text = "-";
-    bs->minus.color = RED;
+    bs->minus.color = UI_RED;
 
     bs->slider.color = WHITE;
     bs->slider.max = max;
     bs->slider.value = 0;
-    bs->slider.step = step;
-    bs->slider.color = RED;
+    bs->slider.color = UI_RED;
 
-    bs->plus.font_size = 32;
+    bs->plus.font_size = 28;
     bs->plus.text = "+";
-    bs->plus.color = GREEN;
+    bs->plus.color = UI_GREEN;
 
     bs->step = step;
 }
@@ -206,34 +234,19 @@ void buttoned_slider_render(buttoned_slider *bs) {
 
 // Tooltip
 
-extern Texture2D box_side;
-extern Texture2D box_mid;
-extern Texture2D spell_box_select;
+int box_border = 15;
 
 // TODO: Border should have a fixed size and not scale with the content
 Rectangle render_box(int x, int y, int w, int h) {
-    // Left side
-    Rectangle source_left = {0, 0, box_side.width, box_side.height};
-    float scale_factor_h = (float)h / (float)box_side.height;
-    Rectangle dest_left = {x, y, box_side.width * scale_factor_h, h};
-    DrawTexturePro(box_side, source_left, dest_left, (Vector2){0}, 0, WHITE);
-
-    // Right side
-    Rectangle source_right = {0, 0, -box_side.width, box_side.height};
-    Rectangle dest_right = {x + w - box_side.width * scale_factor_h, y, box_side.width * scale_factor_h, h};
-    DrawTexturePro(box_side, source_right, dest_right, (Vector2){0}, 0, WHITE);
-
-    // Mid
-    Rectangle source_mid = {0, 0, box_mid.width, box_mid.height};
-    Rectangle dest_mid = {x + dest_left.width, y, dest_right.x - dest_left.x - dest_left.width, h};
-    DrawTexturePro(box_mid, source_mid, dest_mid, (Vector2){0}, 0, WHITE);
-
-    Rectangle res = {0};
-    res.x = dest_mid.x;
-    res.y = dest_mid.y + 7 * scale_factor_h;
-    res.width = dest_right.x - dest_mid.x;
-    res.height = (dest_mid.height - res.y) - 5 * scale_factor_h;
-    return res;
+    NPatchInfo patch = {.source = {0, 0, box.width, box.height},
+                        .left = box_border,
+                        .top = box_border,
+                        .right = box_border,
+                        .bottom = box_border,
+                        .layout = NPATCH_NINE_PATCH};
+    Rectangle dest = {x, y, w, h};
+    DrawTextureNPatch(box, patch, dest, (Vector2){0, 0}, 0.0f, WHITE);
+    return (Rectangle){x + box_border, y + box_border, w - box_border * 2, h - box_border * 2};
 }
 
 #define TOOLTIP_TITLE_FONT_SIZE 32
@@ -253,7 +266,7 @@ void render_tooltip(Rectangle rec, const char *title, const char *description) {
         rec.x -= borderSize;
     }
 
-    DrawRectangleRec(rec, GetColor(0x3B4252FF));
+    DrawRectangleRec(rec, UI_NORD);
 
     NPatchInfo patch = {.source = {0, 0, spell_box_select.width, spell_box_select.height},
                         .left = borderSize,
@@ -288,4 +301,22 @@ void render_tooltip(Rectangle rec, const char *title, const char *description) {
         line[ptr] = '\0';
         DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
     }
+}
+
+// Card
+
+float card_roundness = 0.05f;
+void card_render(card *c) {
+    int shadow_offset = 12;
+    Rectangle card = c->rec;
+    Rectangle card_shadow = {card.x + shadow_offset, card.y + shadow_offset, card.width, card.height};
+
+    DrawRectangleRounded(card_shadow, card_roundness, 12, Fade(DARKGRAY, 0.3f));
+    DrawRectangleRounded(card, card_roundness, 12, c->color);
+    //
+    // DrawLine(card.x, card.y, card.x + card.width, card.y, Fade(LIGHTGRAY, 0.6f));
+    // DrawLine(card.x, card.y, card.x, card.y + card.height, Fade(LIGHTGRAY, 0.6f));
+    //
+    // DrawLine(card.x, card.y + card.height, card.x + card.width, card.y + card.height, Fade(GRAY, 0.6f));
+    // DrawLine(card.x + card.width, card.y, card.x + card.width, card.y + card.height, Fade(GRAY, 0.6f));
 }

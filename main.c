@@ -39,8 +39,8 @@ game_scene active_scene = SCENE_MAIN_MENU;
 
 // UI
 Font font = {0};
-Texture2D box_side = {0};
-Texture2D box_mid = {0};
+Texture2D simple_border = {0};
+Texture2D box = {0};
 Texture2D spell_box = {0};
 Texture2D spell_box_select = {0};
 Texture2D game_slot = {0};
@@ -285,8 +285,8 @@ Vector2 slash_cell = {0};
 
 void load_assets() {
     font = LoadFont("assets/fonts/default.ttf");
-    box_side = LoadTexture("assets/sprites/ui/box_side.png");
-    box_mid = LoadTexture("assets/sprites/ui/box_mid.png");
+    simple_border = LoadTexture("assets/sprites/ui/button.png");
+    box = LoadTexture("assets/sprites/ui/box.png");
     spell_box = LoadTexture("assets/sprites/ui/spell_box.png");
     spell_box_select = LoadTexture("assets/sprites/ui/spell_box_select.png");
     game_slot = LoadTexture("assets/sprites/ui/game_slot.png");
@@ -648,7 +648,7 @@ void render_spell_actions(player *p) {
 }
 
 void render_spell_tooltip(const spell *s) {
-    Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 600, 300};
+    Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 400, 150};
     const char *description =
         TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage, s->range, s->speed);
     render_tooltip(rec, s->name, description);
@@ -745,7 +745,7 @@ void render_infos() {
 
     if (over_player != -1) {
         player *p = &players[over_player];
-        Rectangle rec ={GetMousePosition().x, GetMousePosition().y, 200, 75};
+        Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 200, 75};
         const char *description = TextFormat("%d/%d", p->health, p->max_health);
         render_tooltip(rec, "Health", description);
     }
@@ -829,13 +829,12 @@ void init_in_game_ui() {
     for (int i = 0; i < player_count; i++) {
         int y = 35;
         int life_bar_width = 0.35 * player_info_width;
-        int height = life_bar_bg.height * ((float)life_bar_width / life_bar_bg.width);
+        int height = 32;
         int x = base_x_offset + player_info_width * (i + 1) - life_bar_width * 1.25f;
         health_bars[i].rec = (Rectangle){x, y, life_bar_width, height};
         health_bars[i].color = RED;
         health_bars[i].max = players[i].max_health;
         health_bars[i].value = players[i].max_health;
-        health_bars[i].step = 10;
     }
 }
 
@@ -1138,6 +1137,17 @@ void render_scene_in_game() {
             }
             render_infos();
             state = next_state;
+            for (int i = 0; i < player_count; i++) {
+                player *p = &players[i];
+                Vector2 screen_pos = grid2screen(p->position);
+                Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
+                Vector2 mp = GetMousePosition();
+                if (CheckCollisionPointRec(mp, player_rec)) {
+                    Rectangle player_box = render_box(mp.x, mp.y, 350, 125);
+                    int box_center = get_width_center(player_box, p->name, 32);
+                    DrawText(TextFormat("%s", p->name), box_center, player_box.y, 32, BLACK);
+                }
+            }
         } else if (gs == GS_ENDED) {
             if (IsKeyPressed(KEY_R)) {
                 // TODO: Should be checked server side
@@ -1160,6 +1170,10 @@ void render_scene_in_game() {
     EndDrawing();
 }
 
+const int card_width = (WIDTH - 150) / 2;
+card c = {(Rectangle){50, 150, card_width, 550}, UI_NORD};
+card c2 = {(Rectangle){665, 150, card_width, 550}, UI_NORD};
+
 input_buf ip_buf = {.prefix = "IP", .max_length = 32};
 input_buf port_buf = {.prefix = "Port", .max_length = 32};
 input_buf password_buf = {.prefix = "Password", .max_length = 32};
@@ -1171,7 +1185,7 @@ size_t selected_input = 0;
 
 const char *error = NULL;
 
-button confirm_button = {(Rectangle){5, MAIN_MENU_INPUT_COUNT * 38 + 8, 200, 50}, LIME, "Connect", 32};
+button confirm_button = {(Rectangle){0}, UI_GREEN, "Connect", 32};
 
 button *spell_select_buttons;
 bool *spell_selection;
@@ -1288,13 +1302,21 @@ void render_scene_main_menu() {
 
     BeginDrawing();
     {
-        ClearBackground(GetColor(0x181818FF));
+        ClearBackground(UI_BLACK);
+        int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Duel Game", 64);
+        DrawText("Duel Game", title_center, 32, 64, WHITE);
+        card_render(&c);
+        DrawTextCenter(c.rec, "Server", 46, WHITE);
+
+        card_render(&c2);
+        DrawTextCenter(c2.rec, "Build", 46, WHITE);
+
         for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
             input_render(inputs[i], i == selected_input);
         }
         button_render(&confirm_button);
         if (error != NULL) {
-            DrawText(error, 0, 38 * 7 + 8, 32, RED);
+            DrawText(error, 0, 0, 32, UI_RED);
         }
 
         int button_tooltip = -1;
@@ -1306,21 +1328,21 @@ void render_scene_main_menu() {
             button_render(&spell_select_buttons[i]);
             total += spell_selection[i] == true;
         }
-        DrawText(TextFormat("Total : %d/%d", total, 4), spell_count * 60, 32 * 7 + 8, 32, WHITE);
+        DrawText(TextFormat("Total : %d/%d", total, 4), c2.rec.x + 8, c.rec.y + 100, 32, WHITE);
 
-        DrawText(TextFormat("Health: %d", (int)health_slider.slider.value),
-                 health_slider.rec.x + health_slider.rec.width + 8, health_slider.rec.y, 32, WHITE);
+        DrawText(TextFormat("Health", (int)health_slider.slider.value), c2.rec.x + 8, health_slider.rec.y, 32, WHITE);
         buttoned_slider_render(&health_slider);
 
-        DrawText(TextFormat("AD: %d", (int)physic_power_slider.slider.value),
-                 physic_power_slider.rec.x + physic_power_slider.rec.width + 8, physic_power_slider.rec.y, 32, WHITE);
+        DrawText(TextFormat("AD", (int)physic_power_slider.slider.value), c2.rec.x + 8, physic_power_slider.rec.y, 32,
+                 WHITE);
         buttoned_slider_render(&physic_power_slider);
 
-        DrawText(TextFormat("AP: %d", (int)magic_power_slider.slider.value),
-                 magic_power_slider.rec.x + magic_power_slider.rec.width + 8, magic_power_slider.rec.y, 32, WHITE);
+        DrawText(TextFormat("AP", (int)magic_power_slider.slider.value), c2.rec.x + 8, magic_power_slider.rec.y, 32,
+                 WHITE);
         buttoned_slider_render(&magic_power_slider);
 
-        DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), 0, 38 * 11, 32, WHITE);
+        DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), c2.rec.x + 8, c2.rec.y + c2.rec.height - 32,
+                 32, WHITE);
 
         if (button_tooltip != -1) {
             render_spell_tooltip(&all_spells[button_tooltip]);
@@ -1372,24 +1394,39 @@ int main(int argc, char **argv) {
         input_set_text(&username_buf, username);
 
         for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-            inputs[i]->rec = (Rectangle){2, 38 * i, 400, 36};
-            inputs[i]->color = WHITE;
-            inputs[i]->font_size = 32;
+            inputs[i]->rec = (Rectangle){c.rec.x + 8, c.rec.y + 100 + 60 * i, c.rec.width - 25, 50};
         }
+        confirm_button.rec = (Rectangle){c.rec.x + 8, c.rec.y + c.rec.height - 100, c.rec.width - 25, 75};
 
         spell_select_buttons = malloc(sizeof(button) * spell_count);
         spell_selection = malloc(sizeof(bool) * spell_count);
-        for (int i = 0; i < spell_count; i++) {
-            spell_select_buttons[i].rec = (Rectangle){i * (50 + 10), 32 * 7, 50, 50};
-            spell_select_buttons[i].color = icons[all_spells[i].icon];
-            spell_select_buttons[i].font_size = 32;
-            spell_select_buttons[i].text = "X";
-            spell_selection[i] = false;
+        {
+            int max_row_count = 4;
+            int x = c2.rec.x + 8;
+            int y = c2.rec.y + 150;
+            for (int i = 0; i < spell_count; i++) {
+                spell_select_buttons[i].rec = (Rectangle){x, y, 50, 50};
+                spell_select_buttons[i].color = icons[all_spells[i].icon];
+                spell_select_buttons[i].font_size = 32;
+                spell_select_buttons[i].text = "X";
+                spell_selection[i] = false;
+                if (i != 0 && i % (max_row_count - 1) == 0) {
+                    x = c2.rec.x + 8;
+                    y += 60;
+                } else {
+                    x += 60;
+                }
+            }
         }
-
-        buttoned_slider_init(&health_slider, (Rectangle){0, 38 * 8, 300, 32}, 100, 10);
-        buttoned_slider_init(&physic_power_slider, (Rectangle){0, 38 * 9, 300, 32}, 100, 10);
-        buttoned_slider_init(&magic_power_slider, (Rectangle){0, 38 * 10, 300, 32}, 100, 10);
+        {
+            int w = c2.rec.width - 150;
+            int y = 325;
+            buttoned_slider_init(&health_slider, (Rectangle){c2.rec.x + 125, c2.rec.y + y, w, 50}, 100, 10);
+            y += 60;
+            buttoned_slider_init(&physic_power_slider, (Rectangle){c2.rec.x + 125, c2.rec.y + y, w, 50}, 100, 10);
+            y += 60;
+            buttoned_slider_init(&magic_power_slider, (Rectangle){c2.rec.x + 125, c2.rec.y + y, w, 50}, 100, 10);
+        }
     }
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
