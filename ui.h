@@ -45,9 +45,16 @@ void input_render(input_buf *b, int active);
 
 // Button
 
+typedef enum {
+    BT_COLOR,
+    BT_TEXTURE,
+} button_type;
+
 typedef struct {
     Rectangle rec;
+    button_type type;
     Color color;
+    Texture2D texture;
     const char *text;
     int font_size;
 } button;

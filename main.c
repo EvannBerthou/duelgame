@@ -1,5 +1,3 @@
-// TODO: Unify int/uint8_t
-
 #include <arpa/inet.h>
 #include <limits.h>
 #include <math.h>
@@ -16,6 +14,7 @@
 #include "net.h"
 #include "raylib.h"
 #include "ui.h"
+#include "version.h"
 
 extern const spell all_spells[];
 extern const int spell_count;
@@ -47,11 +46,14 @@ Texture2D game_slot = {0};
 Texture2D life_bar_bg = {0};
 
 // TODO: Use icons instead of colors
-Color icons[] = {
-    {0xFF, 0x00, 0x00, 0xFF},
-    {0x0, 0xFF, 0x00, 0xFF},
-    {0x0, 0x00, 0xFF, 0xFF},
+const char *icons_files[SI_COUNT] = {
+    [SI_UNKNOWN] = "unknown",
+    [SI_MOVE] = "move",
+    [SI_ATTACK] = "attack",
+    [SI_WAND] = "wand"
 };
+
+Texture2D icons[SI_COUNT] = {0};
 
 int base_x_offset = 0;
 int base_y_offset = 0;
@@ -306,6 +308,9 @@ void load_assets() {
     }
     for (int i = 0; i < SLASH_ANIMATION_COUNT; i++) {
         slash_attack[i] = LoadTexture(TextFormat("assets/sprites/attacks/slash_%d.png", i));
+    }
+    for (int i = 0; i < SI_COUNT; i++) {
+        icons[i] = LoadTexture(TextFormat("assets/sprites/icons/%s.png", icons_files[i]));
     }
 }
 
@@ -667,13 +672,17 @@ void render_player_actions(player *p) {
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         button *b = &toolbar_spells_buttons[i];
         bool on_cooldown = p->cooldowns[i] > 0;
-        Color c = on_cooldown ? GRAY : icons[all_spells[p->spells[i]].icon];
+        Texture2D icon = icons[all_spells[p->spells[i]].icon];
+        Color tint = WHITE;
         if (on_cooldown) {
+            tint = GRAY;
             const char *text = TextFormat("%d", p->cooldowns[i]);
             toolbar_spells_buttons[i].text = text;
         }
 
-        b->color = c;
+        b->texture = icon;
+        b->color = tint;
+        b->type = BT_TEXTURE;
         button_render(b);
 
         if (button_hover(b)) {
@@ -820,7 +829,9 @@ void init_in_game_ui() {
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         int x = base_x_offset + (CELL_SIZE + 8) * i;
         toolbar_spells_buttons[i].rec = (Rectangle){x, toolbar_y, CELL_SIZE, CELL_SIZE};
-        toolbar_spells_buttons[i].color = icons[all_spells[my_spells[i]].icon];
+        toolbar_spells_buttons[i].texture = icons[all_spells[my_spells[i]].icon];
+        toolbar_spells_buttons[i].color = WHITE;
+        toolbar_spells_buttons[i].type = BT_TEXTURE;
         toolbar_spells_buttons[i].font_size = 56;
         toolbar_spells_buttons[i].text = NULL;
     }
@@ -1185,7 +1196,7 @@ size_t selected_input = 0;
 
 const char *error = NULL;
 
-button confirm_button = {(Rectangle){0}, UI_GREEN, "Connect", 32};
+button confirm_button = {(Rectangle){0}, BT_COLOR, UI_GREEN, {0}, "Connect", 32};
 
 button *spell_select_buttons;
 bool *spell_selection;
@@ -1280,9 +1291,9 @@ void render_scene_main_menu() {
             } else {
                 spell_selection[i] = !spell_selection[i];
                 if (spell_selection[i]) {
-                    spell_select_buttons[i].text = "O";
+                    spell_select_buttons[i].color = DARKGRAY;
                 } else {
-                    spell_select_buttons[i].text = "X";
+                    spell_select_buttons[i].color = WHITE;
                 }
             }
         }
@@ -1303,6 +1314,9 @@ void render_scene_main_menu() {
     BeginDrawing();
     {
         ClearBackground(UI_BLACK);
+        const char *version_text = TextFormat("v%s", GIT_VERSION);
+        int version_width = MeasureText(version_text, 24);
+        DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
         int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Duel Game", 64);
         DrawText("Duel Game", title_center, 32, 64, WHITE);
         card_render(&c);
@@ -1406,9 +1420,11 @@ int main(int argc, char **argv) {
             int y = c2.rec.y + 150;
             for (int i = 0; i < spell_count; i++) {
                 spell_select_buttons[i].rec = (Rectangle){x, y, 50, 50};
-                spell_select_buttons[i].color = icons[all_spells[i].icon];
+                spell_select_buttons[i].texture = icons[all_spells[i].icon];
+                spell_select_buttons[i].color = WHITE;
+                spell_select_buttons[i].type = BT_TEXTURE;
                 spell_select_buttons[i].font_size = 32;
-                spell_select_buttons[i].text = "X";
+                spell_select_buttons[i].text = NULL;
                 spell_selection[i] = false;
                 if (i != 0 && i % (max_row_count - 1) == 0) {
                     x = c2.rec.x + 8;

@@ -122,7 +122,12 @@ void button_render(button *b) {
             c = ColorTint(c, GRAY);
         }
     }
-    DrawRectangleRec(b->rec, c);
+    if (b->type == BT_COLOR) {
+        DrawRectangleRec(b->rec, c);
+    } else {
+        Rectangle src = {0, 0, b->texture.width, b->texture.height};
+        DrawTexturePro(b->texture, src, b->rec, (Vector2){0}, 0, c);
+    }
 
     int width = MeasureText(b->text, b->font_size);
     DrawText(b->text, b->rec.x + (b->rec.width - width) / 2, b->rec.y + (b->rec.height - b->font_size) / 2,

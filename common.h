@@ -25,6 +25,14 @@ typedef enum {
     SE_COUNT,
 } spell_effect;
 
+typedef enum {
+    SI_UNKNOWN,
+    SI_MOVE,
+    SI_ATTACK,
+    SI_WAND,
+    SI_COUNT
+} spell_icon;
+
 typedef struct {
     uint8_t id;
     const char* name;
