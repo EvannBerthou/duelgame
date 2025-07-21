@@ -273,97 +273,110 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
     return buf;
 }
 
-//TODO: Instead of using fixed offets, we should do something like `unpacku8` which keeps track of offset
-void *unpackstruct(net_packet_type_enum type, char *buf) {
+uint8_t unpacku8(uint8_t **buf) {
+    uint8_t res = **buf;
+    (*buf)++;
+    return res;
+}
+
+void unpacksv(uint8_t **buf, char *dest, uint8_t len) {
+    for (int i = 0; i < len; i++) {
+        dest[i] = **buf;
+        (*buf)++;
+    }
+}
+
+void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
+    uint8_t **base = &buf;
     switch (type) {
         case PKT_PING: return NULL;
         case PKT_JOIN: {
             net_packet_join *p = malloc(sizeof(net_packet_join));
             if (p == NULL) exit(1);
-            p->id = buf[0];
-            memcpy(p->username, buf + 1, 8);
+            p->id = unpacku8(base);
+            unpacksv(base, p->username, 8);
             return p;
         } break;
         case PKT_CONNECTED: {
             net_packet_connected *p = malloc(sizeof(net_packet_connected));
             if (p == NULL) exit(1);
-            p->id = buf[0];
+            p->id = unpacku8(base);
             return p;
         } break;
         case PKT_GAME_START: return NULL;
         case PKT_MAP: {
             net_packet_map *p = malloc(sizeof(net_packet_map));
             if (p == NULL) exit(1);
-            p->width = buf[0];
-            p->height = buf[1];
-            p->type = buf[2];
+            p->width = unpacku8(base);
+            p->height = unpacku8(base);
+            p->type = unpacku8(base);
             p->content = malloc(p->width * p->height);
             for (int i = 0; i < p->width * p->height; i++) {
-                p->content[i] = buf[3 + i];
+                p->content[i] = unpacku8(base);
             }
             return p;
         }
         case PKT_PLAYER_UPDATE: {
             net_packet_player_update *p = malloc(sizeof(net_packet_player_update));
             if (p == NULL) exit(1);
-            p->id = buf[0];
-            p->health = buf[1];
-            p->max_health = buf[2];
-            p->ad = buf[3];
-            p->ap = buf[4];
-            p->x = buf[5];
-            p->y = buf[6];
-            p->effect = buf[7];
-            p->effect_round_left = buf[8];
+            p->id = unpacku8(base);
+            p->health = unpacku8(base);
+            p->max_health = unpacku8(base);
+            p->ad = unpacku8(base);
+            p->ap = unpacku8(base);
+            p->x = unpacku8(base);
+            p->y = unpacku8(base);
+            p->effect = unpacku8(base);
+            p->effect_round_left = unpacku8(base);
             return p;
         } break;
         case PKT_PLAYER_BUILD: {
             net_packet_player_build *p = malloc(sizeof(net_packet_player_build));
             if (p == NULL) exit(1);
-            p->base_health = buf[0];
+            p->base_health = unpacku8(base);
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                p->spells[i] = buf[1 + i];
+                p->spells[i] = unpacku8(base);
             }
-            p->ad = buf[1 + MAX_SPELL_COUNT];
-            p->ap = buf[1 + MAX_SPELL_COUNT + 1];
+            p->ad = unpacku8(base);
+            p->ap = unpacku8(base);
             return p;
         } break;
         case PKT_PLAYER_ACTION: {
             net_packet_player_action *p = malloc(sizeof(net_packet_player_action));
             if (p == NULL) exit(1);
-            p->id = buf[0];
-            p->action = buf[1];
-            p->x = buf[2];
-            p->y = buf[3];
-            p->spell = buf[4];
+            p->id = unpacku8(base);
+            p->action = unpacku8(base);
+            p->x = unpacku8(base);
+            p->y = unpacku8(base);
+            p->spell = unpacku8(base);
             return p;
         } break;
         case PKT_ROUND_END: return NULL;
         case PKT_GAME_END: {
             net_packet_game_end *p = malloc(sizeof(net_packet_game_end));
             if (p == NULL) exit(1);
-            p->winner_id = buf[0];
+            p->winner_id = unpacku8(base);
             return p;
         } break;
         case PKT_GAME_RESET: return NULL;
         case PKT_ADMIN_CONNECT: {
             net_packet_admin_connect *p = malloc(sizeof(net_packet_admin_connect));
             if (p == NULL) exit(1);
-            memcpy(p->password, buf, 8);
+            unpacksv(base, p->password, 8);
             return p;
         } break;
         case PKT_ADMIN_CONNECT_RESULT: {
             net_packet_admin_connect_result *p = malloc(sizeof(net_packet_admin_connect_result));
             if (p == NULL) exit(1);
-            p->success = buf[0];
+            p->success = unpacku8(base);
             return p;
         } break;
         case PKT_ADMIN_UPDATE_PLAYER_INFO: {
             net_packet_admin_update_player_info *p = malloc(sizeof(net_packet_admin_update_player_info));
             if (p == NULL) exit(1);
-            p->id = buf[0];
-            p->property = buf[1];
-            p->value = buf[2];
+            p->id = unpacku8(base);
+            p->property = unpacku8(base);
+            p->value = unpacku8(base);
             return p;
         } break;
         default: exit(1);
@@ -400,8 +413,8 @@ int packet_read(net_packet *p, int fd) {
     }
     p->len = packet_len;
 
-    char buf[256] = {0};
-    char *b = buf;
+    uint8_t buf[256] = {0};
+    uint8_t *b = buf;
     int packet_size_left = packet_len - 1;
     n = 0;
     while ((n = read(fd, buf, packet_size_left)) > 0) {
@@ -409,13 +422,13 @@ int packet_read(net_packet *p, int fd) {
         b += n;
     }
 
-    p->type = buf[0];
-    p->content = unpackstruct(p->type, buf + 1);
+    uint8_t *base = buf;
+    p->type = unpacku8(&base);
+    p->content = unpackstruct(p->type, base);
     return 0;
 }
 
 uint8_t get_packet_length(net_packet_type_enum type, void *p) {
-    (void)p;
     switch (type) {
         case PKT_PING: return 0;
         case PKT_JOIN: return 9;
