@@ -531,8 +531,9 @@ void render_map() {
 }
 
 void render_player(player *p) {
-    if (p->health <= 0 && p->animation_state == PAS_NONE)
+    if (p->dead) {
         return;
+    }
 
     int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
     int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
@@ -561,6 +562,7 @@ void render_player(player *p) {
             if (p->health <= 0) {
                 p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
                 p->animation_state = PAS_DYING;
+                slash_animation = NO_ANIMATION;
             }
         }
     } else if (p->animation_state == PAS_STUNNED) {
@@ -824,6 +826,7 @@ void reset_game() {
         players[i].animation_state = PAS_NONE;
         players[i].action = PA_SPELL;
         players[i].selected_spell = 0;
+        players[i].dead = false;
     }
 
     action_count = 0;
@@ -948,14 +951,13 @@ void handle_packet(net_packet *p) {
         action->spell = a->spell;
         action_count++;
     } else if (p->type == PKT_ROUND_END) {
+        net_packet_round_end *e = (net_packet_round_end *)p->content;
         printf("Round ended\n");
         state = RS_PLAYING_ROUND;
-    } else if (p->type == PKT_GAME_END) {
-        net_packet_game_end *e = (net_packet_game_end *)p->content;
-        winner_id = e->winner_id;
-        state = RS_PLAYING_ROUND;
-        gs = GS_ENDING;
-        printf("Game last round\n");
+        if (e->winner_id != GAME_NOT_ENDED) {
+            winner_id = e->winner_id;
+            gs = GS_ENDING;
+        }
     } else if (p->type == PKT_GAME_RESET) {
         printf("Client: game reset");
         reset_game();
@@ -1094,7 +1096,6 @@ void render_scene_in_game() {
                 player_move move = player_exec_action(&players[current_player]);
                 if (move.action != PA_NONE) {
                     next_state = RS_WAITING;
-                    // Send action to server
                     net_packet_player_action a =
                         pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
                     send_sock(PKT_PLAYER_ACTION, &a, client_fd);
@@ -1115,6 +1116,7 @@ void render_scene_in_game() {
                     }
                 }
             } else if (state == RS_PLAYING_EFFECTS) {
+                // Checks if player died from effects (ex: burn)
                 for (int i = 0; i < player_count; i++) {
                     if (players[i].animation_state == PAS_DYING && anim_finished(players[i].action_animation)) {
                         players[i].dead = true;
@@ -1134,8 +1136,6 @@ void render_scene_in_game() {
                     next_state = RS_PLAYING;
                 }
             }
-
-            // TODO: When waiting, we should preview our action
 
             render_map();
 
@@ -1179,7 +1179,6 @@ void render_scene_in_game() {
             }
         } else if (gs == GS_ENDED) {
             if (IsKeyPressed(KEY_R)) {
-                // TODO: Should be checked server side
                 if (current_player == 0) {
                     send_sock(PKT_GAME_RESET, NULL, client_fd);
                 }

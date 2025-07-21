@@ -140,7 +140,6 @@ void play_round(player_info *player) {
             return;
         }
 
-        // TODO: Check that the player really has this spell in his build
         printf("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
         int found = false;
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
@@ -308,14 +307,17 @@ void handle_message(int fd) {
     } else if (p.type == PKT_GAME_START) {
         start_game();
     } else if (p.type == PKT_PLAYER_BUILD) {
-        // TODO: We should only recieved this packet before the game has started
+        // TODO: Handle error
+        if (gs == GS_STARTED) {
+            printf("Recieved PKT_PLAYER_BUILD but game has already started\n");
+            exit(0);
+        }
         net_packet_player_build *b = (net_packet_player_build *)p.content;
         player_info *player = get_player_from_fd(fd);
         // We force the id to avoid a player setting the build of another player
         b->id = player->id;
         broadcast(PKT_PLAYER_BUILD, b);
 
-        // TODO: Store spells in player_info
         printf("Player %d has %d base health and is using following spells : ", player->id, b->base_health);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             printf("%d ", b->spells[i]);
@@ -366,32 +368,34 @@ void handle_message(int fd) {
                 broadcast(PKT_PLAYER_UPDATE, &u);
             }
 
-            broadcast(PKT_ROUND_END, NULL);
             int alive_count = player_count;
             for (int i = 0; i < player_count; i++) {
                 if (players[i].health <= 0) {
                     alive_count--;
                 }
             }
-            // One player won.
+            net_packet_round_end end = {GAME_NOT_ENDED};
+
             if (alive_count == 1) {
                 for (int i = 0; i < player_count; i++) {
                     if (players[i].health > 0) {
                         printf("Player %s won the game !\n", players[i].name);
-                        net_packet_game_end e = pkt_game_end(players[i].id);
-                        broadcast(PKT_GAME_END, &e);
-                        break;
+                        end.winner_id = players[i].id;
                     }
                 }
-            }
-            // No winner
-            else if (alive_count == 0) {
+            } else if (alive_count == 0) {
                 printf("Nobody won the game...\n");
-                net_packet_game_end e = pkt_game_end(255);
-                broadcast(PKT_GAME_END, &e);
+                end.winner_id = GAME_TIE;
             }
+            broadcast(PKT_ROUND_END, &end);
         }
     } else if (p.type == PKT_GAME_RESET) {
+        // Only first player (owner) can reset the game
+        if (fd != connections[0]) {
+            player_info *player = get_player_from_fd(fd);
+            printf("%s tried to reset the game but they are not the owner.\n", player->name);
+            return;
+        }
         printf("Serv: game reset\n");
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);

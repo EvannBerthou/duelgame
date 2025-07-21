@@ -23,7 +23,6 @@ typedef enum {
 
 typedef enum {
     GS_WAITING,
-    GS_STARTING, //TODO: Show countdown when game is starting
     GS_STARTED,
     GS_ENDING,
     GS_ENDED,
@@ -47,7 +46,6 @@ typedef enum {
     PKT_PLAYER_BUILD,
     PKT_PLAYER_ACTION,
     PKT_ROUND_END,
-    PKT_GAME_END,
     PKT_GAME_RESET,
     PKT_ADMIN_CONNECT,
     PKT_ADMIN_CONNECT_RESULT,
@@ -139,10 +137,13 @@ net_packet_player_action pkt_player_action(uint8_t id, uint8_t action, uint8_t x
 
 typedef struct {
     uint8_t winner_id;
-} net_packet_game_end;
+} net_packet_round_end;
 
-net_packet_game_end pkt_game_end(uint8_t winner_id) {
-    return (net_packet_game_end) {winner_id};
+#define GAME_NOT_ENDED 254
+#define GAME_TIE 255
+
+net_packet_round_end pkt_round_end(uint8_t winner_id) {
+    return (net_packet_round_end) {winner_id};
 }
 
 typedef struct {
@@ -249,12 +250,11 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, p->spell);
             return buf;
         } break;
-        case PKT_ROUND_END: return buf;
-        case PKT_GAME_END: {
-            net_packet_game_end *p = (net_packet_game_end*)content;
+        case PKT_ROUND_END: {
+            net_packet_round_end *p = (net_packet_round_end*)content;
             buf = packu8(buf, p->winner_id);
             return buf;
-        } break;
+        }
         case PKT_GAME_RESET: return buf;
         case PKT_ADMIN_CONNECT: {
             net_packet_admin_connect *p = (net_packet_admin_connect*)content;
@@ -355,9 +355,8 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             p->spell = unpacku8(base);
             return p;
         } break;
-        case PKT_ROUND_END: return NULL;
-        case PKT_GAME_END: {
-            net_packet_game_end *p = malloc(sizeof(net_packet_game_end));
+        case PKT_ROUND_END: {
+            net_packet_round_end *p = malloc(sizeof(net_packet_round_end));
             if (p == NULL) exit(1);
             p->winner_id = unpacku8(base);
             return p;
@@ -447,8 +446,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_PLAYER_UPDATE: return 9;
         case PKT_PLAYER_BUILD: return 4 + MAX_SPELL_COUNT;
         case PKT_PLAYER_ACTION: return 5;
-        case PKT_ROUND_END: return 0;
-        case PKT_GAME_END: return 1;
+        case PKT_ROUND_END: return 1;
         case PKT_GAME_RESET: return 0;
         case PKT_ADMIN_CONNECT: return 8;
         case PKT_ADMIN_CONNECT_RESULT: return 1;
