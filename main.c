@@ -22,6 +22,8 @@ extern const int spell_count;
 #define WIDTH 1280
 #define HEIGHT 720
 
+Rectangle game_window = {0, 0, WIDTH, HEIGHT};
+
 // TODO: Cell size should be given by the map
 #define CELL_SIZE 64.0
 
@@ -31,6 +33,7 @@ extern const int spell_count;
 
 typedef enum {
     SCENE_MAIN_MENU,
+    SCENE_LOBBY,
     SCENE_IN_GAME,
 } game_scene;
 
@@ -206,6 +209,7 @@ typedef struct {
     Vector2 position;
     char name[9];
     Color color;
+    uint8_t base_health;
     int health;
     uint8_t max_health;
     bool dead;
@@ -263,7 +267,7 @@ typedef struct {
 
 player_round_update updates[MAX_PLAYER_COUNT] = {0};
 
-int current_player = 0;
+int current_player = -1;
 round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
@@ -876,8 +880,22 @@ void handle_packet(net_packet *p) {
         int ad = physic_power_slider.slider.value;
         int ap = magic_power_slider.slider.value;
         printf("Joining with %d ad and %d ap\n", ad, ap);
-        net_packet_player_build b = pkt_player_build(base_health, players[current_player].spells, ad, ap);
+        net_packet_player_build b =
+            pkt_player_build(current_player, base_health, players[current_player].spells, ad, ap);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
+    } else if (p->type == PKT_PLAYER_BUILD) {
+        net_packet_player_build *b = (net_packet_player_build *)p->content;
+        player *player = &players[b->id];
+        printf("Setting build for %d\n", b->id);
+
+        player->base_health = b->base_health;
+        player->max_health = b->base_health;
+        player->health = b->base_health;
+        player->ad = b->ad;
+        player->ap = b->ap;
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            player->spells[i] = b->spells[i];
+        }
     } else if (p->type == PKT_MAP) {
         net_packet_map *m = (net_packet_map *)p->content;
         printf("Map is %d/%d\n", m->width, m->height);
@@ -896,6 +914,7 @@ void handle_packet(net_packet *p) {
         }
     } else if (p->type == PKT_GAME_START) {
         printf("Starting Game !!\n");
+        active_scene = SCENE_IN_GAME;
         gs = GS_STARTED;
         set_selected_spell(&players[current_player], 0);
         init_in_game_ui();
@@ -1050,25 +1069,11 @@ bool join_game(const char *ip, int port, const char *username) {
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
 
-    active_scene = SCENE_IN_GAME;
+    active_scene = SCENE_LOBBY;
     return true;
 }
 
 void render_scene_in_game() {
-    fd_set read_fds = master_set;
-    int activity = select(fd_count + 1, &read_fds, NULL, NULL, &timeout);
-    if (activity < 0) {
-        exit(1);
-    }
-
-    if (FD_ISSET(client_fd, &read_fds)) {
-        net_packet p = {0};
-        if (packet_read(&p, client_fd) < 0) {
-            exit(1);
-        }
-        handle_packet(&p);
-    }
-
     step_animations();
 
     BeginDrawing();
@@ -1076,9 +1081,7 @@ void render_scene_in_game() {
         ClearBackground(GetColor(0x181818FF));
 
         const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
-        if (gs == GS_WAITING) {
-            DrawText("Waiting for game to start", 0, 0, 64, WHITE);
-        } else if (gs == GS_STARTED || gs == GS_ENDING) {
+        if (gs == GS_STARTED || gs == GS_ENDING) {
             round_state next_state = state;
             if (state == RS_PLAYING) {
                 for (int i = 0; i < MAX_SPELL_COUNT; i++) {
@@ -1199,8 +1202,104 @@ void render_scene_in_game() {
 }
 
 const int card_width = (WIDTH - 150) / 2;
-card c = {(Rectangle){50, 150, card_width, 550}, UI_NORD, {"Server"}, 1, 0};
-card c2 = {(Rectangle){665, 150, card_width, 550}, UI_NORD, {"Spells", "Stats"}, 2, 0};
+
+card player_list_card = CARD(50, 150, card_width, 550, UI_NORD, "Player list");
+card server_config_card = CARD(665, 150, card_width, 550, UI_NORD, "Map", "Configuration");
+button start_game_button = BUTTON_COLOR(75, 600, card_width - 50, 75, UI_GREEN, "Start Game", 36);
+
+button player_build_buttons[MAX_PLAYER_COUNT] = {0};
+card player_build_card = CARD(50, 150, WIDTH - 100, 550, UI_NORD, "Player build");
+button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, "X", 46);
+int selected_player_build = -1;
+
+void render_scene_lobby() {
+    start_game_button.disabled = player_count < 2;
+
+    if (selected_player_build == -1) {
+        if (button_clicked(&start_game_button)) {
+            send_sock(PKT_GAME_START, NULL, client_fd);
+        }
+
+        card_update_tabs(&player_list_card);
+        card_update_tabs(&server_config_card);
+
+        for (int i = 0; i < player_count; i++) {
+            if (button_clicked(&player_build_buttons[i])) {
+                selected_player_build = i;
+            }
+        }
+    } else {
+        if (button_clicked(&close_build_card_button)) {
+            selected_player_build = -1;
+        }
+    }
+
+    BeginDrawing();
+    {
+        ClearBackground(UI_BLACK);
+        int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Lobby", 64);
+        DrawText("Lobby", title_center, 32, 64, WHITE);
+
+        if (selected_player_build == -1) {
+            card_render(&player_list_card);
+            card_render(&server_config_card);
+        }
+
+        if (gs == GS_WAITING) {
+            for (int i = 0; i < player_count; i++) {
+                int x = player_list_card.rec.x + 8;
+                int y = player_list_card.rec.y + 75 + 46 * i;
+                if (i == current_player) {
+                    DrawText(TextFormat("- %s (you)", players[i].name), x, y, 36, WHITE);
+                } else {
+                    DrawText(TextFormat("- %s", players[i].name), x, y, 36, WHITE);
+                }
+                button_render(&player_build_buttons[i]);
+            }
+
+            // Map
+            if (server_config_card.selected_tab == 0) {
+                DrawTextCenter(server_config_card.rec, "Dust 2", 64, WHITE);
+            } else if (server_config_card.selected_tab == 1) {
+                DrawTextCenter(server_config_card.rec, "Round count", 64, WHITE);
+            }
+        }
+
+        if (current_player == 0) {
+            button_render(&start_game_button);
+        }
+
+        if (selected_player_build != -1) {
+            int icon_tooltip = -1;
+            card_render(&player_build_card);
+            Rectangle header = {player_build_card.rec.x, player_build_card.rec.y + 75, player_build_card.rec.width, 64};
+            DrawTextCenter(header, TextFormat("Viewing %s build", players[selected_player_build].name), 54, WHITE);
+            player *p = &players[selected_player_build];
+            int x = player_build_card.rec.x + 25;
+            DrawText(TextFormat("Health = %d", p->max_health), x, header.y + 64, 32, WHITE);
+            DrawText(TextFormat("AD = %d", p->ad), x, header.y + 96, 32, WHITE);
+            DrawText(TextFormat("AP = %d", p->ap), x, header.y + 128, 32, WHITE);
+            DrawText("Spells", x, header.y + 160, 32, WHITE);
+            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+                Texture2D icon = icons[all_spells[p->spells[i]].icon];
+                Rectangle dst = {x + 60 * i, header.y + 192, 50, 50};
+                icon_render(icon, dst);
+                if (icon_hover(dst)) {
+                    icon_tooltip = p->spells[i];
+                }
+            }
+            button_render(&close_build_card_button);
+
+            if (icon_tooltip != -1) {
+                render_spell_tooltip(&all_spells[icon_tooltip]);
+            }
+        }
+    }
+    EndDrawing();
+}
+
+card server_info_card = CARD(50, 150, card_width, 550, UI_NORD, "Server");
+card player_info_card = CARD(665, 150, card_width, 550, UI_NORD, "Spells", "Stats");
 
 input_buf ip_buf = {.prefix = "IP", .max_length = 32};
 input_buf port_buf = {.prefix = "Port", .max_length = 32};
@@ -1213,7 +1312,7 @@ size_t selected_input = 0;
 
 const char *error = NULL;
 
-button confirm_button = {(Rectangle){0}, BT_COLOR, UI_GREEN, {0}, "Connect", 32};
+button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
 
 button *spell_select_buttons;
 bool *spell_selection;
@@ -1293,13 +1392,9 @@ void render_scene_main_menu() {
     }
 
     // Second card
-    for (int i = 0; i < c2.tab_count; i++) {
-        if (card_tab_clicked(&c2, i)) {
-            c2.selected_tab = i;
-        }
-    }
+    card_update_tabs(&player_info_card);
 
-    if (c2.selected_tab == 0) {
+    if (player_info_card.selected_tab == 0) {
         for (int i = 0; i < spell_count; i++) {
             if (button_clicked(&spell_select_buttons[i])) {
                 int total = 0;
@@ -1318,7 +1413,7 @@ void render_scene_main_menu() {
                 }
             }
         }
-    } else if (c2.selected_tab == 1) {
+    } else if (player_info_card.selected_tab == 1) {
         for (int i = 0; i < stat_sliders_count; i++) {
             buttoned_slider *b = stat_sliders[i];
             if (button_clicked(&b->minus)) {
@@ -1339,8 +1434,8 @@ void render_scene_main_menu() {
         DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
         int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Duel Game", 64);
         DrawText("Duel Game", title_center, 32, 64, WHITE);
-        card_render(&c);
-        card_render(&c2);
+        card_render(&server_info_card);
+        card_render(&player_info_card);
 
         for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
             input_render(inputs[i], i == selected_input);
@@ -1350,7 +1445,7 @@ void render_scene_main_menu() {
             DrawText(error, 0, 0, 32, UI_RED);
         }
 
-        if (c2.selected_tab == 0) {
+        if (player_info_card.selected_tab == 0) {
             int button_tooltip = -1;
             int total = 0;
             for (int i = 0; i < spell_count; i++) {
@@ -1360,24 +1455,26 @@ void render_scene_main_menu() {
                 button_render(&spell_select_buttons[i]);
                 total += spell_selection[i] == true;
             }
-            DrawText(TextFormat("Total : %d/%d", total, 4), c2.rec.x + 8, c.rec.y + 75, 32, WHITE);
+            DrawText(TextFormat("Total : %d/%d", total, 4), player_info_card.rec.x + 8, server_info_card.rec.y + 75, 32,
+                     WHITE);
             if (button_tooltip != -1) {
                 render_spell_tooltip(&all_spells[button_tooltip]);
             }
-        } else if (c2.selected_tab == 1) {
-            DrawText(TextFormat("Health", (int)health_slider.slider.value), c2.rec.x + 8, health_slider.rec.y, 32,
-                     WHITE);
+        } else if (player_info_card.selected_tab == 1) {
+            DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8,
+                     health_slider.rec.y, 32, WHITE);
             buttoned_slider_render(&health_slider);
 
-            DrawText(TextFormat("AD", (int)physic_power_slider.slider.value), c2.rec.x + 8, physic_power_slider.rec.y,
-                     32, WHITE);
+            DrawText(TextFormat("AD", (int)physic_power_slider.slider.value), player_info_card.rec.x + 8,
+                     physic_power_slider.rec.y, 32, WHITE);
             buttoned_slider_render(&physic_power_slider);
 
-            DrawText(TextFormat("AP", (int)magic_power_slider.slider.value), c2.rec.x + 8, magic_power_slider.rec.y, 32,
-                     WHITE);
+            DrawText(TextFormat("AP", (int)magic_power_slider.slider.value), player_info_card.rec.x + 8,
+                     magic_power_slider.rec.y, 32, WHITE);
             buttoned_slider_render(&magic_power_slider);
 
-            DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), c2.rec.x + 8, c2.rec.y + 75, 32, WHITE);
+            DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), player_info_card.rec.x + 8,
+                     player_info_card.rec.y + 75, 32, WHITE);
         }
     }
     EndDrawing();
@@ -1421,41 +1518,43 @@ int main(int argc, char **argv) {
     if (ip != NULL) {
         join_game(ip, port, username);
     } else {
+        // TODO: We should have  "init_scene_*" functions
         input_set_text(&ip_buf, "127.0.0.1");
         input_set_text(&port_buf, "3000");
         input_set_text(&username_buf, username);
 
         for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-            inputs[i]->rec = (Rectangle){c.rec.x + 8, c.rec.y + 75 + 60 * i, c.rec.width - 25, 50};
+            inputs[i]->rec = (Rectangle){server_info_card.rec.x + 8, server_info_card.rec.y + 75 + 60 * i,
+                                         server_info_card.rec.width - 25, 50};
         }
-        confirm_button.rec = (Rectangle){c.rec.x + 8, c.rec.y + c.rec.height - 100, c.rec.width - 25, 75};
+        confirm_button.rec =
+            (Rectangle){server_info_card.rec.x + 25, server_info_card.rec.y + server_info_card.rec.height - 100,
+                        server_info_card.rec.width - 50, 75};
 
         spell_select_buttons = malloc(sizeof(button) * spell_count);
         spell_selection = malloc(sizeof(bool) * spell_count);
         {
             int max_row_count = 9;
-            int x = c2.rec.x + 16;
-            int y = c2.rec.y + 125;
+            int x = player_info_card.rec.x + 16;
+            int y = player_info_card.rec.y + 125;
             for (int i = 0; i < spell_count; i++) {
                 int cell_x = x + 60 * (i % max_row_count);
                 int cell_y = y + 60 * (i / max_row_count);
-                spell_select_buttons[i].rec = (Rectangle){cell_x, cell_y, 50, 50};
-                spell_select_buttons[i].texture = icons[all_spells[i].icon];
-                spell_select_buttons[i].color = WHITE;
-                spell_select_buttons[i].type = BT_TEXTURE;
-                spell_select_buttons[i].font_size = 32;
-                spell_select_buttons[i].text = NULL;
+                spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons[all_spells[i].icon], NULL, 32);
                 spell_selection[i] = false;
             }
         }
         {
-            int w = c2.rec.width - 150;
+            int w = player_info_card.rec.width - 150;
             int y = 125;
-            buttoned_slider_init(&health_slider, (Rectangle){c2.rec.x + 125, c2.rec.y + y, w, 50}, 100, 10);
+            buttoned_slider_init(&health_slider,
+                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
             y += 60;
-            buttoned_slider_init(&physic_power_slider, (Rectangle){c2.rec.x + 125, c2.rec.y + y, w, 50}, 100, 10);
+            buttoned_slider_init(&physic_power_slider,
+                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
             y += 60;
-            buttoned_slider_init(&magic_power_slider, (Rectangle){c2.rec.x + 125, c2.rec.y + y, w, 50}, 100, 10);
+            buttoned_slider_init(&magic_power_slider,
+                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
         }
     }
 
@@ -1463,9 +1562,36 @@ int main(int argc, char **argv) {
         players[i].id = i;
     }
 
+    // Lobby
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        int x = player_list_card.rec.x + player_list_card.rec.width - 75;
+        int y = player_list_card.rec.y + 75 + 46 * i;
+        player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
+    }
+
     while (!WindowShouldClose()) {
+        // Update network
+        if (active_scene == SCENE_LOBBY || active_scene == SCENE_IN_GAME) {
+            fd_set read_fds = master_set;
+            int activity = select(fd_count + 1, &read_fds, NULL, NULL, &timeout);
+            if (activity < 0) {
+                exit(1);
+            }
+
+            if (FD_ISSET(client_fd, &read_fds)) {
+                net_packet p = {0};
+                if (packet_read(&p, client_fd) < 0) {
+                    exit(1);
+                }
+                handle_packet(&p);
+            }
+        }
+
+        // Rendering
         if (active_scene == SCENE_MAIN_MENU) {
             render_scene_main_menu();
+        } else if (active_scene == SCENE_LOBBY) {
+            render_scene_lobby();
         } else if (active_scene == SCENE_IN_GAME) {
             render_scene_in_game();
         }

@@ -57,7 +57,26 @@ typedef struct {
     Texture2D texture;
     const char *text;
     int font_size;
+    bool disabled;
+    bool was_down;
 } button;
+
+#define BUTTON(x, y, w, h, btn_type, btn_color, btn_texture, btn_text, btn_font_size) \
+    (button){                                               \
+        .rec = (Rectangle){x,y,w,h},                        \
+        .type = (btn_type),                                 \
+        .color = (btn_color),                               \
+        .texture = (Texture2D)btn_texture,                  \
+        .text = (btn_text),                                 \
+        .font_size = (btn_font_size),                       \
+        .disabled = false,                                  \
+        .was_down = false                                   \
+    }
+
+#define BUTTON_COLOR(x, y, w, h, color, text, font_size) BUTTON(x, y, w, h, BT_COLOR, color, {0}, text, font_size)
+
+#define BUTTON_TEXTURE(x, y, w, h, texture, text, font_size) BUTTON(x, y, w, h, BT_TEXTURE, WHITE, texture, text, font_size)
+
 
 bool button_hover(button *b);
 bool button_clicked(button *b);
@@ -102,12 +121,27 @@ void render_tooltip(Rectangle rec, const char *title, const char *description);
 typedef struct {
     Rectangle rec;
     Color color;
+    //Max 4 tabs for now
     const char *tabs[4];
     int tab_count;
     int selected_tab;
 } card;
 
 bool card_tab_clicked(card *c, int tab);
+void card_update_tabs(card *c);
 void card_render(card *c);
+
+#define CARD(x, y, w, h, c, ...) ((card){ \
+        .rec = (Rectangle){x, y, w, h}, \
+        .color = (c), \
+        .tabs = {__VA_ARGS__}, \
+        .tab_count = ((int)(sizeof ((char*[]){__VA_ARGS__}) / sizeof ((char*[]){__VA_ARGS__})[0])), \
+        .selected_tab = 0 \
+        })
+
+// Icon
+
+bool icon_hover(Rectangle rec);
+void icon_render(Texture2D icon, Rectangle rec);
 
 #endif

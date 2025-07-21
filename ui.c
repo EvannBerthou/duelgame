@@ -13,7 +13,8 @@ int get_width_center(Rectangle rec, const char *text, int font_size) {
 
 void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c) {
     int center = get_width_center(rec, text, font_size);
-    DrawText(text, center, rec.y + font_size / 2.f, font_size, c);
+    int height = rec.y + (rec.height - font_size) / 2;
+    DrawText(text, center, height, font_size, c);
 }
 
 // Input
@@ -110,16 +111,34 @@ bool button_hover(button *b) {
 }
 
 bool button_clicked(button *b) {
-    return CheckCollisionPointRec(GetMousePosition(), b->rec) && IsMouseButtonPressed(0);
+    if (b->disabled) {
+        return false;
+    }
+    if (CheckCollisionPointRec(GetMousePosition(), b->rec)) {
+        if (IsMouseButtonPressed(0)) {
+            b->was_down = true;
+            return false;
+        }
+        if (b->was_down && IsMouseButtonReleased(0)) {
+            return true;
+        }
+    } else {
+        b->was_down = false;
+    }
+    return false;
 }
 
 void button_render(button *b) {
     Color c = b->color;
-    if (CheckCollisionPointRec(GetMousePosition(), b->rec)) {
-        if (IsMouseButtonDown(0)) {
-            c = ColorTint(c, DARKGRAY);
-        } else {
-            c = ColorTint(c, GRAY);
+    if (b->disabled) {
+        c = ColorTint(c, DARKGRAY);
+    } else {
+        if (CheckCollisionPointRec(GetMousePosition(), b->rec)) {
+            if (IsMouseButtonDown(0)) {
+                c = ColorTint(c, DARKGRAY);
+            } else {
+                c = ColorTint(c, GRAY);
+            }
         }
     }
     if (b->type == BT_COLOR) {
@@ -207,27 +226,16 @@ void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step)
     bs->rec = rec;
 
     int height = rec.height;
-    Rectangle minus = {rec.x, rec.y, height, height};
     Rectangle slider = {rec.x + height, rec.y, rec.width - height * 2, height};
-    Rectangle plus = {rec.x + minus.width + slider.width, rec.y, height, height};
 
-    bs->minus.rec = minus;
+    bs->minus = BUTTON_COLOR(rec.x, rec.y, height, height, UI_RED, "-", 28);
+    bs->plus = BUTTON_COLOR(rec.x + height + slider.width, rec.y, height, height, UI_GREEN, "+", 28);
+
     bs->slider.rec = slider;
-    bs->plus.rec = plus;
-
-    bs->minus.font_size = 28;
-    bs->minus.text = "-";
-    bs->minus.color = UI_RED;
-
     bs->slider.color = WHITE;
     bs->slider.max = max;
     bs->slider.value = 0;
     bs->slider.color = UI_RED;
-
-    bs->plus.font_size = 28;
-    bs->plus.text = "+";
-    bs->plus.color = UI_GREEN;
-
     bs->step = step;
 }
 
@@ -320,6 +328,14 @@ bool card_tab_clicked(card *c, int tab) {
     return CheckCollisionPointRec(GetMousePosition(), tab_rec);
 }
 
+void card_update_tabs(card *c) {
+    for (int i = 0; i < c->tab_count; i++) {
+        if (card_tab_clicked(c, i)) {
+            c->selected_tab = i;
+        }
+    }
+}
+
 float card_roundness = 0.05f;
 int shadow_offset = 12;
 
@@ -352,4 +368,15 @@ void card_render(card *c) {
         Rectangle tab_rec = {c->rec.x + tab_width * i, c->rec.y, tab_width, 40};
         DrawTextCenter(tab_rec, c->tabs[i], 24, WHITE);
     }
+}
+
+// Icon
+
+bool icon_hover(Rectangle rec) {
+    return CheckCollisionPointRec(GetMousePosition(), rec);
+}
+
+void icon_render(Texture2D icon, Rectangle rec) {
+    Rectangle src = {0, 0, icon.width, icon.height};
+    DrawTexturePro(icon, src, rec, (Vector2){0}, 0, WHITE);
 }

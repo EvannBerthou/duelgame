@@ -43,6 +43,7 @@ typedef struct {
     uint8_t id;
     char name[9];
     uint8_t x, y;
+    uint8_t base_health;
     int health;
     uint8_t max_health;
     uint8_t ad;
@@ -51,6 +52,7 @@ typedef struct {
     round_state state;
     player_action action;
     uint8_t ax, ay;
+    uint8_t spells[MAX_SPELL_COUNT];
     uint8_t spell;
 
     spell_effect effect;
@@ -208,7 +210,10 @@ void sort_actions() {
 }
 
 void start_game() {
-    broadcast(PKT_GAME_START, NULL);
+    // TODO: Check that every player is really ready (build is set, etc.)
+    if (player_count > 1) {
+        broadcast(PKT_GAME_START, NULL);
+    }
 }
 
 void handle_message(int fd) {
@@ -235,10 +240,14 @@ void handle_message(int fd) {
 
         // We send previously connected players informations to the new player
         for (int i = 0; i < player_count - 1; i++) {
-            net_packet_join other_user_join = pkt_join(i, players[i].name);
+            player_info *p = &players[i];
+            net_packet_join other_user_join = pkt_join(i, p->name);
             send_sock(PKT_JOIN, &other_user_join, fd);
 
-            net_packet_player_update u = pkt_from_info(&players[i]);
+            net_packet_player_build b = pkt_player_build(p->id, p->base_health, p->spells, p->ad, p->ap);
+            send_sock(PKT_PLAYER_BUILD, &b, fd);
+
+            net_packet_player_update u = pkt_from_info(p);
             send_sock(PKT_PLAYER_UPDATE, &u, fd);
         }
 
@@ -255,6 +264,7 @@ void handle_message(int fd) {
         players[last_player].y = spawn_positions[last_player][1];
 
         player_info *pi = &players[last_player];
+
         net_packet_player_update u = pkt_from_info(pi);
         broadcast(PKT_PLAYER_UPDATE, &u);
 
@@ -278,16 +288,24 @@ void handle_message(int fd) {
         }
         net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
         send_sock(PKT_MAP, &p, fd);
+    } else if (p.type == PKT_GAME_START) {
+        start_game();
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: We should only recieved this packet before the game has started
         net_packet_player_build *b = (net_packet_player_build *)p.content;
         player_info *player = get_player_from_fd(fd);
+        // We force the id to avoid a player setting the build of another player
+        b->id = player->id;
+        broadcast(PKT_PLAYER_BUILD, b);
+
         // TODO: Store spells in player_info
         printf("Player %d has %d base health and is using following spells : ", player->id, b->base_health);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             printf("%d ", b->spells[i]);
+            player->spells[i] = b->spells[i];
         }
         printf("\n");
+        player->base_health = b->base_health;
         player->max_health = b->base_health;
         player->health = player->max_health;
         player->ad = b->ad;
@@ -295,11 +313,6 @@ void handle_message(int fd) {
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
-
-        // TODO: We should only start the game when every player has sent his build
-        if (player_count == LOBBY_FULL_COUNT) {
-            start_game();
-        }
     } else if (p.type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p.content;
         printf("Player %d played : %d at %d %d\n", a->id, a->action, a->x, a->y);
@@ -365,7 +378,7 @@ void handle_message(int fd) {
         printf("Serv: game reset\n");
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);
-        //TODO: We should resend base player infos
+        // TODO: We should resend base player infos
         for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
             players[i] = (player_info){0};
         }

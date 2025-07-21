@@ -23,6 +23,7 @@ typedef enum {
 
 typedef enum {
     GS_WAITING,
+    GS_STARTING, //TODO: Show countdown when game is starting
     GS_STARTED,
     GS_ENDING,
     GS_ENDED,
@@ -110,14 +111,15 @@ net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t m
 // Player build
 // Includes stats and spells
 typedef struct {
+    uint8_t id;
     uint8_t base_health;
     uint8_t spells[MAX_SPELL_COUNT]; // We only send IDs since spells are fixed by the game and not the player
     uint8_t ad;
     uint8_t ap;
 } net_packet_player_build;
 
-net_packet_player_build pkt_player_build(uint8_t base_health, uint8_t *spells, uint8_t ad, uint8_t ap) {
-    net_packet_player_build packet = {.base_health = base_health, .ad = ad, .ap = ap};
+net_packet_player_build pkt_player_build(uint8_t id, uint8_t base_health, uint8_t *spells, uint8_t ad, uint8_t ap) {
+    net_packet_player_build packet = {.id = id, .base_health = base_health, .ad = ad, .ap = ap};
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         packet.spells[i] = spells[i];
     }
@@ -229,6 +231,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
         } break;
         case PKT_PLAYER_BUILD: {
             net_packet_player_build *p = (net_packet_player_build*)content;
+            buf = packu8(buf, p->id);
             buf = packu8(buf, p->base_health);
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                 buf = packu8(buf, p->spells[i]);
@@ -333,6 +336,7 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
         case PKT_PLAYER_BUILD: {
             net_packet_player_build *p = malloc(sizeof(net_packet_player_build));
             if (p == NULL) exit(1);
+            p->id = unpacku8(base);
             p->base_health = unpacku8(base);
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                 p->spells[i] = unpacku8(base);
@@ -405,6 +409,7 @@ void write_packet(net_packet *p, int fd) {
     }
 }
 
+//TODO: We should check the size and avoid reading too much
 int packet_read(net_packet *p, int fd) {
     uint8_t packet_len;
     int n = read(fd, &packet_len, sizeof(packet_len));
@@ -440,7 +445,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
             return 3 + map_length;
         }
         case PKT_PLAYER_UPDATE: return 9;
-        case PKT_PLAYER_BUILD: return 3 + MAX_SPELL_COUNT;
+        case PKT_PLAYER_BUILD: return 4 + MAX_SPELL_COUNT;
         case PKT_PLAYER_ACTION: return 5;
         case PKT_ROUND_END: return 0;
         case PKT_GAME_END: return 1;

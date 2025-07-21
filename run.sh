@@ -10,6 +10,7 @@ killall main_game || true
 
 ./server &
 sleep 1
-./main_game --ip 127.0.0.1 --port 3000 > /dev/null &
+#./main_game --ip 127.0.0.1 --port 3000 > /dev/null &
+./main_game > /dev/null &
 sleep 1
 ./main_game
