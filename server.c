@@ -45,6 +45,8 @@ typedef struct {
     uint8_t x, y;
     int health;
     uint8_t max_health;
+    uint8_t ad;
+    uint8_t ap;
 
     round_state state;
     player_action action;
@@ -96,7 +98,7 @@ int ci(int a) {
 
 net_packet_player_update pkt_from_info(player_info *p) {
     uint8_t health = p->health >= 0 ? p->health : 0;
-    return pkt_player_update(p->id, health, p->max_health, p->x, p->y, p->effect, p->effect_round_left);
+    return pkt_player_update(p->id, health, p->max_health, p->ad, p->ap, p->x, p->y, p->effect, p->effect_round_left);
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
@@ -288,6 +290,8 @@ void handle_message(int fd) {
         printf("\n");
         player->max_health = b->base_health;
         player->health = player->max_health;
+        player->ad = b->ad;
+        player->ap = b->ap;
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
@@ -361,6 +365,7 @@ void handle_message(int fd) {
         printf("Serv: game reset\n");
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);
+        //TODO: We should resend base player infos
         for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
             players[i] = (player_info){0};
         }

@@ -96,13 +96,15 @@ typedef struct {
     uint8_t id;
     uint8_t health;
     uint8_t max_health;
+    uint8_t ad;
+    uint8_t ap;
     uint8_t x, y;
     uint8_t effect;
     uint8_t effect_round_left;
 } net_packet_player_update;
 
-net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t x, uint8_t y, uint8_t effect, uint8_t erl) {
-    return (net_packet_player_update){id, health, max_health, x, y, effect, erl};
+net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t ad, uint8_t ap, uint8_t x, uint8_t y, uint8_t effect, uint8_t erl) {
+    return (net_packet_player_update){id, health, max_health, ad, ap, x, y, effect, erl};
 }
 
 // Player build
@@ -110,10 +112,12 @@ net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t m
 typedef struct {
     uint8_t base_health;
     uint8_t spells[MAX_SPELL_COUNT]; // We only send IDs since spells are fixed by the game and not the player
+    uint8_t ad;
+    uint8_t ap;
 } net_packet_player_build;
 
-net_packet_player_build pkt_player_build(uint8_t base_health, uint8_t *spells) {
-    net_packet_player_build packet = {.base_health = base_health};
+net_packet_player_build pkt_player_build(uint8_t base_health, uint8_t *spells, uint8_t ad, uint8_t ap) {
+    net_packet_player_build packet = {.base_health = base_health, .ad = ad, .ap = ap};
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         packet.spells[i] = spells[i];
     }
@@ -215,6 +219,8 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, p->id);
             buf = packu8(buf, p->health);
             buf = packu8(buf, p->max_health);
+            buf = packu8(buf, p->ad);
+            buf = packu8(buf, p->ap);
             buf = packu8(buf, p->x);
             buf = packu8(buf, p->y);
             buf = packu8(buf, p->effect);
@@ -227,6 +233,8 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                 buf = packu8(buf, p->spells[i]);
             }
+            buf = packu8(buf, p->ad);
+            buf = packu8(buf, p->ap);
             return buf;
         } break;
         case PKT_PLAYER_ACTION: {
@@ -265,6 +273,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
     return buf;
 }
 
+//TODO: Instead of using fixed offets, we should do something like `unpacku8` which keeps track of offset
 void *unpackstruct(net_packet_type_enum type, char *buf) {
     switch (type) {
         case PKT_PING: return NULL;
@@ -300,10 +309,12 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             p->id = buf[0];
             p->health = buf[1];
             p->max_health = buf[2];
-            p->x = buf[3];
-            p->y = buf[4];
-            p->effect = buf[5];
-            p->effect_round_left = buf[6];
+            p->ad = buf[3];
+            p->ap = buf[4];
+            p->x = buf[5];
+            p->y = buf[6];
+            p->effect = buf[7];
+            p->effect_round_left = buf[8];
             return p;
         } break;
         case PKT_PLAYER_BUILD: {
@@ -313,6 +324,8 @@ void *unpackstruct(net_packet_type_enum type, char *buf) {
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                 p->spells[i] = buf[1 + i];
             }
+            p->ad = buf[1 + MAX_SPELL_COUNT];
+            p->ap = buf[1 + MAX_SPELL_COUNT + 1];
             return p;
         } break;
         case PKT_PLAYER_ACTION: {
@@ -413,8 +426,8 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
             int map_length = map->width * map->height;
             return 3 + map_length;
         }
-        case PKT_PLAYER_UPDATE: return 7;
-        case PKT_PLAYER_BUILD: return 1 + MAX_SPELL_COUNT;
+        case PKT_PLAYER_UPDATE: return 9;
+        case PKT_PLAYER_BUILD: return 3 + MAX_SPELL_COUNT;
         case PKT_PLAYER_ACTION: return 5;
         case PKT_ROUND_END: return 0;
         case PKT_GAME_END: return 1;

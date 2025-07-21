@@ -102,8 +102,12 @@ void render_tooltip(Rectangle rec, const char *title, const char *description);
 typedef struct {
     Rectangle rec;
     Color color;
+    const char *tabs[4];
+    int tab_count;
+    int selected_tab;
 } card;
 
+bool card_tab_clicked(card *c, int tab);
 void card_render(card *c);
 
 #endif

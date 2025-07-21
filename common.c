@@ -47,6 +47,9 @@ const spell all_spells[] = {
      .cooldown = 4,
      .effect = SE_BURN,
      .effect_duration = 3},
+    {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+    {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+    {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
 };
 
 const int spell_count = (int)(sizeof(all_spells) / sizeof(all_spells[0]));

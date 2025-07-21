@@ -310,18 +310,46 @@ void render_tooltip(Rectangle rec, const char *title, const char *description) {
 
 // Card
 
-float card_roundness = 0.05f;
-void card_render(card *c) {
-    int shadow_offset = 12;
-    Rectangle card = c->rec;
-    Rectangle card_shadow = {card.x + shadow_offset, card.y + shadow_offset, card.width, card.height};
+bool card_tab_clicked(card *c, int tab) {
+    if (IsMouseButtonPressed(0) == false) {
+        return false;
+    }
 
-    DrawRectangleRounded(card_shadow, card_roundness, 12, Fade(DARKGRAY, 0.3f));
-    DrawRectangleRounded(card, card_roundness, 12, c->color);
-    //
-    // DrawLine(card.x, card.y, card.x + card.width, card.y, Fade(LIGHTGRAY, 0.6f));
-    // DrawLine(card.x, card.y, card.x, card.y + card.height, Fade(LIGHTGRAY, 0.6f));
-    //
-    // DrawLine(card.x, card.y + card.height, card.x + card.width, card.y + card.height, Fade(GRAY, 0.6f));
-    // DrawLine(card.x + card.width, card.y, card.x + card.width, card.y + card.height, Fade(GRAY, 0.6f));
+    float tab_width = c->rec.width / c->tab_count;
+    Rectangle tab_rec = {c->rec.x + tab_width * tab, c->rec.y, tab_width, 40};
+    return CheckCollisionPointRec(GetMousePosition(), tab_rec);
+}
+
+float card_roundness = 0.05f;
+int shadow_offset = 12;
+
+// TODO: offests are not generic
+void card_render(card *c) {
+    // Shadow
+    Rectangle card = {c->rec.x, c->rec.y + 40, c->rec.width, c->rec.height - 40};
+    Rectangle card_shadow = {card.x + shadow_offset, c->rec.y + shadow_offset, card.width, c->rec.height};
+    DrawRectangleRec(card_shadow, Fade(DARKGRAY, 0.3f));
+
+    // Tabs
+    float tab_width = c->rec.width / c->tab_count;
+    for (int i = 0; i < c->tab_count; i++) {
+        Rectangle tab_rec = {c->rec.x + tab_width * i, c->rec.y, tab_width, 40};
+        Color color = c->color;
+        if (i != c->selected_tab) {
+            if (CheckCollisionPointRec(GetMousePosition(), tab_rec)) {
+                color = ColorTint(color, LIGHTGRAY);
+            } else {
+                color = ColorTint(color, GRAY);
+            }
+        }
+        DrawRectangleRec(tab_rec, color);
+    }
+
+    // Card
+    DrawRectangleRec(card, c->color);
+
+    for (int i = 0; i < c->tab_count; i++) {
+        Rectangle tab_rec = {c->rec.x + tab_width * i, c->rec.y, tab_width, 40};
+        DrawTextCenter(tab_rec, c->tabs[i], 24, WHITE);
+    }
 }
