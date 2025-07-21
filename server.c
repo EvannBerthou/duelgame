@@ -142,6 +142,18 @@ void play_round(player_info *player) {
 
         // TODO: Check that the player really has this spell in his build
         printf("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
+        int found = false;
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            if (player->spell == player->spells[i]) {
+                found = true;
+            }
+        }
+        // TODO: Report an error / kick the player ?
+        if (found == false) {
+            printf("Player is trying to cast a spell which is not in his build\n");
+            exit(0);
+        }
+
         const spell *s = &all_spells[player->spell];
         net_packet_player_action action =
             pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
@@ -216,6 +228,26 @@ void start_game() {
     }
 }
 
+void send_map(int fd) {
+    uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
+    for (int i = 0; i < MAP_HEIGHT; i++) {
+        for (int j = 0; j < MAP_WIDTH; j++) {
+            map[i * MAP_WIDTH + j] = MAP[i][j];
+        }
+    }
+    net_packet_map m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
+    send_sock(PKT_MAP, &m, fd);
+
+    uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
+    for (int i = 0; i < MAP_HEIGHT; i++) {
+        for (int j = 0; j < MAP_WIDTH; j++) {
+            props[i * MAP_WIDTH + j] = PROPS[i][j];
+        }
+    }
+    net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
+    send_sock(PKT_MAP, &p, fd);
+}
+
 void handle_message(int fd) {
     net_packet p = {0};
     if (packet_read(&p, fd) < 0) {
@@ -240,14 +272,15 @@ void handle_message(int fd) {
 
         // We send previously connected players informations to the new player
         for (int i = 0; i < player_count - 1; i++) {
-            player_info *p = &players[i];
-            net_packet_join other_user_join = pkt_join(i, p->name);
+            player_info *player = &players[i];
+            net_packet_join other_user_join = pkt_join(i, player->name);
             send_sock(PKT_JOIN, &other_user_join, fd);
 
-            net_packet_player_build b = pkt_player_build(p->id, p->base_health, p->spells, p->ad, p->ap);
+            net_packet_player_build b =
+                pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
             send_sock(PKT_PLAYER_BUILD, &b, fd);
 
-            net_packet_player_update u = pkt_from_info(p);
+            net_packet_player_update u = pkt_from_info(player);
             send_sock(PKT_PLAYER_UPDATE, &u, fd);
         }
 
@@ -271,23 +304,7 @@ void handle_message(int fd) {
         net_packet_connected c = pkt_connected(last_player);
         send_sock(PKT_CONNECTED, &c, fd);
 
-        uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
-        for (int i = 0; i < MAP_HEIGHT; i++) {
-            for (int j = 0; j < MAP_WIDTH; j++) {
-                map[i * MAP_WIDTH + j] = MAP[i][j];
-            }
-        }
-        net_packet_map m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
-        send_sock(PKT_MAP, &m, fd);
-
-        uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
-        for (int i = 0; i < MAP_HEIGHT; i++) {
-            for (int j = 0; j < MAP_WIDTH; j++) {
-                props[i * MAP_WIDTH + j] = PROPS[i][j];
-            }
-        }
-        net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
-        send_sock(PKT_MAP, &p, fd);
+        send_map(fd);
     } else if (p.type == PKT_GAME_START) {
         start_game();
     } else if (p.type == PKT_PLAYER_BUILD) {
@@ -378,11 +395,28 @@ void handle_message(int fd) {
         printf("Serv: game reset\n");
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);
-        // TODO: We should resend base player infos
-        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-            players[i] = (player_info){0};
+        // We send previously connected players informations to the new player
+        for (int i = 0; i < player_count; i++) {
+            player_info *p = &players[i];
+            p->max_health = p->base_health;
+            p->health = p->base_health;
+            p->x = spawn_positions[i][0];
+            p->y = spawn_positions[i][1];
+            p->effect = SE_NONE;
+            p->effect_round_left = 0;
+            p->spell_effect = NULL;
+            net_packet_join other_user_join = pkt_join(i, p->name);
+            broadcast(PKT_JOIN, &other_user_join);
+
+            net_packet_player_build b = pkt_player_build(p->id, p->base_health, p->spells, p->ad, p->ap);
+            broadcast(PKT_PLAYER_BUILD, &b);
+
+            net_packet_player_update u = pkt_from_info(p);
+            broadcast(PKT_PLAYER_UPDATE, &u);
+
+            send_map(connections[i]);
         }
-        player_count = 0;
+        broadcast(PKT_GAME_START, NULL);
     } else if (p.type == PKT_ADMIN_CONNECT) {
         net_packet_admin_connect *a = (net_packet_admin_connect *)p.content;
         printf("%d is trying to connect as admin with password '%s'\n", fd, a->password);

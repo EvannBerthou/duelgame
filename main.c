@@ -811,7 +811,6 @@ void reset_game() {
     for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
         anim_pool[i] = (animation){0};
     }
-
     player_count = 0;
 
     players[0].color = YELLOW;
@@ -829,8 +828,6 @@ void reset_game() {
 
     action_count = 0;
     action_step = 0;
-
-    player_join();
 }
 
 void init_in_game_ui() {
@@ -1061,6 +1058,7 @@ bool join_game(const char *ip, int port, const char *username) {
 
     strncpy(current_player_username, username, 8);
     reset_game();
+    player_join();
 
     FD_ZERO(&master_set);
     FD_SET(client_fd, &master_set);
