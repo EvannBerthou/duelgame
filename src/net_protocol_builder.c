@@ -280,14 +280,14 @@ int main(void) {
         for (int j = 0; j < s->field_count; j++) {
             struct_field *f = &s->fields[j];
             if (f->type == TYPE_UINT8) {
-                printf("    s->%s = %s;", f->name, f->name);
+                printf("    s->%s = %s;\n", f->name, f->name);
             } else if (f->type == TYPE_UINT8_PTR) {
-                printf("    s->%s = %s;", f->name, f->name);
+                printf("    s->%s = %s;\n", f->name, f->name);
             } else if (f->type == TYPE_UINT8_ARRAY) {
-                printf("    memcpy(s->%s, %s, %s);", f->name, f->name, f->size);
+                printf("    memcpy(s->%s, %s, %s);\n", f->name, f->name, f->size);
             } else if (f->type == TYPE_CHAR_ARRAY) {
-                printf("    memcpy(s->%s, %s, %d);", f->name, f->name, f->array_size);
-                printf("    s->%s[%d - 1] = 0;", f->name, f->array_size);
+                printf("    memcpy(s->%s, %s, %d);\n", f->name, f->name, f->array_size);
+                printf("    s->%s[%d - 1] = 0;\n", f->name, f->array_size);
             }
         }
         printf("    return result;\n");
