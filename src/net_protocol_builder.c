@@ -186,7 +186,8 @@ void parse_struct(stb_lexer *l) {
 int main(void) {
     stb_lexer l = {0};
     char store[2048] = {0};
-    FILE *f = fopen("net_protocol_base.h", "r");
+    //TODO: Should be an argument
+    FILE *f = fopen("include/net_protocol_base.h", "r");
     if (f == NULL) {
         printf("Error reading file\n");
         exit(1);
