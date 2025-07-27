@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "common.h"
+#include "net_protocol.h"
 
 #define MAX_PLAYER_COUNT 4
 
@@ -35,24 +36,6 @@ typedef enum {
     PA_CANT_PLAY,
 } player_action;
 
-//TODO: Fixed type IDs for the protocol when more mature
-typedef enum {
-    PKT_PING,
-    PKT_JOIN,
-    PKT_CONNECTED,
-    PKT_MAP,
-    PKT_GAME_START,
-    PKT_PLAYER_UPDATE,
-    PKT_PLAYER_BUILD,
-    PKT_PLAYER_ACTION,
-    PKT_ROUND_END,
-    PKT_GAME_RESET,
-    PKT_ADMIN_CONNECT,
-    PKT_ADMIN_CONNECT_RESULT,
-    PKT_ADMIN_UPDATE_PLAYER_INFO,
-    PKT_COUNT
-} net_packet_type_enum;
-
 typedef uint8_t net_packet_type;
 
 typedef struct {
@@ -61,126 +44,12 @@ typedef struct {
     void *content;
 } net_packet;
 
-typedef struct {
-    uint8_t id;
-    char username[8];
-} net_packet_join;
-
-net_packet_join pkt_join(uint8_t id, const char *username) {
-    assert(strlen(username) <= 8);
-    net_packet_join p = {.id = id};
-    memcpy(p.username, username, 8);
-    return p;
-}
-
-typedef struct {
-    uint8_t id;
-} net_packet_connected;
-
-net_packet_connected pkt_connected(uint8_t id) {
-    return (net_packet_connected){id};
-}
-
-typedef struct {
-    uint8_t width, height;
-    uint8_t type;
-    uint8_t *content;
-} net_packet_map;
-
-net_packet_map pkt_map(uint8_t width, uint8_t height, uint8_t type, uint8_t *content) {
-    return (net_packet_map){width, height, type, content};
-}
-
-typedef struct {
-    uint8_t id;
-    uint8_t health;
-    uint8_t max_health;
-    uint8_t ad;
-    uint8_t ap;
-    uint8_t x, y;
-    uint8_t effect;
-    uint8_t effect_round_left;
-} net_packet_player_update;
-
-net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t ad, uint8_t ap, uint8_t x, uint8_t y, uint8_t effect, uint8_t erl) {
-    return (net_packet_player_update){id, health, max_health, ad, ap, x, y, effect, erl};
-}
-
-// Player build
-// Includes stats and spells
-typedef struct {
-    uint8_t id;
-    uint8_t base_health;
-    uint8_t spells[MAX_SPELL_COUNT]; // We only send IDs since spells are fixed by the game and not the player
-    uint8_t ad;
-    uint8_t ap;
-} net_packet_player_build;
-
-net_packet_player_build pkt_player_build(uint8_t id, uint8_t base_health, uint8_t *spells, uint8_t ad, uint8_t ap) {
-    net_packet_player_build packet = {.id = id, .base_health = base_health, .ad = ad, .ap = ap};
-    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-        packet.spells[i] = spells[i];
-    }
-    return packet;
-}
-
-typedef struct {
-    uint8_t id;
-    uint8_t action;
-    uint8_t x, y;
-    uint8_t spell;
-} net_packet_player_action;
-
-net_packet_player_action pkt_player_action(uint8_t id, uint8_t action, uint8_t x, uint8_t y, uint8_t spell) {
-    return (net_packet_player_action){id, action, x, y, spell};
-}
-
-typedef struct {
-    uint8_t winner_id;
-} net_packet_round_end;
-
 #define GAME_NOT_ENDED 254
 #define GAME_TIE 255
-
-net_packet_round_end pkt_round_end(uint8_t winner_id) {
-    return (net_packet_round_end) {winner_id};
-}
-
-typedef struct {
-    char password[8];
-} net_packet_admin_connect;
-
-net_packet_admin_connect pkt_admin_connect(const char *password) {
-    net_packet_admin_connect p = {0};
-    for (int i = 0; i < 8; i++) {
-        if (password[i] == '\0')
-            break;
-        p.password[i] = password[i];
-    }
-    return p;
-}
-
-typedef struct {
-    uint8_t success;
-} net_packet_admin_connect_result;
-
-net_packet_admin_connect_result pkt_admin_connect_result(uint8_t result) {
-    return (net_packet_admin_connect_result){result};
-}
 
 typedef enum {
     PIP_HEALTH,
 } player_info_property;
-
-typedef struct {
-    uint8_t id;
-    uint8_t property;
-    uint8_t value;
-} net_packet_admin_update_player_info;
-
-net_packet_admin_update_player_info pkt_admin_update_player_info(uint8_t id, player_info_property prop, uint8_t value) {
-    return (net_packet_admin_update_player_info){id, (uint8_t)prop, value};
-}
 
 char *packu8(char *buf, uint8_t u) {
     *buf = u;
@@ -190,88 +59,6 @@ char *packu8(char *buf, uint8_t u) {
 char *packsv(char *buf, char *str, int len) {
     while (len-- > 0) {
         *buf++ = *str++;
-    }
-    return buf;
-}
-
-char *packstruct(char *buf, void *content, net_packet_type_enum type) {
-    switch (type) {
-        case PKT_PING: return buf;
-        case PKT_JOIN: {
-            net_packet_join *p = (net_packet_join*)content;
-            buf = packu8(buf, p->id);
-            return packsv(buf, p->username, 8);
-        } break;
-        case PKT_CONNECTED: {
-            net_packet_connected *p = (net_packet_connected*)content;
-            return packu8(buf, p->id);
-        } break;
-        case PKT_GAME_START: return buf;
-        case PKT_MAP: {
-            net_packet_map *p = (net_packet_map*)content;
-            buf = packu8(buf, p->width);
-            buf = packu8(buf, p->height);
-            buf = packu8(buf, p->type);
-            for (int i = 0; i < p->width * p->height; i++) {
-                buf = packu8(buf, p->content[i]);
-            }
-            return buf;
-        }
-        case PKT_PLAYER_UPDATE: {
-            net_packet_player_update *p = (net_packet_player_update*)content;
-            buf = packu8(buf, p->id);
-            buf = packu8(buf, p->health);
-            buf = packu8(buf, p->max_health);
-            buf = packu8(buf, p->ad);
-            buf = packu8(buf, p->ap);
-            buf = packu8(buf, p->x);
-            buf = packu8(buf, p->y);
-            buf = packu8(buf, p->effect);
-            buf = packu8(buf, p->effect_round_left);
-            return buf;
-        } break;
-        case PKT_PLAYER_BUILD: {
-            net_packet_player_build *p = (net_packet_player_build*)content;
-            buf = packu8(buf, p->id);
-            buf = packu8(buf, p->base_health);
-            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                buf = packu8(buf, p->spells[i]);
-            }
-            buf = packu8(buf, p->ad);
-            buf = packu8(buf, p->ap);
-            return buf;
-        } break;
-        case PKT_PLAYER_ACTION: {
-            net_packet_player_action *p = (net_packet_player_action*)content;
-            buf = packu8(buf, p->id);
-            buf = packu8(buf, p->action);
-            buf = packu8(buf, p->x);
-            buf = packu8(buf, p->y);
-            buf = packu8(buf, p->spell);
-            return buf;
-        } break;
-        case PKT_ROUND_END: {
-            net_packet_round_end *p = (net_packet_round_end*)content;
-            buf = packu8(buf, p->winner_id);
-            return buf;
-        }
-        case PKT_GAME_RESET: return buf;
-        case PKT_ADMIN_CONNECT: {
-            net_packet_admin_connect *p = (net_packet_admin_connect*)content;
-            return packsv(buf, p->password, 8);
-        } break;
-        case PKT_ADMIN_CONNECT_RESULT: {
-            net_packet_admin_connect_result *p = (net_packet_admin_connect_result*)content;
-            return packu8(buf, p->success);
-        } break;
-        case PKT_ADMIN_UPDATE_PLAYER_INFO: {
-            net_packet_admin_update_player_info *p = (net_packet_admin_update_player_info*)content;
-            buf = packu8(buf, p->id);
-            buf = packu8(buf, p->property);
-            buf = packu8(buf, p->value);
-            return buf;
-        } break;
-        default: exit(1);
     }
     return buf;
 }
@@ -287,105 +74,6 @@ void unpacksv(uint8_t **buf, char *dest, uint8_t len) {
         dest[i] = **buf;
         (*buf)++;
     }
-}
-
-void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
-    uint8_t **base = &buf;
-    switch (type) {
-        case PKT_PING: return NULL;
-        case PKT_JOIN: {
-            net_packet_join *p = malloc(sizeof(net_packet_join));
-            if (p == NULL) exit(1);
-            p->id = unpacku8(base);
-            unpacksv(base, p->username, 8);
-            return p;
-        } break;
-        case PKT_CONNECTED: {
-            net_packet_connected *p = malloc(sizeof(net_packet_connected));
-            if (p == NULL) exit(1);
-            p->id = unpacku8(base);
-            return p;
-        } break;
-        case PKT_GAME_START: return NULL;
-        case PKT_MAP: {
-            net_packet_map *p = malloc(sizeof(net_packet_map));
-            if (p == NULL) exit(1);
-            p->width = unpacku8(base);
-            p->height = unpacku8(base);
-            p->type = unpacku8(base);
-            p->content = malloc(p->width * p->height);
-            for (int i = 0; i < p->width * p->height; i++) {
-                p->content[i] = unpacku8(base);
-            }
-            return p;
-        }
-        case PKT_PLAYER_UPDATE: {
-            net_packet_player_update *p = malloc(sizeof(net_packet_player_update));
-            if (p == NULL) exit(1);
-            p->id = unpacku8(base);
-            p->health = unpacku8(base);
-            p->max_health = unpacku8(base);
-            p->ad = unpacku8(base);
-            p->ap = unpacku8(base);
-            p->x = unpacku8(base);
-            p->y = unpacku8(base);
-            p->effect = unpacku8(base);
-            p->effect_round_left = unpacku8(base);
-            return p;
-        } break;
-        case PKT_PLAYER_BUILD: {
-            net_packet_player_build *p = malloc(sizeof(net_packet_player_build));
-            if (p == NULL) exit(1);
-            p->id = unpacku8(base);
-            p->base_health = unpacku8(base);
-            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                p->spells[i] = unpacku8(base);
-            }
-            p->ad = unpacku8(base);
-            p->ap = unpacku8(base);
-            return p;
-        } break;
-        case PKT_PLAYER_ACTION: {
-            net_packet_player_action *p = malloc(sizeof(net_packet_player_action));
-            if (p == NULL) exit(1);
-            p->id = unpacku8(base);
-            p->action = unpacku8(base);
-            p->x = unpacku8(base);
-            p->y = unpacku8(base);
-            p->spell = unpacku8(base);
-            return p;
-        } break;
-        case PKT_ROUND_END: {
-            net_packet_round_end *p = malloc(sizeof(net_packet_round_end));
-            if (p == NULL) exit(1);
-            p->winner_id = unpacku8(base);
-            return p;
-        } break;
-        case PKT_GAME_RESET: return NULL;
-        case PKT_ADMIN_CONNECT: {
-            net_packet_admin_connect *p = malloc(sizeof(net_packet_admin_connect));
-            if (p == NULL) exit(1);
-            unpacksv(base, p->password, 8);
-            return p;
-        } break;
-        case PKT_ADMIN_CONNECT_RESULT: {
-            net_packet_admin_connect_result *p = malloc(sizeof(net_packet_admin_connect_result));
-            if (p == NULL) exit(1);
-            p->success = unpacku8(base);
-            return p;
-        } break;
-        case PKT_ADMIN_UPDATE_PLAYER_INFO: {
-            net_packet_admin_update_player_info *p = malloc(sizeof(net_packet_admin_update_player_info));
-            if (p == NULL) exit(1);
-            p->id = unpacku8(base);
-            p->property = unpacku8(base);
-            p->value = unpacku8(base);
-            return p;
-        } break;
-        default: exit(1);
-    }
-
-    return NULL;
 }
 
 void write_packet(net_packet *p, int fd) {
@@ -430,29 +118,6 @@ int packet_read(net_packet *p, int fd) {
     p->type = unpacku8(&base);
     p->content = unpackstruct(p->type, base);
     return 0;
-}
-
-uint8_t get_packet_length(net_packet_type_enum type, void *p) {
-    switch (type) {
-        case PKT_PING: return 0;
-        case PKT_JOIN: return 9;
-        case PKT_CONNECTED: return 1;
-        case PKT_GAME_START: return 0;
-        case PKT_MAP: {
-            net_packet_map *map = (net_packet_map*)p;
-            int map_length = map->width * map->height;
-            return 3 + map_length;
-        }
-        case PKT_PLAYER_UPDATE: return 9;
-        case PKT_PLAYER_BUILD: return 4 + MAX_SPELL_COUNT;
-        case PKT_PLAYER_ACTION: return 5;
-        case PKT_ROUND_END: return 1;
-        case PKT_GAME_RESET: return 0;
-        case PKT_ADMIN_CONNECT: return 8;
-        case PKT_ADMIN_CONNECT_RESULT: return 1;
-        case PKT_ADMIN_UPDATE_PLAYER_INFO: return 3;
-        default: { fprintf(stderr, "Unknown type\n"); exit(1); }
-    }
 }
 
 void send_sock(net_packet_type_enum type, void *p, int fd) {

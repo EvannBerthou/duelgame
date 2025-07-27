@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include "common.h"
 #include "net.h"
+#include "net.h"
 #include "raylib.h"
 #include "ui.h"
 #include "version.h"
