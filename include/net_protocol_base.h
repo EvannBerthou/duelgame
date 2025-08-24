@@ -4,6 +4,7 @@
 #define NET_SIZE(...)
 
 typedef struct {
+    uint64_t send_time;
 } net_packet_ping;
 
 typedef struct {
@@ -16,10 +17,15 @@ typedef struct {
 } net_packet_connected;
 
 typedef struct {
+    uint8_t id;
+    uint8_t new_master;
+} net_packet_disconnect;
+
+typedef struct {
     uint8_t width;
     uint8_t height;
     uint8_t type;
-    uint8_t *content NET_SIZE("s->width * s->height");
+    uint8_t* content NET_SIZE("s->width * s->height");
 } net_packet_map;
 
 typedef struct {
@@ -58,10 +64,15 @@ typedef struct {
 
 typedef struct {
     uint8_t winner_id;
+    uint8_t player_scores[MAX_PLAYER_COUNT] NET_SIZE("MAX_PLAYER_COUNT");
 } net_packet_round_end;
 
 typedef struct {
 } net_packet_game_reset;
+
+typedef struct {
+    uint64_t round_timer;
+} net_packet_game_stats;
 
 typedef struct {
     char password[8];

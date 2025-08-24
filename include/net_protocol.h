@@ -7,6 +7,7 @@
 #define NET_SIZE(...)
 
 typedef struct {
+    uint64_t send_time;
 } net_packet_ping;
 
 typedef struct {
@@ -19,10 +20,15 @@ typedef struct {
 } net_packet_connected;
 
 typedef struct {
+    uint8_t id;
+    uint8_t new_master;
+} net_packet_disconnect;
+
+typedef struct {
     uint8_t width;
     uint8_t height;
     uint8_t type;
-    uint8_t *content NET_SIZE("s->width * s->height");
+    uint8_t* content NET_SIZE("s->width * s->height");
 } net_packet_map;
 
 typedef struct {
@@ -61,10 +67,15 @@ typedef struct {
 
 typedef struct {
     uint8_t winner_id;
+    uint8_t player_scores[MAX_PLAYER_COUNT] NET_SIZE("MAX_PLAYER_COUNT");
 } net_packet_round_end;
 
 typedef struct {
 } net_packet_game_reset;
+
+typedef struct {
+    uint64_t round_timer;
+} net_packet_game_stats;
 
 typedef struct {
     char password[8];
@@ -84,6 +95,7 @@ typedef enum {
     PKT_PING,
     PKT_JOIN,
     PKT_CONNECTED,
+    PKT_DISCONNECT,
     PKT_MAP,
     PKT_GAME_START,
     PKT_PLAYER_UPDATE,
@@ -91,15 +103,17 @@ typedef enum {
     PKT_PLAYER_ACTION,
     PKT_ROUND_END,
     PKT_GAME_RESET,
+    PKT_GAME_STATS,
     PKT_ADMIN_CONNECT,
     PKT_ADMIN_CONNECT_RESULT,
     PKT_ADMIN_UPDATE_PLAYER_INFO,
 } net_packet_type_enum;
 uint8_t get_packet_length(net_packet_type_enum type, void *p) {
     switch (type) {
-        case PKT_PING: return 0;
+        case PKT_PING: return 8;
         case PKT_JOIN: return 9;
         case PKT_CONNECTED: return 1;
+        case PKT_DISCONNECT: return 2;
         case PKT_MAP: {
             net_packet_map *s = (net_packet_map*)p;
             (void)s;
@@ -113,18 +127,24 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
             return 4 + (MAX_SPELL_COUNT);
         }
         case PKT_PLAYER_ACTION: return 5;
-        case PKT_ROUND_END: return 1;
+        case PKT_ROUND_END: {
+            net_packet_round_end *s = (net_packet_round_end*)p;
+            (void)s;
+            return 1 + (MAX_PLAYER_COUNT);
+        }
         case PKT_GAME_RESET: return 0;
+        case PKT_GAME_STATS: return 8;
         case PKT_ADMIN_CONNECT: return 8;
         case PKT_ADMIN_CONNECT_RESULT: return 1;
         case PKT_ADMIN_UPDATE_PLAYER_INFO: return 3;
         default: { fprintf(stderr, "Unknown type\n"); exit(1); }
     }
 }
-net_packet_ping pkt_ping() {
+net_packet_ping pkt_ping(uint64_t send_time) {
     net_packet_ping result = {};
     net_packet_ping *s = &result;
     (void)s;
+    s->send_time = send_time;
     return result;
 }
 net_packet_join pkt_join(uint8_t id, const char *username) {
@@ -141,6 +161,14 @@ net_packet_connected pkt_connected(uint8_t id) {
     net_packet_connected *s = &result;
     (void)s;
     s->id = id;
+    return result;
+}
+net_packet_disconnect pkt_disconnect(uint8_t id, uint8_t new_master) {
+    net_packet_disconnect result = {};
+    net_packet_disconnect *s = &result;
+    (void)s;
+    s->id = id;
+    s->new_master = new_master;
     return result;
 }
 net_packet_map pkt_map(uint8_t width, uint8_t height, uint8_t type, uint8_t *content) {
@@ -196,17 +224,25 @@ net_packet_player_action pkt_player_action(uint8_t id, uint8_t action, uint8_t x
     s->spell = spell;
     return result;
 }
-net_packet_round_end pkt_round_end(uint8_t winner_id) {
+net_packet_round_end pkt_round_end(uint8_t winner_id, uint8_t *player_scores) {
     net_packet_round_end result = {};
     net_packet_round_end *s = &result;
     (void)s;
     s->winner_id = winner_id;
+    memcpy(s->player_scores, player_scores, MAX_PLAYER_COUNT);
     return result;
 }
 net_packet_game_reset pkt_game_reset() {
     net_packet_game_reset result = {};
     net_packet_game_reset *s = &result;
     (void)s;
+    return result;
+}
+net_packet_game_stats pkt_game_stats(uint64_t round_timer) {
+    net_packet_game_stats result = {};
+    net_packet_game_stats *s = &result;
+    (void)s;
+    s->round_timer = round_timer;
     return result;
 }
 net_packet_admin_connect pkt_admin_connect(const char *password) {
@@ -234,10 +270,13 @@ net_packet_admin_update_player_info pkt_admin_update_player_info(uint8_t id, uin
     return result;
 }
 char *packu8(char *buf, uint8_t u);
+char *packu64(char *buf, uint64_t u);
 char *packsv(char *buf, char *str, int len);
 char *packstruct(char *buf, void *content, net_packet_type_enum type) {
     switch (type) {
         case PKT_PING: {
+            net_packet_ping *s = (net_packet_ping*)content;
+            buf = packu64(buf, s->send_time);
             return buf;
         } break;
         case PKT_JOIN: {
@@ -249,6 +288,12 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
         case PKT_CONNECTED: {
             net_packet_connected *s = (net_packet_connected*)content;
             buf = packu8(buf, s->id);
+            return buf;
+        } break;
+        case PKT_DISCONNECT: {
+            net_packet_disconnect *s = (net_packet_disconnect*)content;
+            buf = packu8(buf, s->id);
+            buf = packu8(buf, s->new_master);
             return buf;
         } break;
         case PKT_MAP: {
@@ -300,9 +345,17 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
         case PKT_ROUND_END: {
             net_packet_round_end *s = (net_packet_round_end*)content;
             buf = packu8(buf, s->winner_id);
+            for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+                buf = packu8(buf, s->player_scores[i]);
+            }
             return buf;
         } break;
         case PKT_GAME_RESET: {
+            return buf;
+        } break;
+        case PKT_GAME_STATS: {
+            net_packet_game_stats *s = (net_packet_game_stats*)content;
+            buf = packu64(buf, s->round_timer);
             return buf;
         } break;
         case PKT_ADMIN_CONNECT: {
@@ -325,12 +378,18 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
     }
     return buf;
 }
-void unpacksv(uint8_t **buf, char *dest, uint8_t len);
 uint8_t unpacku8(uint8_t **buf);
+uint64_t unpacku64(uint8_t **buf);
+void unpacksv(uint8_t **buf, char *dest, uint8_t len);
 void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
     uint8_t **base = &buf;
     switch (type) {
-        case PKT_PING: return NULL;
+        case PKT_PING: {
+            net_packet_ping *s = malloc(sizeof(net_packet_ping));
+            if (s == NULL) exit(1);
+            s->send_time = unpacku64(base);
+            return s;
+        } break;
         case PKT_JOIN: {
             net_packet_join *s = malloc(sizeof(net_packet_join));
             if (s == NULL) exit(1);
@@ -342,6 +401,13 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             net_packet_connected *s = malloc(sizeof(net_packet_connected));
             if (s == NULL) exit(1);
             s->id = unpacku8(base);
+            return s;
+        } break;
+        case PKT_DISCONNECT: {
+            net_packet_disconnect *s = malloc(sizeof(net_packet_disconnect));
+            if (s == NULL) exit(1);
+            s->id = unpacku8(base);
+            s->new_master = unpacku8(base);
             return s;
         } break;
         case PKT_MAP: {
@@ -397,9 +463,18 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             net_packet_round_end *s = malloc(sizeof(net_packet_round_end));
             if (s == NULL) exit(1);
             s->winner_id = unpacku8(base);
+            for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+                s->player_scores[i] = unpacku8(base);
+            }
             return s;
         } break;
         case PKT_GAME_RESET: return NULL;
+        case PKT_GAME_STATS: {
+            net_packet_game_stats *s = malloc(sizeof(net_packet_game_stats));
+            if (s == NULL) exit(1);
+            s->round_timer = unpacku64(base);
+            return s;
+        } break;
         case PKT_ADMIN_CONNECT: {
             net_packet_admin_connect *s = malloc(sizeof(net_packet_admin_connect));
             if (s == NULL) exit(1);

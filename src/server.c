@@ -8,12 +8,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 #include "common.h"
 #include "net.h"
+#include "net_protocol.h"
 
 #define MAP_WIDTH 16
 #define MAP_HEIGHT 8
+
+#define FOREACH_PLAYER(IT, P)                                                    \
+    for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                                \
+        for (player_info *P = &players[IT]; P != NULL && P->connected; P = NULL) \
+            if (1)
 
 extern const spell all_spells[];
 
@@ -41,6 +48,7 @@ game_state gs = GS_WAITING;
 
 typedef struct {
     uint8_t id;
+    bool connected;
     char name[9];
     uint8_t x, y;
     uint8_t base_health;
@@ -67,7 +75,9 @@ int clients[MAX_PLAYER_COUNT] = {0};
 player_info players[MAX_PLAYER_COUNT] = {0};
 // Stores the order in which players will do their actions
 int player_round_order[MAX_PLAYER_COUNT] = {0};
-int player_count = 0;
+// int player_count = 0;
+uint8_t round_scores[MAX_PLAYER_COUNT] = {0};
+time_t round_start_time = 0;
 
 const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
@@ -104,8 +114,10 @@ net_packet_player_update pkt_from_info(player_info *p) {
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
-    for (int i = 0; i < player_count; i++) {
-        send_sock(type, content, clients[i]);
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (players[i].connected) {
+            send_sock(type, content, clients[i]);
+        }
     }
 }
 
@@ -158,10 +170,10 @@ void play_round(player_info *player) {
             pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
         broadcast(PKT_PLAYER_ACTION, &action);
         if (s->type == ST_MOVE) {
-            for (int i = 0; i < player_count; i++) {
+            FOREACH_PLAYER(i, other) {
                 // The player tries to move on the same cell as another player so we cancel it
                 // TODO: We could add a negative effect (stun ?)
-                if (players[i].x == player->ax && players[i].y == player->ay && players[i].id != player->id) {
+                if (other->x == player->ax && other->y == player->ay && other->id != player->id) {
                     player->state = RS_PLAYING;
                     return;
                 }
@@ -171,8 +183,7 @@ void play_round(player_info *player) {
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
         } else if (s->type == ST_TARGET) {
-            for (int i = 0; i < player_count; i++) {
-                player_info *other = &players[i];
+            FOREACH_PLAYER(i, other) {
                 if (other->x == player->ax && other->y == player->ay) {
                     damage_player(other, s);
                 }
@@ -186,7 +197,7 @@ void play_round(player_info *player) {
 }
 
 player_info *get_player_from_fd(int fd) {
-    for (int i = 0; i < player_count; i++) {
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
         if (clients[i] == fd) {
             return &players[i];
         }
@@ -194,6 +205,14 @@ player_info *get_player_from_fd(int fd) {
     printf("Unkown player\n");
     exit(1);
     return NULL;
+}
+
+int player_count() {
+    int player_count = 0;
+    FOREACH_PLAYER(i, player) {
+        player_count++;
+    }
+    return player_count;
 }
 
 int compare_players_action(const void *a, const void *b) {
@@ -214,17 +233,16 @@ int compare_players_action(const void *a, const void *b) {
 }
 
 void sort_actions() {
-    for (int i = 0; i < player_count; i++) {
+    for (int i = 0; i < player_count(); i++) {
         player_round_order[i] = i;
     }
-    qsort(player_round_order, player_count, sizeof(int), &compare_players_action);
+    qsort(player_round_order, player_count(), sizeof(int), &compare_players_action);
 }
 
 void start_game() {
     // TODO: Check that every player is really ready (build is set, etc.)
-    if (player_count > 1) {
-        broadcast(PKT_GAME_START, NULL);
-    }
+    broadcast(PKT_GAME_START, NULL);
+    round_start_time = time(NULL);
 }
 
 void send_map(int fd) {
@@ -247,60 +265,78 @@ void send_map(int fd) {
     send_sock(PKT_MAP, &p, fd);
 }
 
+void handle_player_disconnect(int fd) {
+    FD_CLR(fd, &master_set);
+    printf("Player %d left\n", fd);
+    player_info *player = get_player_from_fd(fd);
+    player->connected = false;
+    int new_master = -1;
+    FOREACH_PLAYER(i, player) {
+        if (player->connected && new_master == -1) {
+            new_master = player->id;
+        }
+    }
+    net_packet_disconnect p = pkt_disconnect(player->id, new_master);
+    broadcast(PKT_DISCONNECT, &p);
+    // TODO: Back to lobby
+}
+
 void handle_message(int fd) {
     net_packet p = {0};
     if (packet_read(&p, fd) < 0) {
-        FD_CLR(fd, &master_set);
-        printf("Player %d left\n", fd);
-        // TODO: Handle player disconnect
+        handle_player_disconnect(fd);
         return;
     }
 
-    if (p.type == PKT_JOIN) {
-        clients[player_count] = fd;
-        player_count++;
-
-        net_packet_join *j = (net_packet_join *)p.content;
-        printf("[%d] Joined %.*s\n", fd, 8, j->username);
-        for (int i = 0; i < player_count; i++) {
-            if (clients[i] == fd) {
-                j->id = i;
+    if (p.type == PKT_PING) {
+        send_sock(PKT_PING, p.content, fd);
+    } else if (p.type == PKT_JOIN) {
+        int new_player = -1;
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            if (players[i].connected == false) {
+                players[i].connected = true;
+                clients[i] = fd;
+                new_player = i;
                 break;
             }
         }
+        assert(new_player != -1);
+
+        net_packet_join *j = (net_packet_join *)p.content;
+        printf("[%d] Joined %.*s\n", fd, 8, j->username);
+        j->id = new_player;
 
         // We send previously connected players informations to the new player
-        for (int i = 0; i < player_count - 1; i++) {
-            player_info *player = &players[i];
-            net_packet_join other_user_join = pkt_join(i, player->name);
-            send_sock(PKT_JOIN, &other_user_join, fd);
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            if (players[i].connected && connections[i] != fd) {
+                player_info *player = &players[i];
+                net_packet_join other_user_join = pkt_join(i, player->name);
+                send_sock(PKT_JOIN, &other_user_join, fd);
 
-            net_packet_player_build b =
-                pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
-            send_sock(PKT_PLAYER_BUILD, &b, fd);
+                net_packet_player_build b =
+                    pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
+                send_sock(PKT_PLAYER_BUILD, &b, fd);
 
-            net_packet_player_update u = pkt_from_info(player);
-            send_sock(PKT_PLAYER_UPDATE, &u, fd);
+                net_packet_player_update u = pkt_from_info(player);
+                send_sock(PKT_PLAYER_UPDATE, &u, fd);
+            }
         }
 
-        for (int i = 0; i < player_count; i++) {
-            send_sock(PKT_JOIN, j, clients[i]);
-        }
+        broadcast(PKT_JOIN, j);
 
-        int last_player = player_count - 1;
-        players[last_player].id = last_player;
-        memcpy(players[last_player].name, j->username, 8);
-        players[last_player].name[8] = '\0';
-        players[last_player].health = 0;
-        players[last_player].x = spawn_positions[last_player][0];
-        players[last_player].y = spawn_positions[last_player][1];
+        players[new_player].id = new_player;
+        memcpy(players[new_player].name, j->username, 8);
+        players[new_player].name[8] = '\0';
+        players[new_player].health = 0;
+        players[new_player].x = spawn_positions[new_player][0];
+        players[new_player].y = spawn_positions[new_player][1];
 
-        player_info *pi = &players[last_player];
+        player_info *pi = &players[new_player];
 
         net_packet_player_update u = pkt_from_info(pi);
         broadcast(PKT_PLAYER_UPDATE, &u);
 
-        net_packet_connected c = pkt_connected(last_player);
+        net_packet_connected c = pkt_connected(new_player);
         send_sock(PKT_CONNECTED, &c, fd);
 
         send_map(fd);
@@ -343,50 +379,50 @@ void handle_message(int fd) {
         players[a->id].spell = a->spell;
 
         int all_played = true;
-        for (int i = 0; i < player_count; i++) {
-            if (players[i].state == RS_PLAYING) {
+        FOREACH_PLAYER(i, player) {
+            if (player->state == RS_PLAYING) {
                 all_played = false;
             }
         }
 
         if (all_played) {
             sort_actions();
-            for (int i = 0; i < player_count; i++) {
+            FOREACH_PLAYER(i, player) {
                 play_round(&players[player_round_order[i]]);
             }
-            for (int i = 0; i < player_count; i++) {
-                if (players[i].effect == SE_BURN) {
-                    players[i].health -= players[i].spell_effect->damage;
+            FOREACH_PLAYER(i, player) {
+                if (players->effect == SE_BURN) {
+                    players->health -= player->spell_effect->damage;
                 }
-                if (players[i].effect_round_left > 0) {
-                    players[i].effect_round_left--;
-                    if (players[i].effect_round_left == 0) {
-                        players[i].effect = SE_NONE;
+                if (player->effect_round_left > 0) {
+                    player->effect_round_left--;
+                    if (player->effect_round_left == 0) {
+                        player->effect = SE_NONE;
                     }
                 }
                 net_packet_player_update u = pkt_from_info(&players[i]);
                 broadcast(PKT_PLAYER_UPDATE, &u);
             }
 
-            int alive_count = player_count;
-            for (int i = 0; i < player_count; i++) {
-                if (players[i].health <= 0) {
-                    alive_count--;
-                }
+            int alive_count = 0;
+            FOREACH_PLAYER(i, player) {
+                alive_count++;
             }
-            net_packet_round_end end = {GAME_NOT_ENDED};
 
+            uint8_t end_verdict = GAME_NOT_ENDED;
             if (alive_count == 1) {
-                for (int i = 0; i < player_count; i++) {
-                    if (players[i].health > 0) {
+                FOREACH_PLAYER(i, player) {
+                    if (player->health > 0) {
                         printf("Player %s won the game !\n", players[i].name);
-                        end.winner_id = players[i].id;
+                        end_verdict = i;
+                        round_scores[i]++;
                     }
                 }
             } else if (alive_count == 0) {
                 printf("Nobody won the game...\n");
-                end.winner_id = GAME_TIE;
+                end_verdict = GAME_TIE;
             }
+            net_packet_round_end end = pkt_round_end(end_verdict, round_scores);
             broadcast(PKT_ROUND_END, &end);
         }
     } else if (p.type == PKT_GAME_RESET) {
@@ -400,8 +436,12 @@ void handle_message(int fd) {
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);
         // We send previously connected players informations to the new player
-        for (int i = 0; i < player_count; i++) {
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
             player_info *p = &players[i];
+            if (p->connected == false) {
+                continue;
+            }
+
             p->max_health = p->base_health;
             p->health = p->base_health;
             p->x = spawn_positions[i][0];
@@ -489,6 +529,7 @@ int main(int argc, char **argv) {
         read_fds = master_set;
         int activity = ci(select(fd_count + 1, &read_fds, NULL, NULL, &timeout));
         if (activity < 0) {
+            printf("here?\n");
             exit(1);
         }
 
@@ -502,7 +543,9 @@ int main(int argc, char **argv) {
                         fd_count = connfd;
                     }
                     printf("new connection %d\n", connfd);
-                    if (player_count == MAX_PLAYER_COUNT) {
+                    // TODO: Check if there is any space left
+                    if (false) {  // player_count == MAX_PLAYER_COUNT) {
+                        // TODO: Tell the player the game is full
                         printf("Full\n");
                         FD_CLR(connfd, &master_set);
                         close(connfd);
@@ -512,10 +555,13 @@ int main(int argc, char **argv) {
                     }
                 } else {
                     handle_message(i);
+                    time_t round_timer = time(NULL) - round_start_time;
+                    net_packet_game_stats stats = pkt_game_stats(round_timer);
+                    broadcast(PKT_GAME_STATS, &stats);
                 }
             }
         }
-        usleep(16000);  // Sleep to avoid 100% CPU usage while I implement a better solution
+        usleep(16000);  // TODO: Sleep to avoid 100% CPU usage while I implement a better solution
     }
 
     printf("Client connected\n");

@@ -11,6 +11,7 @@ int strtoint(const char *str, int *out);
 #define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)
 
 #define MAX_SPELL_COUNT 4
+#define MAX_PLAYER_COUNT 4
 
 typedef enum {
     ST_MOVE,

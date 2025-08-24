@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include "common.h"
 #include "net.h"
-#include "net.h"
+#include "net_protocol.h"
 #include "raylib.h"
 #include "ui.h"
 #include "version.h"
@@ -23,7 +23,15 @@ extern const int spell_count;
 #define WIDTH 1280
 #define HEIGHT 720
 
+#define FOREACH_PLAYER(IT, P)                                               \
+    for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                           \
+        for (player *P = &players[IT]; P != NULL && P->connected; P = NULL) \
+            if (1)
+
 Rectangle game_window = {0, 0, WIDTH, HEIGHT};
+uint64_t last_ping = 0;
+time_t round_timer = 0;
+int round_scores[MAX_PLAYER_COUNT] = {0};
 
 // TODO: Cell size should be given by the map
 #define CELL_SIZE 64.0
@@ -205,6 +213,7 @@ typedef struct {
 
 typedef struct {
     int id;
+    bool connected;
     bool init;
     // Position in grid space
     Vector2 position;
@@ -238,9 +247,16 @@ typedef struct {
 } player;
 
 player players[MAX_PLAYER_COUNT] = {0};
-int player_count = 0;
 char current_player_username[8] = {0};
 slider health_bars[MAX_PLAYER_COUNT] = {0};
+
+int player_count() {
+    int player_count = 0;
+    FOREACH_PLAYER(i, player) {
+        player_count++;
+    }
+    return player_count;
+}
 
 typedef struct {
     int player;
@@ -269,6 +285,7 @@ typedef struct {
 player_round_update updates[MAX_PLAYER_COUNT] = {0};
 
 int current_player = -1;
+int master_player = 0;
 round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
@@ -739,8 +756,8 @@ void render_player_move(player_move *move) {
 void render_infos() {
     int over_player = -1;
 
-    const int player_info_width = (game_map.width * CELL_SIZE) / player_count;
-    for (int i = 0; i < player_count; i++) {
+    const int player_info_width = (game_map.width * CELL_SIZE) / player_count();
+    FOREACH_PLAYER(i, player) {
         int start_x = base_x_offset + player_info_width * i;
         Rectangle inner = render_box(start_x, 0, player_info_width, base_y_offset);
         const int x = inner.x;
@@ -762,6 +779,7 @@ void render_infos() {
             DrawText(TextFormat("Effect %d : %d rounds left", players[i].effect, players[i].effect_round_left), x,
                      y + 24, 24, BLACK);
         }
+        DrawText(TextFormat("%d", round_scores[i]), x + inner.width - 48, y + (inner.height - 48) / 2, 48, BLACK);
     }
 
     if (over_player != -1) {
@@ -814,7 +832,6 @@ void reset_game() {
     for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
         anim_pool[i] = (animation){0};
     }
-    player_count = 0;
 
     players[0].color = YELLOW;
     players[1].color = GREEN;
@@ -846,12 +863,12 @@ void init_in_game_ui() {
         toolbar_spells_buttons[i].text = NULL;
     }
 
-    const int player_info_width = (game_map.width * CELL_SIZE) / player_count;
-    for (int i = 0; i < player_count; i++) {
-        int y = 35;
-        int life_bar_width = 0.35 * player_info_width;
+    const int player_info_width = (game_map.width * CELL_SIZE) / player_count();
+    FOREACH_PLAYER(i, player) {
+        int y = 48;
+        int life_bar_width = 0.5 * player_info_width;
         int height = 32;
-        int x = base_x_offset + player_info_width * (i + 1) - life_bar_width * 1.25f;
+        int x = base_x_offset + player_info_width * i + 16;
         health_bars[i].rec = (Rectangle){x, y, life_bar_width, height};
         health_bars[i].color = RED;
         health_bars[i].max = players[i].max_health;
@@ -864,13 +881,15 @@ void init_in_game_ui() {
 //  PKT_PLAYER_UPDATE could also be used just to force player informations when an admin updates it.
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
-        printf("PING\n");
+        net_packet_ping *ping = (net_packet_ping *)p->content;
+        uint64_t now = GetTime() * 1000;
+        last_ping = now - ping->send_time;
     } else if (p->type == PKT_JOIN) {
         net_packet_join *join = (net_packet_join *)p->content;
         printf("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
         memcpy(players[join->id].name, join->username, 8);
         players[join->id].name[8] = '\0';
-        player_count++;
+        players[join->id].connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
         printf("My ID is %d\n", c->id);
@@ -884,6 +903,13 @@ void handle_packet(net_packet *p) {
         net_packet_player_build b =
             pkt_player_build(current_player, base_health, players[current_player].spells, ad, ap);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
+    } else if (p->type == PKT_DISCONNECT) {
+        net_packet_disconnect *d = (net_packet_disconnect *)p->content;
+        printf("Player %d disconnected\n", d->id);
+        players[d->id].connected = false;
+        master_player = d->new_master;
+        active_scene = SCENE_LOBBY;
+        gs = GS_WAITING;
     } else if (p->type == PKT_PLAYER_BUILD) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
@@ -958,10 +984,17 @@ void handle_packet(net_packet *p) {
         if (e->winner_id != GAME_NOT_ENDED) {
             winner_id = e->winner_id;
             gs = GS_ENDING;
+            for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+                round_scores[i] = e->player_scores[i];
+                printf("%d\n", round_scores[i]);
+            }
         }
     } else if (p->type == PKT_GAME_RESET) {
         printf("Client: game reset");
         reset_game();
+    } else if (p->type == PKT_GAME_STATS) {
+        net_packet_game_stats *s = (net_packet_game_stats *)p->content;
+        round_timer = s->round_timer;
     }
 
     free(p->content);
@@ -977,9 +1010,9 @@ void play_round() {
         printf("Casting %s\n", s->name);
 
         player *target = NULL;
-        for (int i = 0; i < player_count; i++) {
-            if (v2eq(a->target, players[i].position)) {
-                target = &players[i];
+        FOREACH_PLAYER(i, player) {
+            if (v2eq(a->target, player->position)) {
+                target = player;
                 break;
             }
         }
@@ -1014,28 +1047,28 @@ void play_round() {
 }
 
 void play_effects() {
-    for (int i = 0; i < player_count; i++) {
-        players[i].position = updates[i].position;
-        if (players[i].effect == SE_BURN) {
-            players[i].health -= players[i].spell_effect->damage;
-            printf("player took a tick of burn and has %d hp left\n", players[i].health);
-            players[i].action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-            players[i].animation_state = PAS_BURNING;
+    FOREACH_PLAYER(i, player) {
+        player->position = updates[i].position;
+        if (player->effect == SE_BURN) {
+            player->health -= players[i].spell_effect->damage;
+            printf("player took a tick of burn and has %d hp left\n", player->health);
+            player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+            player->animation_state = PAS_BURNING;
         }
     }
 }
 
 void end_round() {
-    for (int i = 0; i < player_count; i++) {
-        players[i].health = updates[i].health;
-        players[i].ad = updates[i].ad;
-        players[i].ap = updates[i].ap;
-        players[i].position = updates[i].position;
-        players[i].effect = updates[i].effect;
-        players[i].effect_round_left = updates[i].effect_round_left;
+    FOREACH_PLAYER(i, player) {
+        player->health = updates[i].health;
+        player->ad = updates[i].ad;
+        player->ap = updates[i].ap;
+        player->position = updates[i].position;
+        player->effect = updates[i].effect;
+        player->effect_round_left = updates[i].effect_round_left;
         for (int j = 0; j < MAX_SPELL_COUNT; j++) {
-            if (players[i].cooldowns[j] > 0) {
-                players[i].cooldowns[j]--;
+            if (player->cooldowns[j] > 0) {
+                player->cooldowns[j]--;
             }
         }
     }
@@ -1118,16 +1151,16 @@ void render_scene_in_game() {
                 }
             } else if (state == RS_PLAYING_EFFECTS) {
                 // Checks if player died from effects (ex: burn)
-                for (int i = 0; i < player_count; i++) {
-                    if (players[i].animation_state == PAS_DYING && anim_finished(players[i].action_animation)) {
-                        players[i].dead = true;
+                FOREACH_PLAYER(i, player) {
+                    if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
+                        player->dead = true;
                     }
                 }
                 if (wait_for_animations()) {
-                    for (int i = 0; i < player_count; i++) {
-                        if (players[i].health <= 0 && players[i].dead == false) {
-                            players[i].action_animation = new_animation(AT_ONESHOT, 3.f, 1);
-                            players[i].animation_state = PAS_DYING;
+                    FOREACH_PLAYER(i, player) {
+                        if (player->health <= 0 && player->dead == false) {
+                            player->action_animation = new_animation(AT_ONESHOT, 3.f, 1);
+                            player->animation_state = PAS_DYING;
                         }
                     }
                 }
@@ -1141,8 +1174,8 @@ void render_scene_in_game() {
             render_map();
 
             // TODO: Always render currently animation player on top
-            for (int i = 0; i < player_count; i++) {
-                render_player(&players[i]);
+            FOREACH_PLAYER(i, player) {
+                render_player(player);
             }
 
             if (slash_animation != NO_ANIMATION) {
@@ -1165,17 +1198,16 @@ void render_scene_in_game() {
             }
             render_infos();
             state = next_state;
-            for (int i = 0; i < player_count; i++) {
-                player *p = &players[i];
-                Vector2 screen_pos = grid2screen(p->position);
+            FOREACH_PLAYER(i, player) {
+                Vector2 screen_pos = grid2screen(player->position);
                 Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
                 Vector2 mp = GetMousePosition();
                 if (CheckCollisionPointRec(mp, player_rec)) {
                     Rectangle player_box = render_box(mp.x, mp.y, 350, 150);
-                    int box_center = get_width_center(player_box, p->name, 32);
-                    DrawText(TextFormat("%s", p->name), box_center, player_box.y, 32, BLACK);
-                    DrawText(TextFormat("AD=%d", p->ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
-                    DrawText(TextFormat("AP=%d", p->ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
+                    int box_center = get_width_center(player_box, player->name, 32);
+                    DrawText(TextFormat("%s", player->name), box_center, player_box.y, 32, BLACK);
+                    DrawText(TextFormat("AD=%d", player->ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
+                    DrawText(TextFormat("AP=%d", player->ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
                 }
             }
         } else if (gs == GS_ENDED) {
@@ -1195,6 +1227,13 @@ void render_scene_in_game() {
                 DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
             }
         }
+        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+        char time_string[8] = {0};
+        struct tm *time = localtime(&round_timer);
+        strftime(time_string, 8, "%M:%S", time);
+        int width = MeasureText(time_string, 48);
+        DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
+        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     }
     EndDrawing();
 }
@@ -1211,7 +1250,7 @@ button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, 
 int selected_player_build = -1;
 
 void render_scene_lobby() {
-    start_game_button.disabled = player_count < 2;
+    start_game_button.disabled = player_count() < 2;
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button)) {
@@ -1221,7 +1260,7 @@ void render_scene_lobby() {
         card_update_tabs(&player_list_card);
         card_update_tabs(&server_config_card);
 
-        for (int i = 0; i < player_count; i++) {
+        FOREACH_PLAYER(i, player) {
             if (button_clicked(&player_build_buttons[i])) {
                 selected_player_build = i;
             }
@@ -1244,13 +1283,13 @@ void render_scene_lobby() {
         }
 
         if (gs == GS_WAITING) {
-            for (int i = 0; i < player_count; i++) {
+            FOREACH_PLAYER(i, player) {
                 int x = player_list_card.rec.x + 8;
                 int y = player_list_card.rec.y + 75 + 46 * i;
                 if (i == current_player) {
-                    DrawText(TextFormat("- %s (you)", players[i].name), x, y, 36, WHITE);
+                    DrawText(TextFormat("- %s (you)", player->name), x, y, 36, WHITE);
                 } else {
-                    DrawText(TextFormat("- %s", players[i].name), x, y, 36, WHITE);
+                    DrawText(TextFormat("- %s", player->name), x, y, 36, WHITE);
                 }
                 button_render(&player_build_buttons[i]);
             }
@@ -1263,7 +1302,7 @@ void render_scene_lobby() {
             }
         }
 
-        if (current_player == 0) {
+        if (current_player == master_player) {
             button_render(&start_game_button);
         }
 
@@ -1292,6 +1331,7 @@ void render_scene_lobby() {
                 render_spell_tooltip(&all_spells[icon_tooltip]);
             }
         }
+        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     }
     EndDrawing();
 }
@@ -1532,6 +1572,7 @@ int main(int argc, char **argv) {
         spell_select_buttons = malloc(sizeof(button) * spell_count);
         spell_selection = malloc(sizeof(bool) * spell_count);
         {
+            // TODO: Temporary
             int max_row_count = 9;
             int x = player_info_card.rec.x + 16;
             int y = player_info_card.rec.y + 125;
@@ -1540,6 +1581,10 @@ int main(int argc, char **argv) {
                 int cell_y = y + 60 * (i / max_row_count);
                 spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons[all_spells[i].icon], NULL, 32);
                 spell_selection[i] = false;
+            }
+            for (int i = 0; i < 4; i++) {
+                spell_selection[i] = true;
+                spell_select_buttons[i].color = DARKGRAY;
             }
         }
         {
@@ -1567,6 +1612,8 @@ int main(int argc, char **argv) {
         player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
     }
 
+    // Send ping every seconds
+    float ping_counter = 1;
     while (!WindowShouldClose()) {
         // Update network
         if (active_scene == SCENE_LOBBY || active_scene == SCENE_IN_GAME) {
@@ -1585,6 +1632,16 @@ int main(int argc, char **argv) {
             }
         }
 
+        if (client_fd != 0) {
+            ping_counter -= GetFrameTime();
+            if (ping_counter <= 0) {
+                net_packet_ping ping = {.send_time = (uint64_t)(GetTime() * 1000)};
+                send_sock(PKT_PING, &ping, client_fd);
+                ping_counter = 1;
+            }
+        }
+
+        DrawText(TextFormat("FPS=%d", GetFPS()), 0, 0, 24, GREEN);
         // Rendering
         if (active_scene == SCENE_MAIN_MENU) {
             render_scene_main_menu();

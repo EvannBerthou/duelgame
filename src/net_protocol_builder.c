@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -10,6 +11,7 @@ typedef enum {
     TYPE_UINT8_PTR,
     TYPE_UINT8_ARRAY,
     TYPE_CHAR_ARRAY,
+    TYPE_UINT64,
 } net_struct_field_type;
 
 typedef struct {
@@ -23,11 +25,13 @@ int get_field_size(struct_field *f) {
     if (f->type == TYPE_CHAR_ARRAY) {
         return f->array_size;
     } else if (f->type == TYPE_UINT8) {
-        return 1;
+        return sizeof(uint8_t);
     } else if (f->type == TYPE_UINT8_PTR) {
         return 0;
     } else if (f->type == TYPE_UINT8_ARRAY) {
         return 0;
+    } else if (f->type == TYPE_UINT64) {
+        return sizeof(uint64_t);
     } else {
         printf("Unknown field\n");
         exit(1);
@@ -162,6 +166,10 @@ void parse_struct(stb_lexer *l) {
                 expect_next_token(l, CLEX_id);
                 expect_next_token_char(l, ']');
             }
+        } else if (strcmp(l->string, "uint64_t") == 0) {
+            f->type = TYPE_UINT64;
+            expect_next_token(l, CLEX_id);
+            f->name = strdup(l->string);
         } else {
             printf("Unknown type %s\n", l->string);
         }
@@ -186,7 +194,7 @@ void parse_struct(stb_lexer *l) {
 int main(void) {
     stb_lexer l = {0};
     char store[2048] = {0};
-    //TODO: Should be an argument
+    // TODO: Should be an argument
     FILE *f = fopen("include/net_protocol_base.h", "r");
     if (f == NULL) {
         printf("Error reading file\n");
@@ -267,6 +275,8 @@ int main(void) {
                 printf("uint8_t *%s", f->name);
             } else if (f->type == TYPE_CHAR_ARRAY) {
                 printf("const char *%s", f->name);
+            } else if (f->type == TYPE_UINT64) {
+                printf("uint64_t %s", f->name);
             }
 
             if (j != s->field_count - 1) {
@@ -288,6 +298,8 @@ int main(void) {
             } else if (f->type == TYPE_CHAR_ARRAY) {
                 printf("    memcpy(s->%s, %s, %d);\n", f->name, f->name, f->array_size);
                 printf("    s->%s[%d - 1] = 0;\n", f->name, f->array_size);
+            } else if (f->type == TYPE_UINT64) {
+                printf("    s->%s = %s;\n", f->name, f->name);
             }
         }
         printf("    return result;\n");
@@ -295,6 +307,7 @@ int main(void) {
     }
 
     printf("char *packu8(char *buf, uint8_t u);\n");
+    printf("char *packu64(char *buf, uint64_t u);\n");
     printf("char *packsv(char *buf, char *str, int len);\n");
 
     printf("char *packstruct(char *buf, void *content, net_packet_type_enum type) {\n");
@@ -318,6 +331,8 @@ int main(void) {
                     printf("            for (int i = 0; i < %s; i++) {\n", f->size);
                     printf("                buf = packu8(buf, s->%s[i]);\n", f->name);
                     printf("            }\n");
+                } else if (f->type == TYPE_UINT64) {
+                    printf("            buf = packu64(buf, s->%s);\n", f->name);
                 }
             }
         }
@@ -328,8 +343,9 @@ int main(void) {
     printf("    return buf;\n");
     printf("}\n");
 
-    printf("void unpacksv(uint8_t **buf, char *dest, uint8_t len);\n");
     printf("uint8_t unpacku8(uint8_t **buf);\n");
+    printf("uint64_t unpacku64(uint8_t **buf);\n");
+    printf("void unpacksv(uint8_t **buf, char *dest, uint8_t len);\n");
 
     printf("void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {\n");
     printf("    uint8_t **base = &buf;\n");
@@ -357,6 +373,8 @@ int main(void) {
                     printf("            for (int i = 0; i < %s; i++) {\n", f->size);
                     printf("                s->%s[i] = unpacku8(base);\n", f->name);
                     printf("            }\n");
+                } else if (f->type == TYPE_UINT64) {
+                    printf("            s->%s = unpacku64(base);\n", f->name);
                 }
             }
             printf("            return s;\n");

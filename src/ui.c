@@ -249,7 +249,6 @@ void buttoned_slider_render(buttoned_slider *bs) {
 
 int box_border = 15;
 
-// TODO: Border should have a fixed size and not scale with the content
 Rectangle render_box(int x, int y, int w, int h) {
     NPatchInfo patch = {.source = {0, 0, box.width, box.height},
                         .left = box_border,
