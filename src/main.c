@@ -23,9 +23,9 @@ extern const int spell_count;
 #define WIDTH 1280
 #define HEIGHT 720
 
-#define FOREACH_PLAYER(IT, P)                                               \
-    for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                           \
-        for (player *P = &players[IT]; P != NULL && P->connected; P = NULL) \
+#define FOREACH_PLAYER(IT, P)                                                    \
+    for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                                \
+        for (player *P = &players[IT]; P != NULL && P->info.connected; P = NULL) \
             if (1)
 
 Rectangle game_window = {0, 0, WIDTH, HEIGHT};
@@ -212,34 +212,13 @@ typedef struct {
 } player_move;
 
 typedef struct {
-    int id;
-    bool connected;
-    bool init;
-    // Position in grid space
-    Vector2 position;
-    char name[9];
+    player_info info;
     Color color;
-    uint8_t base_health;
-    int health;
-    uint8_t max_health;
     bool dead;
-    uint8_t ad;
-    uint8_t ap;
-
-    uint8_t spells[MAX_SPELL_COUNT];
-    uint8_t cooldowns[MAX_SPELL_COUNT];
-    player_action action;
     uint8_t selected_spell;
     map_layer action_range;
-
     player_move round_move;
-    bool waiting;
-
-    // TODO: We should be able to stack effects (stun + burn)
-    spell_effect effect;
-    const spell *spell_effect;
-    uint8_t effect_round_left;
-
+    bool waiting;                   // TODO: remove and be a round_state ?
     anim_id animation;
     anim_id action_animation;
     player_animation_state animation_state;
@@ -266,7 +245,7 @@ typedef struct {
 } player_round_action;
 
 // Buffer of actions to display
-#define MAX_PLAYER_ROUND_ACTION_COUNT 4
+#define MAX_PLAYER_ROUND_ACTION_COUNT MAX_PLAYER_COUNT
 player_round_action actions[MAX_PLAYER_ROUND_ACTION_COUNT] = {0};
 int action_count = 0;
 int action_step = 0;
@@ -417,7 +396,7 @@ bool can_player_move(player *p, Vector2 cell) {
 
 const spell *get_selected_spell() {
     player *p = &players[current_player];
-    return &all_spells[p->spells[p->selected_spell]];
+    return &all_spells[p->info.spells[p->selected_spell]];
 }
 
 typedef struct {
@@ -432,9 +411,9 @@ typedef struct {
 void compute_spell_range(player *p) {
     Queue q = {.front = 0, .rear = 0};
     q.nodes = calloc(game_map.width * game_map.height, sizeof(Node));
-    q.nodes[q.rear++] = (Node){p->position.x, p->position.y, 0};
+    q.nodes[q.rear++] = (Node){p->info.x, p->info.y, 0};
     clear_map(&p->action_range);
-    set_map(&p->action_range, p->position.x, p->position.y, 1);
+    set_map(&p->action_range, p->info.x, p->info.y, 1);
 
     int range = get_selected_spell()->range;
     int dx[] = {-1, 1, 0, 0};
@@ -473,17 +452,18 @@ int player_cast_spell(player *p, Vector2 origin) {
 }
 
 player_move player_exec_action(player *p) {
-    if (p->effect == SE_STUN) {
+    if (p->info.effect == SE_STUN) {
         return (player_move){.action = PA_CANT_PLAY, .position = (Vector2){0, 0}};
     }
 
+    player_info *i = &p->info;
     const Vector2 g = screen2grid(GetMousePosition());
     if (get_map(&game_map, g.x, g.y) != -1 && IsMouseButtonPressed(0)) {
-        if (p->action == PA_SPELL) {
-            if (p->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
-                int selected_spell = p->spells[p->selected_spell];
-                p->cooldowns[p->selected_spell] = get_selected_spell()->cooldown;
-                if (p->cooldowns[p->selected_spell] > 0) {
+        if (i->action == PA_SPELL) {
+            if (i->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
+                int selected_spell = i->spells[p->selected_spell];
+                i->cooldowns[p->selected_spell] = get_selected_spell()->cooldown;
+                if (i->cooldowns[p->selected_spell] > 0) {
                     p->selected_spell = 0;
                 }
                 return (player_move){.action = PA_SPELL, .position = g, .spell = selected_spell};
@@ -552,9 +532,9 @@ void render_player(player *p) {
     if (p->dead) {
         return;
     }
-
-    int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
-    int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
+    player_info *i = &p->info;
+    int x_pos = base_x_offset + i->x * CELL_SIZE + 8;
+    int y_pos = base_y_offset + i->y * CELL_SIZE - 24;
     Vector2 player_position = {x_pos, y_pos};
     Texture2D player_texture = player_textures[get_frame(p->animation)];
     Color c = WHITE;
@@ -563,8 +543,8 @@ void render_player(player *p) {
     if (p->animation_state == PAS_MOVING) {
         double progress = get_process(p->action_animation);
 
-        int x_pos = base_x_offset + p->position.x * CELL_SIZE + 8;
-        int y_pos = base_y_offset + p->position.y * CELL_SIZE - 24;
+        int x_pos = base_x_offset + i->x * CELL_SIZE + 8;
+        int y_pos = base_y_offset + i->y * CELL_SIZE - 24;
 
         const int x_target = base_x_offset + p->moving_target.x * CELL_SIZE + 8;
         const int y_target = base_y_offset + p->moving_target.y * CELL_SIZE - 24;
@@ -572,12 +552,13 @@ void render_player(player *p) {
         player_position.y = lerp(y_pos, y_target, progress);
 
         if (anim_finished(p->action_animation)) {
-            p->position = p->moving_target;
+            i->x = p->moving_target.x;
+            i->y = p->moving_target.y;
         }
     } else if (p->animation_state == PAS_DAMAGE) {
         c = RED;
         if (anim_finished(p->action_animation)) {
-            if (p->health <= 0) {
+            if (i->health <= 0) {
                 p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
                 p->animation_state = PAS_DYING;
                 slash_animation = NO_ANIMATION;
@@ -647,8 +628,8 @@ void render_spell_actions(player *p) {
     if (s->type == ST_MOVE) {
         for (int x = -s->range; x <= s->range; x++) {
             for (int y = -s->range; y <= s->range; y++) {
-                const int x_pos = p->position.x + x;
-                const int y_pos = p->position.y + y;
+                const int x_pos = p->info.x + x;
+                const int y_pos = p->info.y + y;
                 if (can_player_move(p, (Vector2){x_pos, y_pos})) {
                     Vector2 s = grid2screen((Vector2){x_pos, y_pos});
                     render_game_slot(s);
@@ -658,8 +639,8 @@ void render_spell_actions(player *p) {
     } else if (s->type == ST_TARGET) {
         for (int x = -s->range; x <= s->range; x++) {
             for (int y = -s->range; y <= s->range; y++) {
-                const int x_pos = p->position.x + x;
-                const int y_pos = p->position.y + y;
+                const int x_pos = p->info.x + x;
+                const int y_pos = p->info.y + y;
                 Vector2 g = {x_pos, y_pos};
                 if (can_player_move(p, g)) {
                     Vector2 s = grid2screen(g);
@@ -672,7 +653,7 @@ void render_spell_actions(player *p) {
         for (int x = -s->range; x <= s->range; x++) {
             for (int y = -s->range; y <= s->range; y++) {
                 const Vector2 cell = {g.x + x, g.y + y};
-                if (is_cell_in_zone(p->position, g, cell, s)) {
+                if (is_cell_in_zone((Vector2){p->info.x, p->info.y}, g, cell, s)) {
                     Vector2 s = grid2screen(cell);
                     render_game_slot(s);
                 }
@@ -698,14 +679,15 @@ bool is_over_toolbar_cell(uint8_t cell_id) {
 void render_player_actions(player *p) {
     // Toolbar rendering
     int hoverred_button = -1;
+    player_info *info = &p->info;
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         button *b = &toolbar_spells_buttons[i];
-        bool on_cooldown = p->cooldowns[i] > 0;
-        Texture2D icon = icons[all_spells[p->spells[i]].icon];
+        bool on_cooldown = info->cooldowns[i] > 0;
+        Texture2D icon = icons[all_spells[info->spells[i]].icon];
         Color tint = WHITE;
         if (on_cooldown) {
             tint = GRAY;
-            const char *text = TextFormat("%d", p->cooldowns[i]);
+            const char *text = TextFormat("%d", info->cooldowns[i]);
             toolbar_spells_buttons[i].text = text;
         }
 
@@ -715,15 +697,15 @@ void render_player_actions(player *p) {
         button_render(b);
 
         if (button_hover(b)) {
-            hoverred_button = p->spells[i];
+            hoverred_button = info->spells[i];
         }
         if (button_clicked(b)) {
-            p->action = PA_SPELL;
+            info->action = PA_SPELL;
             p->selected_spell = i;
         }
     }
 
-    if (p->action == PA_SPELL) {
+    if (info->action == PA_SPELL) {
         draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_spells_buttons[0].rec.y);
     }
 
@@ -732,8 +714,8 @@ void render_player_actions(player *p) {
     }
 
     // In-game rendering
-    if (p->cooldowns[p->selected_spell] == 0) {
-        if (p->action == PA_SPELL) {
+    if (info->cooldowns[p->selected_spell] == 0) {
+        if (info->action == PA_SPELL) {
             render_spell_actions(p);
         }
     }
@@ -758,15 +740,16 @@ void render_infos() {
 
     const int player_info_width = (game_map.width * CELL_SIZE) / player_count();
     FOREACH_PLAYER(i, player) {
+        player_info *info = &players[i].info;
         int start_x = base_x_offset + player_info_width * i;
         Rectangle inner = render_box(start_x, 0, player_info_width, base_y_offset);
         const int x = inner.x;
         const int y = inner.y;
 
         if (i == current_player) {
-            DrawTextEx(font, TextFormat("%s (you)", players[i].name), (Vector2){x, y}, 24, 1, BLACK);
+            DrawTextEx(font, TextFormat("%s (you)", info->name), (Vector2){x, y}, 24, 1, BLACK);
         } else {
-            DrawTextEx(font, TextFormat("%s", players[i].name), (Vector2){x, y}, 24, 1, BLACK);
+            DrawTextEx(font, TextFormat("%s", info->name), (Vector2){x, y}, 24, 1, BLACK);
         }
 
         slider_render(&health_bars[i]);
@@ -774,18 +757,18 @@ void render_infos() {
             over_player = i;
         }
 
-        if (players[i].effect_round_left > 0) {
+        if (info->effect_round_left > 0) {
             // TODO: Display an icon instead
-            DrawText(TextFormat("Effect %d : %d rounds left", players[i].effect, players[i].effect_round_left), x,
+            DrawText(TextFormat("Effect %d : %d rounds left", info->effect, info->effect_round_left), x,
                      y + 24, 24, BLACK);
         }
         DrawText(TextFormat("%d", round_scores[i]), x + inner.width - 48, y + (inner.height - 48) / 2, 48, BLACK);
     }
 
     if (over_player != -1) {
-        player *p = &players[over_player];
+        player_info *i = &players[over_player].info;
         Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 200, 75};
-        const char *description = TextFormat("%d/%d", p->health, p->max_health);
+        const char *description = TextFormat("%d/%d", i->health, i->max_health);
         render_tooltip(rec, "Health", description);
     }
 }
@@ -842,7 +825,7 @@ void reset_game() {
         players[i].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
         players[i].action_animation = NO_ANIMATION;
         players[i].animation_state = PAS_NONE;
-        players[i].action = PA_SPELL;
+        players[i].info.action = PA_SPELL;
         players[i].selected_spell = 0;
         players[i].dead = false;
     }
@@ -871,8 +854,8 @@ void init_in_game_ui() {
         int x = base_x_offset + player_info_width * i + 16;
         health_bars[i].rec = (Rectangle){x, y, life_bar_width, height};
         health_bars[i].color = RED;
-        health_bars[i].max = players[i].max_health;
-        health_bars[i].value = players[i].max_health;
+        health_bars[i].max = players[i].info.max_health;
+        health_bars[i].value = players[i].info.max_health;
     }
 }
 
@@ -887,27 +870,27 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_JOIN) {
         net_packet_join *join = (net_packet_join *)p->content;
         printf("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
-        memcpy(players[join->id].name, join->username, 8);
-        players[join->id].name[8] = '\0';
-        players[join->id].connected = true;
+        memcpy(players[join->id].info.name, join->username, 8);
+        players[join->id].info.name[8] = '\0';
+        players[join->id].info.connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
         printf("My ID is %d\n", c->id);
         current_player = c->id;
         master_player = c->master;
 
-        memcpy(players[current_player].spells, my_spells, MAX_SPELL_COUNT);
+        memcpy(players[current_player].info.spells, my_spells, MAX_SPELL_COUNT);
         int base_health = 50 + health_slider.slider.value;
         int ad = physic_power_slider.slider.value;
         int ap = magic_power_slider.slider.value;
         printf("Joining with %d ad and %d ap\n", ad, ap);
         net_packet_player_build b =
-            pkt_player_build(current_player, base_health, players[current_player].spells, ad, ap);
+            pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
         printf("Player %d disconnected\n", d->id);
-        players[d->id].connected = false;
+        players[d->id].info.connected = false;
         master_player = d->new_master;
         active_scene = SCENE_LOBBY;
         gs = GS_WAITING;
@@ -915,14 +898,13 @@ void handle_packet(net_packet *p) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
         printf("Setting build for %d\n", b->id);
-
-        player->base_health = b->base_health;
-        player->max_health = b->base_health;
-        player->health = b->base_health;
-        player->ad = b->ad;
-        player->ap = b->ap;
+        player->info.base_health = b->base_health;
+        player->info.max_health = b->base_health;
+        player->info.health = b->base_health;
+        player->info.ad = b->ad;
+        player->info.ap = b->ap;
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-            player->spells[i] = b->spells[i];
+            player->info.spells[i] = b->spells[i];
         }
     } else if (p->type == PKT_MAP) {
         net_packet_map *m = (net_packet_map *)p->content;
@@ -952,14 +934,14 @@ void handle_packet(net_packet *p) {
         player *player = &players[u->id];
 
         if (gs == GS_WAITING) {
-            player->health = u->health;
-            player->max_health = u->max_health;
-            player->ad = u->ad;
-            player->ap = u->ap;
-            player->position.x = u->x;
-            player->position.y = u->y;
-            player->effect = u->effect;
-            player->effect_round_left = u->effect_round_left;
+            player->info.health = u->health;
+            player->info.max_health = u->max_health;
+            player->info.ad = u->ad;
+            player->info.ap = u->ap;
+            player->info.x = u->x;
+            player->info.y = u->y;
+            player->info.effect = u->effect;
+            player->info.effect_round_left = u->effect_round_left;
         } else {
             updates[u->id].position = (Vector2){u->x, u->y};
             updates[u->id].health = u->health;
@@ -1012,7 +994,7 @@ void play_round() {
 
         player *target = NULL;
         FOREACH_PLAYER(i, player) {
-            if (v2eq(a->target, player->position)) {
+            if (v2eq(a->target, (Vector2){player->info.x, player->info.y})) {
                 target = player;
                 break;
             }
@@ -1027,19 +1009,19 @@ void play_round() {
             slash_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, 3);
             slash_cell = a->target;
             if (target != NULL) {
-                target->health -= s->damage;
-                health_bars[target->id].value = target->health;
+                target->info.health -= s->damage;
+                health_bars[target->info.id].value = target->info.health;
                 target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                 target->animation_state = PAS_DAMAGE;
                 if (s->effect != SE_NONE) {
-                    target->effect = s->effect;
-                    target->effect_round_left = s->effect_duration;
-                    target->spell_effect = s;
+                    target->info.effect = s->effect;
+                    target->info.effect_round_left = s->effect_duration;
+                    target->info.spell_effect = s;
                 }
             }
         }
     } else if (a->action == PA_CANT_PLAY) {
-        if (p->effect_round_left > 0) {
+        if (p->info.effect_round_left > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             p->animation_state = PAS_STUNNED;
         }
@@ -1049,10 +1031,12 @@ void play_round() {
 
 void play_effects() {
     FOREACH_PLAYER(i, player) {
-        player->position = updates[i].position;
-        if (player->effect == SE_BURN) {
-            player->health -= players[i].spell_effect->damage;
-            printf("player took a tick of burn and has %d hp left\n", player->health);
+        player_info *info = &players->info;
+        info->x = updates[i].position.x;
+        info->y = updates[i].position.y;
+        if (info->effect == SE_BURN) {
+            info->health -= info->spell_effect->damage;
+            printf("player took a tick of burn and has %d hp left\n", player->info.health);
             player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             player->animation_state = PAS_BURNING;
         }
@@ -1061,15 +1045,16 @@ void play_effects() {
 
 void end_round() {
     FOREACH_PLAYER(i, player) {
-        player->health = updates[i].health;
-        player->ad = updates[i].ad;
-        player->ap = updates[i].ap;
-        player->position = updates[i].position;
-        player->effect = updates[i].effect;
-        player->effect_round_left = updates[i].effect_round_left;
+        player->info.health = updates[i].health;
+        player->info.ad = updates[i].ad;
+        player->info.ap = updates[i].ap;
+        player->info.x = updates[i].position.x;
+        player->info.y = updates[i].position.y;
+        player->info.effect = updates[i].effect;
+        player->info.effect_round_left = updates[i].effect_round_left;
         for (int j = 0; j < MAX_SPELL_COUNT; j++) {
-            if (player->cooldowns[j] > 0) {
-                player->cooldowns[j]--;
+            if (player->info.cooldowns[j] > 0) {
+                player->info.cooldowns[j]--;
             }
         }
     }
@@ -1121,7 +1106,7 @@ void render_scene_in_game() {
             if (state == RS_PLAYING) {
                 for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                     if (IsKeyPressed(keybinds[i])) {
-                        players[current_player].action = PA_SPELL;
+                        players[current_player].info.action = PA_SPELL;
                         set_selected_spell(&players[current_player], i);
                     }
                 }
@@ -1159,7 +1144,7 @@ void render_scene_in_game() {
                 }
                 if (wait_for_animations()) {
                     FOREACH_PLAYER(i, player) {
-                        if (player->health <= 0 && player->dead == false) {
+                        if (player->info.health <= 0 && player->dead == false) {
                             player->action_animation = new_animation(AT_ONESHOT, 3.f, 1);
                             player->animation_state = PAS_DYING;
                         }
@@ -1200,15 +1185,15 @@ void render_scene_in_game() {
             render_infos();
             state = next_state;
             FOREACH_PLAYER(i, player) {
-                Vector2 screen_pos = grid2screen(player->position);
+                Vector2 screen_pos = grid2screen((Vector2){player->info.x, player->info.y});
                 Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
                 Vector2 mp = GetMousePosition();
                 if (CheckCollisionPointRec(mp, player_rec)) {
                     Rectangle player_box = render_box(mp.x, mp.y, 350, 150);
-                    int box_center = get_width_center(player_box, player->name, 32);
-                    DrawText(TextFormat("%s", player->name), box_center, player_box.y, 32, BLACK);
-                    DrawText(TextFormat("AD=%d", player->ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
-                    DrawText(TextFormat("AP=%d", player->ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
+                    int box_center = get_width_center(player_box, player->info.name, 32);
+                    DrawText(TextFormat("%s", player->info.name), box_center, player_box.y, 32, BLACK);
+                    DrawText(TextFormat("AD=%d", player->info.ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
+                    DrawText(TextFormat("AP=%d", player->info.ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
                 }
             }
         } else if (gs == GS_ENDED) {
@@ -1221,7 +1206,7 @@ void render_scene_in_game() {
             if (winner_id == 255) {
                 DrawText("Game draw", 0, 0, 64, WHITE);
             } else {
-                DrawText(TextFormat("%s won the game !", players[winner_id].name), 0, 0, 64, WHITE);
+                DrawText(TextFormat("%s won the game !", players[winner_id].info.name), 0, 0, 64, WHITE);
             }
 
             if (current_player == 0) {
@@ -1281,19 +1266,19 @@ void render_scene_lobby() {
         if (selected_player_build == -1) {
             card_render(&player_list_card);
             card_render(&server_config_card);
-        }
+        }   
 
         if (gs == GS_WAITING) {
             int idx = 0;
-            //TODO: We should order names based on who connected first
+            // TODO: We should order names based on who connected first
             FOREACH_PLAYER(i, player) {
                 int x = player_list_card.rec.x + 8;
                 int y = player_list_card.rec.y + 75 + 46 * idx;
                 Color c = master_player == i ? YELLOW : WHITE;
                 if (i == current_player) {
-                    DrawText(TextFormat("- %s (you)", player->name), x, y, 36, c);
+                    DrawText(TextFormat("- %s (you)", player->info.name), x, y, 36, c);
                 } else {
-                    DrawText(TextFormat("- %s", player->name), x, y, 36, c);
+                    DrawText(TextFormat("- %s", player->info.name), x, y, 36, c);
                 }
                 button_render(&player_build_buttons[idx]);
                 idx++;
@@ -1315,19 +1300,20 @@ void render_scene_lobby() {
             int icon_tooltip = -1;
             card_render(&player_build_card);
             Rectangle header = {player_build_card.rec.x, player_build_card.rec.y + 75, player_build_card.rec.width, 64};
-            DrawTextCenter(header, TextFormat("Viewing %s build", players[selected_player_build].name), 54, WHITE);
+            DrawTextCenter(header, TextFormat("Viewing %s build", players[selected_player_build].info.name), 54, WHITE);
             player *p = &players[selected_player_build];
+            player_info *info = &p->info;
             int x = player_build_card.rec.x + 25;
-            DrawText(TextFormat("Health = %d", p->max_health), x, header.y + 64, 32, WHITE);
-            DrawText(TextFormat("AD = %d", p->ad), x, header.y + 96, 32, WHITE);
-            DrawText(TextFormat("AP = %d", p->ap), x, header.y + 128, 32, WHITE);
+            DrawText(TextFormat("Health = %d", info->max_health), x, header.y + 64, 32, WHITE);
+            DrawText(TextFormat("AD = %d", info->ad), x, header.y + 96, 32, WHITE);
+            DrawText(TextFormat("AP = %d", info->ap), x, header.y + 128, 32, WHITE);
             DrawText("Spells", x, header.y + 160, 32, WHITE);
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                Texture2D icon = icons[all_spells[p->spells[i]].icon];
+                Texture2D icon = icons[all_spells[info->spells[i]].icon];
                 Rectangle dst = {x + 60 * i, header.y + 192, 50, 50};
                 icon_render(icon, dst);
                 if (icon_hover(dst)) {
-                    icon_tooltip = p->spells[i];
+                    icon_tooltip = info->spells[i];
                 }
             }
             button_render(&close_build_card_button);
@@ -1607,7 +1593,7 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        players[i].id = i;
+        players[i].info.id = i;
     }
 
     // Lobby

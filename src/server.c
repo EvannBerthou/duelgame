@@ -42,30 +42,6 @@ bool is_admin(int fd) {
 }
 
 game_state gs = GS_WAITING;
-
-typedef struct {
-    uint8_t id;
-    bool connected;
-    char name[9];
-    uint8_t x, y;
-    uint8_t base_health;
-    int health;
-    uint8_t max_health;
-    uint8_t ad;
-    uint8_t ap;
-
-    round_state state;
-    player_action action;
-    uint8_t ax, ay;
-    uint8_t spells[MAX_SPELL_COUNT];
-    uint8_t spell;
-
-    //TODO: Multiple effects can be active at the same time
-    spell_effect effect;
-    uint8_t effect_round_left;
-    const spell *spell_effect;
-} player_info;
-
 int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
 int connection_count = 0;
 int master_player = 0;
@@ -135,11 +111,12 @@ void damage_player(player_info *p, const spell *s) {
 void reset_player(player_info *player) {
     player->max_health = player->base_health;
     player->health = player->max_health;
-    player->x = 0;
-    player->y = 0;
+    player->x = spawn_positions[player->id][0];
+    player->y = spawn_positions[player->id][1];
     player->effect = SE_NONE;
     player->effect_round_left = 0;
     player->spell_effect = NULL;
+    printf("Reseting player %d with %d/%d hp\n", player->id, player->health, player->max_health);
     net_packet_player_update u = pkt_from_info(player);
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
@@ -256,8 +233,8 @@ void start_game() {
     }
 
     // TODO: Check that every player is really ready (build is set, etc.)
-    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        reset_player(&players[i]);
+    FOREACH_PLAYER(i, player) {
+        reset_player(player);
     }
     broadcast(PKT_GAME_START, NULL);
     round_start_time = time(NULL);
@@ -326,8 +303,8 @@ void handle_message(int fd) {
         j->id = new_player;
 
         // We send previously connected players informations to the new player
-        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-            if (players[i].connected && connections[i] != fd) {
+        FOREACH_PLAYER(i, player) {
+            if (clients[i] != fd) {
                 player_info *player = &players[i];
                 net_packet_join other_user_join = pkt_join(i, player->name);
                 send_sock(PKT_JOIN, &other_user_join, fd);
@@ -346,9 +323,6 @@ void handle_message(int fd) {
         players[new_player].id = new_player;
         memcpy(players[new_player].name, j->username, 8);
         players[new_player].name[8] = '\0';
-        players[new_player].health = 0;
-        players[new_player].x = spawn_positions[new_player][0];
-        players[new_player].y = spawn_positions[new_player][1];
 
         player_info *pi = &players[new_player];
 

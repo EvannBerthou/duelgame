@@ -9,29 +9,6 @@
 #include <unistd.h>
 #include "net_protocol.h"
 
-typedef enum {
-    RS_PLAYING,
-    RS_WAITING,
-    RS_PLAYING_ROUND,
-    RS_WAITING_ANIMATIONS,
-    RS_PLAYING_EFFECTS,
-    RS_COUNT,
-} round_state;
-
-typedef enum {
-    GS_WAITING,
-    GS_STARTED,
-    GS_ENDING,
-    GS_ENDED,
-    GS_COUNT
-} game_state;
-
-typedef enum {
-    PA_NONE,
-    PA_SPELL,
-    PA_CANT_PLAY,
-} player_action;
-
 typedef uint8_t net_packet_type;
 
 typedef struct {

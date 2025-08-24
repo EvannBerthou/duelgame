@@ -1,4 +1,7 @@
 #include "common.h"
+#include <errno.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 int strtoint(const char *str, int *out) {
     char *endptr = NULL;
