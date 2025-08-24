@@ -1,7 +1,40 @@
 #include "common.h"
 #include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+#define MAX_LOG_HISTORY 2048
+char *log_history[MAX_LOG_HISTORY] = {0};
+int log_history_ptr = 0;
+
+void LOG(const char *fmt, ...) {
+    va_list args;
+    char *formatted = NULL;
+    va_start(args, fmt);
+    vasprintf(&formatted, fmt, args);
+    va_end(args);
+    asprintf(&log_history[log_history_ptr], "[%s(%d)]%s", LOG_PREFIX, getpid(), formatted);
+    free(formatted);
+
+    printf("%s", log_history[log_history_ptr]);
+    log_history_ptr++;
+    if (log_history_ptr == MAX_LOG_HISTORY) {
+        log_history_ptr = 0;
+    }
+}
+
+const char *get_log(int idx) {
+    if (idx < log_history_ptr && idx >= 0) {
+        return log_history[idx];
+    }
+    return NULL;
+}
+
+int get_log_count() {
+    return log_history_ptr - 1;
+}
 
 int strtoint(const char *str, int *out) {
     char *endptr = NULL;

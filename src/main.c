@@ -20,6 +20,24 @@
 extern const spell all_spells[];
 extern const int spell_count;
 
+bool display_logs = false;
+int log_base = 0;
+#define LOG_LINE_COUNT 20
+
+//TODO: Maybe make a full console system instead of just logs ?
+void draw_logs() {
+    if (display_logs) {
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), GetColor(0x181818AA));
+        for (int i = 0; i < fmin(LOG_LINE_COUNT, get_log_count()); i++) {
+            int idx = get_log_count() - fmin(LOG_LINE_COUNT, get_log_count()) + i - log_base;
+            if (get_log(idx) == NULL) {
+                continue;
+            }
+            DrawText(get_log(idx), 0, 32 * i, 32, GREEN);
+        }
+    }
+}
+
 #define WIDTH 1280
 #define HEIGHT 720
 
@@ -28,12 +46,10 @@ extern const int spell_count;
         for (player *P = &players[IT]; P != NULL && P->info.connected; P = NULL) \
             if (1)
 
-Rectangle game_window = {0, 0, WIDTH, HEIGHT};
 uint64_t last_ping = 0;
 time_t round_timer = 0;
 int round_scores[MAX_PLAYER_COUNT] = {0};
 
-// TODO: Cell size should be given by the map
 #define CELL_SIZE 64.0
 
 #define MAX_ANIMATION_POOL 16
@@ -122,7 +138,7 @@ anim_id new_animation(animation_type type, double animation_time, int max_frame)
             return i;
         }
     }
-    printf("Animation pool is full\n");
+    LOG("Animation pool is full\n");
     exit(1);
 }
 
@@ -152,7 +168,7 @@ void step_animations() {
 
 int get_frame(anim_id id) {
     if (id >= MAX_ANIMATION_POOL) {
-        printf("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        LOG("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
         return 0;
     }
     return anim_pool[id].current_frame;
@@ -160,7 +176,7 @@ int get_frame(anim_id id) {
 
 double get_process(anim_id id) {
     if (id >= MAX_ANIMATION_POOL) {
-        printf("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        LOG("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
         return 0;
     }
 
@@ -178,7 +194,7 @@ double get_process(anim_id id) {
 
 bool anim_finished(anim_id id) {
     if (id >= MAX_ANIMATION_POOL) {
-        printf("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        LOG("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
         return false;
     }
 
@@ -218,7 +234,6 @@ typedef struct {
     uint8_t selected_spell;
     map_layer action_range;
     player_move round_move;
-    bool waiting;                   // TODO: remove and be a round_state ?
     anim_id animation;
     anim_id action_animation;
     player_animation_state animation_state;
@@ -226,7 +241,6 @@ typedef struct {
 } player;
 
 player players[MAX_PLAYER_COUNT] = {0};
-char current_player_username[8] = {0};
 slider health_bars[MAX_PLAYER_COUNT] = {0};
 
 int player_count() {
@@ -445,7 +459,7 @@ int player_cast_spell(player *p, Vector2 origin) {
     if (s->type == ST_MOVE || s->type == ST_TARGET) {
         return can_player_move(p, origin);
     } else {
-        printf("not implemented\n");
+        LOG("not implemented\n");
         exit(1);
     }
     return false;
@@ -532,6 +546,7 @@ void render_player(player *p) {
     if (p->dead) {
         return;
     }
+
     player_info *i = &p->info;
     int x_pos = base_x_offset + i->x * CELL_SIZE + 8;
     int y_pos = base_y_offset + i->y * CELL_SIZE - 24;
@@ -759,8 +774,8 @@ void render_infos() {
 
         if (info->effect_round_left > 0) {
             // TODO: Display an icon instead
-            DrawText(TextFormat("Effect %d : %d rounds left", info->effect, info->effect_round_left), x,
-                     y + 24, 24, BLACK);
+            DrawText(TextFormat("Effect %d : %d rounds left", info->effect, info->effect_round_left), x, y + 24, 24,
+                     BLACK);
         }
         DrawText(TextFormat("%d", round_scores[i]), x + inner.width - 48, y + (inner.height - 48) / 2, 48, BLACK);
     }
@@ -776,7 +791,7 @@ void render_infos() {
 int client_fd = 0;
 
 int connect_to_server(const char *ip, uint16_t port) {
-    printf("Connecting to %s:%d\n", ip, port);
+    LOG("Connecting to %s:%d\n", ip, port);
 
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return -1;
@@ -798,9 +813,9 @@ int connect_to_server(const char *ip, uint16_t port) {
     return 0;
 }
 
-void player_join() {
+void player_join(const char *username) {
     net_packet_join join = {0};
-    memcpy(join.username, current_player_username, 8);
+    memcpy(join.username, username, 8);
     send_sock(PKT_JOIN, &join, client_fd);
 }
 
@@ -869,13 +884,13 @@ void handle_packet(net_packet *p) {
         last_ping = now - ping->send_time;
     } else if (p->type == PKT_JOIN) {
         net_packet_join *join = (net_packet_join *)p->content;
-        printf("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
+        LOG("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
         memcpy(players[join->id].info.name, join->username, 8);
         players[join->id].info.name[8] = '\0';
         players[join->id].info.connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
-        printf("My ID is %d\n", c->id);
+        LOG("My ID is %d\n", c->id);
         current_player = c->id;
         master_player = c->master;
 
@@ -883,13 +898,13 @@ void handle_packet(net_packet *p) {
         int base_health = 50 + health_slider.slider.value;
         int ad = physic_power_slider.slider.value;
         int ap = magic_power_slider.slider.value;
-        printf("Joining with %d ad and %d ap\n", ad, ap);
+        LOG("Joining with %d ad and %d ap\n", ad, ap);
         net_packet_player_build b =
             pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
-        printf("Player %d disconnected\n", d->id);
+        LOG("Player %d disconnected\n", d->id);
         players[d->id].info.connected = false;
         master_player = d->new_master;
         active_scene = SCENE_LOBBY;
@@ -897,7 +912,7 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_PLAYER_BUILD) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
-        printf("Setting build for %d\n", b->id);
+        LOG("Setting build for %d\n", b->id);
         player->info.base_health = b->base_health;
         player->info.max_health = b->base_health;
         player->info.health = b->base_health;
@@ -908,7 +923,7 @@ void handle_packet(net_packet *p) {
         }
     } else if (p->type == PKT_MAP) {
         net_packet_map *m = (net_packet_map *)p->content;
-        printf("Map is %d/%d\n", m->width, m->height);
+        LOG("Map is %d/%d\n", m->width, m->height);
         if (m->type == MLT_BACKGROUND) {
             init_map(&game_map, m->width, m->height, m->content);
             init_map(&players[current_player].action_range, game_map.width, game_map.height, NULL);
@@ -919,18 +934,18 @@ void handle_packet(net_packet *p) {
             init_map(&props, m->width, m->height, m->content);
             set_props_animations();
         } else {
-            printf("Unknown map layer\n");
+            LOG("Unknown map layer\n");
             exit(1);
         }
     } else if (p->type == PKT_GAME_START) {
-        printf("Starting Game !!\n");
+        LOG("Starting Game !!\n");
         active_scene = SCENE_IN_GAME;
         gs = GS_STARTED;
         set_selected_spell(&players[current_player], 0);
         init_in_game_ui();
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
-        printf("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
+        LOG("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
         player *player = &players[u->id];
 
         if (gs == GS_WAITING) {
@@ -953,7 +968,7 @@ void handle_packet(net_packet *p) {
         }
     } else if (p->type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p->content;
-        printf("New action: %d %d\n", a->id, a->spell);
+        LOG("New action: %d %d\n", a->id, a->spell);
         player_round_action *action = &actions[action_count];
         action->player = a->id;
         action->action = a->action;
@@ -962,18 +977,17 @@ void handle_packet(net_packet *p) {
         action_count++;
     } else if (p->type == PKT_ROUND_END) {
         net_packet_round_end *e = (net_packet_round_end *)p->content;
-        printf("Round ended\n");
+        LOG("Round ended\n");
         state = RS_PLAYING_ROUND;
         if (e->winner_id != GAME_NOT_ENDED) {
             winner_id = e->winner_id;
             gs = GS_ENDING;
-            for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            FOREACH_PLAYER(i, player) {
                 round_scores[i] = e->player_scores[i];
-                printf("%d\n", round_scores[i]);
             }
         }
     } else if (p->type == PKT_GAME_RESET) {
-        printf("Client: game reset");
+        LOG("Client: game reset\n");
         reset_game();
     } else if (p->type == PKT_GAME_STATS) {
         net_packet_game_stats *s = (net_packet_game_stats *)p->content;
@@ -985,12 +999,12 @@ void handle_packet(net_packet *p) {
 
 void play_round() {
     player_round_action *a = &actions[action_step];
-    printf("Playing round %d/%d for %d\n", action_step, action_count, a->player);
+    LOG("Playing round %d/%d for %d\n", action_step, action_count, a->player);
     player *p = &players[a->player];
 
     if (a->action == PA_SPELL) {
         const spell *s = &all_spells[a->spell];
-        printf("Casting %s\n", s->name);
+        LOG("Casting %s\n", s->name);
 
         player *target = NULL;
         FOREACH_PLAYER(i, player) {
@@ -1026,17 +1040,17 @@ void play_round() {
             p->animation_state = PAS_STUNNED;
         }
     }
-    p->waiting = false;
+    p->info.state = RS_PLAYING;
 }
 
 void play_effects() {
     FOREACH_PLAYER(i, player) {
-        player_info *info = &players->info;
+        player_info *info = &player->info;
         info->x = updates[i].position.x;
         info->y = updates[i].position.y;
         if (info->effect == SE_BURN) {
             info->health -= info->spell_effect->damage;
-            printf("player took a tick of burn and has %d hp left\n", player->info.health);
+            LOG("player took a tick of burn and has %d hp left\n", player->info.health);
             player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             player->animation_state = PAS_BURNING;
         }
@@ -1076,11 +1090,10 @@ bool join_game(const char *ip, int port, const char *username) {
         return false;
     }
 
-    printf("Connected to server !\n");
+    LOG("Connected to server !\n");
 
-    strncpy(current_player_username, username, 8);
     reset_game();
-    player_join();
+    player_join(username);
 
     FD_ZERO(&master_set);
     FD_SET(client_fd, &master_set);
@@ -1120,7 +1133,7 @@ void render_scene_in_game() {
                         pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
                     send_sock(PKT_PLAYER_ACTION, &a, client_fd);
                     players[current_player].round_move = move;
-                    players[current_player].waiting = true;
+                    players[current_player].info.state = RS_WAITING;
                 }
             } else if (state == RS_PLAYING_ROUND) {
                 play_round();
@@ -1178,7 +1191,7 @@ void render_scene_in_game() {
             } else if (state == RS_WAITING) {
                 render_player_move(&players[current_player].round_move);
             } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
-                if (players[current_player].waiting) {
+                if (players[current_player].info.state == RS_WAITING) {
                     render_player_move(&players[current_player].round_move);
                 }
             }
@@ -1221,6 +1234,7 @@ void render_scene_in_game() {
         DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
         DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     }
+    draw_logs();
     EndDrawing();
 }
 
@@ -1266,7 +1280,7 @@ void render_scene_lobby() {
         if (selected_player_build == -1) {
             card_render(&player_list_card);
             card_render(&server_config_card);
-        }   
+        }
 
         if (gs == GS_WAITING) {
             int idx = 0;
@@ -1324,6 +1338,7 @@ void render_scene_lobby() {
         }
         DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     }
+    draw_logs();
     EndDrawing();
 }
 
@@ -1506,6 +1521,7 @@ void render_scene_main_menu() {
                      player_info_card.rec.y + 75, 32, WHITE);
         }
     }
+    draw_logs();
     EndDrawing();
 }
 
@@ -1524,17 +1540,18 @@ int main(int argc, char **argv) {
         } else if (strcmp(arg, "--port") == 0) {
             const char *value = POPARG(argc, argv);
             if (!strtoint(value, &port)) {
-                printf("Error parsing port to int '%s'\n", value);
+                LOG("Error parsing port to int '%s'\n", value);
                 exit(1);
             }
         } else if (strcmp(arg, "--username") == 0) {
             username = POPARG(argc, argv);
         } else {
-            printf("Unknown arg : '%s'\n", arg);
+            LOG("Unknown arg : '%s'\n", arg);
             exit(1);
         }
     }
 
+    // TODO: Make window resizable
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     SetTargetFPS(60);
 
@@ -1606,6 +1623,18 @@ int main(int argc, char **argv) {
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
+        if (IsKeyPressed(KEY_RIGHT_ALT)) {
+            display_logs = !display_logs;
+        }
+        if (display_logs && (IsKeyPressed(KEY_UP) || IsKeyPressedRepeat(KEY_UP))) {
+            if (log_base + LOG_LINE_COUNT < get_log_count()) {
+                log_base++;
+            }
+        }
+        if (display_logs && (IsKeyPressed(KEY_DOWN) || IsKeyPressedRepeat(KEY_DOWN))) {
+            log_base = fmax(log_base - 1, 0);
+        }
+
         // Update network
         if (active_scene == SCENE_LOBBY || active_scene == SCENE_IN_GAME) {
             fd_set read_fds = master_set;
@@ -1642,6 +1671,5 @@ int main(int argc, char **argv) {
             render_scene_in_game();
         }
     }
-
     CloseWindow();
 }

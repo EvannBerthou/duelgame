@@ -2,9 +2,8 @@
 - Check server side that moves are valid
 - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
 - Some kind of runes or stats customization ?
-- Better battle logging
+- Better battle logging (in-game recap ?)
 - Make game window resizable
-- Bugged when we target the same player twice in a round
 - pkt_* functions should return a net_packet with content set from a malloc. It will allow us to buffer packets that 
     need to be sent when multithreading will be implemented
 - 3 player game are bugged because you can still play when you are dead

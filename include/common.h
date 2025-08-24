@@ -1,13 +1,15 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <limits.h>
 
-int strtoint(const char *str, int *out);
+int strtoint(const char* str, int* out);
 
 #define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)
+
+void LOG(const char *fmt, ...);
 
 #define MAX_SPELL_COUNT 4
 #define MAX_PLAYER_COUNT 4
@@ -25,18 +27,12 @@ typedef enum {
     SE_COUNT,
 } spell_effect;
 
-typedef enum {
-    SI_UNKNOWN,
-    SI_MOVE,
-    SI_ATTACK,
-    SI_WAND,
-    SI_COUNT
-} spell_icon;
+typedef enum { SI_UNKNOWN, SI_MOVE, SI_ATTACK, SI_WAND, SI_COUNT } spell_icon;
 
 typedef struct {
     uint8_t id;
     const char* name;
-    const char *description;
+    const char* description;
     uint8_t icon;
 
     spell_type_enum type;
@@ -45,7 +41,6 @@ typedef struct {
     uint8_t zone_size;
     uint8_t speed;
     // Number of round between 2 usages of the spell
-    // TODO: Should also be server-sided
     uint8_t cooldown;
 
     spell_effect effect;
@@ -60,14 +55,14 @@ typedef enum {
 typedef struct {
     uint8_t width, height;
     map_layer_type type;
-    uint8_t *content;
+    uint8_t* content;
 } map_layer;
 
-void init_map(map_layer *m, int width, int height, uint8_t *copy);
-int get_map(map_layer *m, int x, int y);
-void set_map(map_layer *m, int x, int y, int v);
-void clear_map(map_layer *m);
-void free_map(map_layer *m);
+void init_map(map_layer* m, int width, int height, uint8_t* copy);
+int get_map(map_layer* m, int x, int y);
+void set_map(map_layer* m, int x, int y, int v);
+void clear_map(map_layer* m);
+void free_map(map_layer* m);
 
 typedef enum {
     RS_PLAYING,
@@ -110,10 +105,14 @@ typedef struct {
     uint8_t cooldowns[MAX_SPELL_COUNT];
     uint8_t spell;
 
-    //TODO: Multiple effects can be active at the same time
+    // TODO: Multiple effects can be active at the same time
     spell_effect effect;
     uint8_t effect_round_left;
-    const spell *spell_effect;
+    const spell* spell_effect;
 } player_info;
+
+
+const char *get_log(int idx);
+int get_log_count();
 
 #endif
