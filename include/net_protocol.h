@@ -17,6 +17,7 @@ typedef struct {
 
 typedef struct {
     uint8_t id;
+    uint8_t master; // Is the player the lobby's master ?
 } net_packet_connected;
 
 typedef struct {
@@ -51,7 +52,6 @@ typedef struct {
 typedef struct {
     uint8_t id;
     uint8_t base_health;
-    // We only send IDs since spells are fixed by the game and not the player
     uint8_t spells[MAX_SPELL_COUNT] NET_SIZE("MAX_SPELL_COUNT");
     uint8_t ad;
     uint8_t ap;
@@ -112,7 +112,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
     switch (type) {
         case PKT_PING: return 8;
         case PKT_JOIN: return 9;
-        case PKT_CONNECTED: return 1;
+        case PKT_CONNECTED: return 2;
         case PKT_DISCONNECT: return 2;
         case PKT_MAP: {
             net_packet_map *s = (net_packet_map*)p;
@@ -153,14 +153,14 @@ net_packet_join pkt_join(uint8_t id, const char *username) {
     (void)s;
     s->id = id;
     memcpy(s->username, username, 8);
-    s->username[8 - 1] = 0;
     return result;
 }
-net_packet_connected pkt_connected(uint8_t id) {
+net_packet_connected pkt_connected(uint8_t id, uint8_t master) {
     net_packet_connected result = {};
     net_packet_connected *s = &result;
     (void)s;
     s->id = id;
+    s->master = master;
     return result;
 }
 net_packet_disconnect pkt_disconnect(uint8_t id, uint8_t new_master) {
@@ -250,7 +250,6 @@ net_packet_admin_connect pkt_admin_connect(const char *password) {
     net_packet_admin_connect *s = &result;
     (void)s;
     memcpy(s->password, password, 8);
-    s->password[8 - 1] = 0;
     return result;
 }
 net_packet_admin_connect_result pkt_admin_connect_result(uint8_t success) {
@@ -288,6 +287,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
         case PKT_CONNECTED: {
             net_packet_connected *s = (net_packet_connected*)content;
             buf = packu8(buf, s->id);
+            buf = packu8(buf, s->master);
             return buf;
         } break;
         case PKT_DISCONNECT: {
@@ -401,6 +401,7 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             net_packet_connected *s = malloc(sizeof(net_packet_connected));
             if (s == NULL) exit(1);
             s->id = unpacku8(base);
+            s->master = unpacku8(base);
             return s;
         } break;
         case PKT_DISCONNECT: {

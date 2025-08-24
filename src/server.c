@@ -41,9 +41,6 @@ bool is_admin(int fd) {
     return false;
 }
 
-// Number of players required to have join the game in order to start
-#define LOBBY_FULL_COUNT 2
-
 game_state gs = GS_WAITING;
 
 typedef struct {
@@ -63,6 +60,7 @@ typedef struct {
     uint8_t spells[MAX_SPELL_COUNT];
     uint8_t spell;
 
+    //TODO: Multiple effects can be active at the same time
     spell_effect effect;
     uint8_t effect_round_left;
     const spell *spell_effect;
@@ -70,6 +68,7 @@ typedef struct {
 
 int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
 int connection_count = 0;
+int master_player = 0;
 
 int clients[MAX_PLAYER_COUNT] = {0};
 player_info players[MAX_PLAYER_COUNT] = {0};
@@ -130,6 +129,18 @@ void damage_player(player_info *p, const spell *s) {
     }
 
     net_packet_player_update u = pkt_from_info(p);
+    broadcast(PKT_PLAYER_UPDATE, &u);
+}
+
+void reset_player(player_info *player) {
+    player->max_health = player->base_health;
+    player->health = player->max_health;
+    player->x = 0;
+    player->y = 0;
+    player->effect = SE_NONE;
+    player->effect_round_left = 0;
+    player->spell_effect = NULL;
+    net_packet_player_update u = pkt_from_info(player);
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
 
@@ -240,7 +251,14 @@ void sort_actions() {
 }
 
 void start_game() {
+    if (gs != GS_WAITING) {
+        return;
+    }
+
     // TODO: Check that every player is really ready (build is set, etc.)
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        reset_player(&players[i]);
+    }
     broadcast(PKT_GAME_START, NULL);
     round_start_time = time(NULL);
 }
@@ -278,7 +296,8 @@ void handle_player_disconnect(int fd) {
     }
     net_packet_disconnect p = pkt_disconnect(player->id, new_master);
     broadcast(PKT_DISCONNECT, &p);
-    // TODO: Back to lobby
+    master_player = new_master;
+    gs = GS_WAITING;
 }
 
 void handle_message(int fd) {
@@ -336,7 +355,7 @@ void handle_message(int fd) {
         net_packet_player_update u = pkt_from_info(pi);
         broadcast(PKT_PLAYER_UPDATE, &u);
 
-        net_packet_connected c = pkt_connected(new_player);
+        net_packet_connected c = pkt_connected(new_player, master_player);
         send_sock(PKT_CONNECTED, &c, fd);
 
         send_map(fd);
@@ -436,26 +455,16 @@ void handle_message(int fd) {
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);
         // We send previously connected players informations to the new player
-        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-            player_info *p = &players[i];
-            if (p->connected == false) {
-                continue;
-            }
-
-            p->max_health = p->base_health;
-            p->health = p->base_health;
-            p->x = spawn_positions[i][0];
-            p->y = spawn_positions[i][1];
-            p->effect = SE_NONE;
-            p->effect_round_left = 0;
-            p->spell_effect = NULL;
-            net_packet_join other_user_join = pkt_join(i, p->name);
+        FOREACH_PLAYER(i, player) {
+            reset_player(player);
+            net_packet_join other_user_join = pkt_join(i, player->name);
             broadcast(PKT_JOIN, &other_user_join);
 
-            net_packet_player_build b = pkt_player_build(p->id, p->base_health, p->spells, p->ad, p->ap);
+            net_packet_player_build b =
+                pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
             broadcast(PKT_PLAYER_BUILD, &b);
 
-            net_packet_player_update u = pkt_from_info(p);
+            net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
 
             send_map(connections[i]);

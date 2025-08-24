@@ -2,9 +2,7 @@
 #define COMMON_H
 
 #include <stdint.h>
-#include <errno.h>
 #include <limits.h>
-#include <stdlib.h>
 
 int strtoint(const char *str, int *out);
 

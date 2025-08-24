@@ -14,6 +14,7 @@ typedef struct {
 
 typedef struct {
     uint8_t id;
+    uint8_t master; // Is the player the lobby's master ?
 } net_packet_connected;
 
 typedef struct {
@@ -48,7 +49,6 @@ typedef struct {
 typedef struct {
     uint8_t id;
     uint8_t base_health;
-    // We only send IDs since spells are fixed by the game and not the player
     uint8_t spells[MAX_SPELL_COUNT] NET_SIZE("MAX_SPELL_COUNT");
     uint8_t ad;
     uint8_t ap;

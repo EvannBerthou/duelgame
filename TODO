@@ -7,4 +7,4 @@
 - Bugged when we target the same player twice in a round
 - pkt_* functions should return a net_packet with content set from a malloc. It will allow us to buffer packets that 
     need to be sent when multithreading will be implemented
-- Loops should not be based on player count because if someone disconnected it will not be right
+- 3 player game are bugged because you can still play when you are dead

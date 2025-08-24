@@ -894,6 +894,7 @@ void handle_packet(net_packet *p) {
         net_packet_connected *c = (net_packet_connected *)p->content;
         printf("My ID is %d\n", c->id);
         current_player = c->id;
+        master_player = c->master;
 
         memcpy(players[current_player].spells, my_spells, MAX_SPELL_COUNT);
         int base_health = 50 + health_slider.slider.value;
@@ -1283,15 +1284,19 @@ void render_scene_lobby() {
         }
 
         if (gs == GS_WAITING) {
+            int idx = 0;
+            //TODO: We should order names based on who connected first
             FOREACH_PLAYER(i, player) {
                 int x = player_list_card.rec.x + 8;
-                int y = player_list_card.rec.y + 75 + 46 * i;
+                int y = player_list_card.rec.y + 75 + 46 * idx;
+                Color c = master_player == i ? YELLOW : WHITE;
                 if (i == current_player) {
-                    DrawText(TextFormat("- %s (you)", player->name), x, y, 36, WHITE);
+                    DrawText(TextFormat("- %s (you)", player->name), x, y, 36, c);
                 } else {
-                    DrawText(TextFormat("- %s", player->name), x, y, 36, WHITE);
+                    DrawText(TextFormat("- %s", player->name), x, y, 36, c);
                 }
-                button_render(&player_build_buttons[i]);
+                button_render(&player_build_buttons[idx]);
+                idx++;
             }
 
             // Map
@@ -1519,7 +1524,7 @@ void render_scene_main_menu() {
 }
 
 int main(int argc, char **argv) {
-    srand(time(NULL));
+    srand(time(NULL) + getpid());
 
     char *ip = NULL;
     int port = 3000;

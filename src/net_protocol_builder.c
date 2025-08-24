@@ -297,7 +297,6 @@ int main(void) {
                 printf("    memcpy(s->%s, %s, %s);\n", f->name, f->name, f->size);
             } else if (f->type == TYPE_CHAR_ARRAY) {
                 printf("    memcpy(s->%s, %s, %d);\n", f->name, f->name, f->array_size);
-                printf("    s->%s[%d - 1] = 0;\n", f->name, f->array_size);
             } else if (f->type == TYPE_UINT64) {
                 printf("    s->%s = %s;\n", f->name, f->name);
             }
