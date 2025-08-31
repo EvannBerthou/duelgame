@@ -7,3 +7,4 @@
 - pkt_* functions should return a net_packet with content set from a malloc. It will allow us to buffer packets that 
     need to be sent when multithreading will be implemented
 - 3 player game are bugged because you can still play when you are dead
+- Generic queue

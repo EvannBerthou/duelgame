@@ -5,6 +5,7 @@
 
 typedef struct {
     uint64_t send_time;
+    uint64_t recieve_time;
 } net_packet_ping;
 
 typedef struct {

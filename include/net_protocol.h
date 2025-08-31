@@ -8,6 +8,7 @@
 
 typedef struct {
     uint64_t send_time;
+    uint64_t recieve_time;
 } net_packet_ping;
 
 typedef struct {
@@ -110,7 +111,7 @@ typedef enum {
 } net_packet_type_enum;
 uint8_t get_packet_length(net_packet_type_enum type, void *p) {
     switch (type) {
-        case PKT_PING: return 8;
+        case PKT_PING: return 16;
         case PKT_JOIN: return 9;
         case PKT_CONNECTED: return 2;
         case PKT_DISCONNECT: return 2;
@@ -140,11 +141,12 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         default: { fprintf(stderr, "Unknown type\n"); exit(1); }
     }
 }
-net_packet_ping pkt_ping(uint64_t send_time) {
+net_packet_ping pkt_ping(uint64_t send_time, uint64_t recieve_time) {
     net_packet_ping result = {};
     net_packet_ping *s = &result;
     (void)s;
     s->send_time = send_time;
+    s->recieve_time = recieve_time;
     return result;
 }
 net_packet_join pkt_join(uint8_t id, const char *username) {
@@ -276,6 +278,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
         case PKT_PING: {
             net_packet_ping *s = (net_packet_ping*)content;
             buf = packu64(buf, s->send_time);
+            buf = packu64(buf, s->recieve_time);
             return buf;
         } break;
         case PKT_JOIN: {
@@ -388,6 +391,7 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             net_packet_ping *s = malloc(sizeof(net_packet_ping));
             if (s == NULL) exit(1);
             s->send_time = unpacku64(base);
+            s->recieve_time = unpacku64(base);
             return s;
         } break;
         case PKT_JOIN: {

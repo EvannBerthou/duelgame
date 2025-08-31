@@ -3,6 +3,7 @@
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +25,7 @@ bool display_logs = false;
 int log_base = 0;
 #define LOG_LINE_COUNT 20
 
-//TODO: Maybe make a full console system instead of just logs ?
+// TODO: Maybe make a full console system instead of just logs ?
 void draw_logs() {
     if (display_logs) {
         DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), GetColor(0x181818AA));
@@ -33,7 +34,7 @@ void draw_logs() {
             if (get_log(idx) == NULL) {
                 continue;
             }
-            DrawText(get_log(idx), 0, 32 * i, 32, GREEN);
+            DrawText(get_log(idx), 0, 32 * i, 32, WHITE);
         }
     }
 }
@@ -420,10 +421,10 @@ typedef struct {
 typedef struct {
     Node *nodes;
     int front, rear;
-} Queue;
+} MapQueue;
 
 void compute_spell_range(player *p) {
-    Queue q = {.front = 0, .rear = 0};
+    MapQueue q = {.front = 0, .rear = 0};
     q.nodes = calloc(game_map.width * game_map.height, sizeof(Node));
     q.nodes[q.rear++] = (Node){p->info.x, p->info.y, 0};
     clear_map(&p->action_range);
@@ -879,9 +880,9 @@ void init_in_game_ui() {
 //  PKT_PLAYER_UPDATE could also be used just to force player informations when an admin updates it.
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
+        // TODO: We should not compute the diff here but when we recieve it
         net_packet_ping *ping = (net_packet_ping *)p->content;
-        uint64_t now = GetTime() * 1000;
-        last_ping = now - ping->send_time;
+        last_ping = ping->recieve_time - ping->send_time;
     } else if (p->type == PKT_JOIN) {
         net_packet_join *join = (net_packet_join *)p->content;
         LOG("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
@@ -1109,133 +1110,128 @@ bool join_game(const char *ip, int port, const char *username) {
 void render_scene_in_game() {
     step_animations();
 
-    BeginDrawing();
-    {
-        ClearBackground(GetColor(0x181818FF));
+    ClearBackground(GetColor(0x181818FF));
 
-        const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
-        if (gs == GS_STARTED || gs == GS_ENDING) {
-            round_state next_state = state;
-            if (state == RS_PLAYING) {
-                for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                    if (IsKeyPressed(keybinds[i])) {
-                        players[current_player].info.action = PA_SPELL;
-                        set_selected_spell(&players[current_player], i);
-                    }
+    const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
+    if (gs == GS_STARTED || gs == GS_ENDING) {
+        round_state next_state = state;
+        if (state == RS_PLAYING) {
+            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+                if (IsKeyPressed(keybinds[i])) {
+                    players[current_player].info.action = PA_SPELL;
+                    set_selected_spell(&players[current_player], i);
                 }
-            }
-
-            if (state == RS_PLAYING) {
-                player_move move = player_exec_action(&players[current_player]);
-                if (move.action != PA_NONE) {
-                    next_state = RS_WAITING;
-                    net_packet_player_action a =
-                        pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
-                    send_sock(PKT_PLAYER_ACTION, &a, client_fd);
-                    players[current_player].round_move = move;
-                    players[current_player].info.state = RS_WAITING;
-                }
-            } else if (state == RS_PLAYING_ROUND) {
-                play_round();
-                next_state = RS_WAITING_ANIMATIONS;
-            } else if (state == RS_WAITING_ANIMATIONS) {
-                if (wait_for_animations()) {
-                    if (action_step < action_count - 1) {
-                        action_step++;
-                        next_state = RS_PLAYING_ROUND;
-                    } else {
-                        play_effects();
-                        next_state = RS_PLAYING_EFFECTS;
-                    }
-                }
-            } else if (state == RS_PLAYING_EFFECTS) {
-                // Checks if player died from effects (ex: burn)
-                FOREACH_PLAYER(i, player) {
-                    if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
-                        player->dead = true;
-                    }
-                }
-                if (wait_for_animations()) {
-                    FOREACH_PLAYER(i, player) {
-                        if (player->info.health <= 0 && player->dead == false) {
-                            player->action_animation = new_animation(AT_ONESHOT, 3.f, 1);
-                            player->animation_state = PAS_DYING;
-                        }
-                    }
-                }
-
-                if (wait_for_animations()) {
-                    end_round();
-                    next_state = RS_PLAYING;
-                }
-            }
-
-            render_map();
-
-            // TODO: Always render currently animation player on top
-            FOREACH_PLAYER(i, player) {
-                render_player(player);
-            }
-
-            if (slash_animation != NO_ANIMATION) {
-                Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
-                Vector2 position = grid2screen(slash_cell);
-                DrawTextureEx(slash_texture, position, 0, 1, WHITE);
-                if (anim_finished(slash_animation)) {
-                    slash_animation = NO_ANIMATION;
-                }
-            }
-
-            if (state == RS_PLAYING) {
-                render_player_actions(&players[current_player]);
-            } else if (state == RS_WAITING) {
-                render_player_move(&players[current_player].round_move);
-            } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
-                if (players[current_player].info.state == RS_WAITING) {
-                    render_player_move(&players[current_player].round_move);
-                }
-            }
-            render_infos();
-            state = next_state;
-            FOREACH_PLAYER(i, player) {
-                Vector2 screen_pos = grid2screen((Vector2){player->info.x, player->info.y});
-                Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
-                Vector2 mp = GetMousePosition();
-                if (CheckCollisionPointRec(mp, player_rec)) {
-                    Rectangle player_box = render_box(mp.x, mp.y, 350, 150);
-                    int box_center = get_width_center(player_box, player->info.name, 32);
-                    DrawText(TextFormat("%s", player->info.name), box_center, player_box.y, 32, BLACK);
-                    DrawText(TextFormat("AD=%d", player->info.ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
-                    DrawText(TextFormat("AP=%d", player->info.ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
-                }
-            }
-        } else if (gs == GS_ENDED) {
-            if (IsKeyPressed(KEY_R)) {
-                if (current_player == 0) {
-                    send_sock(PKT_GAME_RESET, NULL, client_fd);
-                }
-            }
-
-            if (winner_id == 255) {
-                DrawText("Game draw", 0, 0, 64, WHITE);
-            } else {
-                DrawText(TextFormat("%s won the game !", players[winner_id].info.name), 0, 0, 64, WHITE);
-            }
-
-            if (current_player == 0) {
-                DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
             }
         }
-        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
-        char time_string[8] = {0};
-        struct tm *time = localtime(&round_timer);
-        strftime(time_string, 8, "%M:%S", time);
-        int width = MeasureText(time_string, 48);
-        DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
-        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+
+        if (state == RS_PLAYING) {
+            player_move move = player_exec_action(&players[current_player]);
+            if (move.action != PA_NONE) {
+                next_state = RS_WAITING;
+                net_packet_player_action a =
+                    pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
+                send_sock(PKT_PLAYER_ACTION, &a, client_fd);
+                players[current_player].round_move = move;
+                players[current_player].info.state = RS_WAITING;
+            }
+        } else if (state == RS_PLAYING_ROUND) {
+            play_round();
+            next_state = RS_WAITING_ANIMATIONS;
+        } else if (state == RS_WAITING_ANIMATIONS) {
+            if (wait_for_animations()) {
+                if (action_step < action_count - 1) {
+                    action_step++;
+                    next_state = RS_PLAYING_ROUND;
+                } else {
+                    play_effects();
+                    next_state = RS_PLAYING_EFFECTS;
+                }
+            }
+        } else if (state == RS_PLAYING_EFFECTS) {
+            // Checks if player died from effects (ex: burn)
+            FOREACH_PLAYER(i, player) {
+                if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
+                    player->dead = true;
+                }
+            }
+            if (wait_for_animations()) {
+                FOREACH_PLAYER(i, player) {
+                    if (player->info.health <= 0 && player->dead == false) {
+                        player->action_animation = new_animation(AT_ONESHOT, 3.f, 1);
+                        player->animation_state = PAS_DYING;
+                    }
+                }
+            }
+
+            if (wait_for_animations()) {
+                end_round();
+                next_state = RS_PLAYING;
+            }
+        }
+
+        render_map();
+
+        // TODO: Always render currently animation player on top
+        FOREACH_PLAYER(i, player) {
+            render_player(player);
+        }
+
+        if (slash_animation != NO_ANIMATION) {
+            Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
+            Vector2 position = grid2screen(slash_cell);
+            DrawTextureEx(slash_texture, position, 0, 1, WHITE);
+            if (anim_finished(slash_animation)) {
+                slash_animation = NO_ANIMATION;
+            }
+        }
+
+        if (state == RS_PLAYING) {
+            render_player_actions(&players[current_player]);
+        } else if (state == RS_WAITING) {
+            render_player_move(&players[current_player].round_move);
+        } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
+            if (players[current_player].info.state == RS_WAITING) {
+                render_player_move(&players[current_player].round_move);
+            }
+        }
+        render_infos();
+        state = next_state;
+        FOREACH_PLAYER(i, player) {
+            Vector2 screen_pos = grid2screen((Vector2){player->info.x, player->info.y});
+            Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
+            Vector2 mp = GetMousePosition();
+            if (CheckCollisionPointRec(mp, player_rec)) {
+                Rectangle player_box = render_box(mp.x, mp.y, 350, 150);
+                int box_center = get_width_center(player_box, player->info.name, 32);
+                DrawText(TextFormat("%s", player->info.name), box_center, player_box.y, 32, BLACK);
+                DrawText(TextFormat("AD=%d", player->info.ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
+                DrawText(TextFormat("AP=%d", player->info.ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
+            }
+        }
+    } else if (gs == GS_ENDED) {
+        if (IsKeyPressed(KEY_R)) {
+            if (current_player == 0) {
+                send_sock(PKT_GAME_RESET, NULL, client_fd);
+            }
+        }
+
+        if (winner_id == 255) {
+            DrawText("Game draw", 0, 0, 64, WHITE);
+        } else {
+            DrawText(TextFormat("%s won the game !", players[winner_id].info.name), 0, 0, 64, WHITE);
+        }
+
+        if (current_player == 0) {
+            DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
+        }
     }
-    draw_logs();
-    EndDrawing();
+    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+    char time_string[8] = {0};
+    struct tm *time = localtime(&round_timer);
+    strftime(time_string, 8, "%M:%S", time);
+    int width = MeasureText(time_string, 48);
+    DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
+    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
 }
 
 const int card_width = (WIDTH - 150) / 2;
@@ -1271,75 +1267,70 @@ void render_scene_lobby() {
         }
     }
 
-    BeginDrawing();
-    {
-        ClearBackground(UI_BLACK);
-        int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Lobby", 64);
-        DrawText("Lobby", title_center, 32, 64, WHITE);
+    ClearBackground(UI_BLACK);
+    int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Lobby", 64);
+    DrawText("Lobby", title_center, 32, 64, WHITE);
 
-        if (selected_player_build == -1) {
-            card_render(&player_list_card);
-            card_render(&server_config_card);
-        }
-
-        if (gs == GS_WAITING) {
-            int idx = 0;
-            // TODO: We should order names based on who connected first
-            FOREACH_PLAYER(i, player) {
-                int x = player_list_card.rec.x + 8;
-                int y = player_list_card.rec.y + 75 + 46 * idx;
-                Color c = master_player == i ? YELLOW : WHITE;
-                if (i == current_player) {
-                    DrawText(TextFormat("- %s (you)", player->info.name), x, y, 36, c);
-                } else {
-                    DrawText(TextFormat("- %s", player->info.name), x, y, 36, c);
-                }
-                button_render(&player_build_buttons[idx]);
-                idx++;
-            }
-
-            // Map
-            if (server_config_card.selected_tab == 0) {
-                DrawTextCenter(server_config_card.rec, "Dust 2", 64, WHITE);
-            } else if (server_config_card.selected_tab == 1) {
-                DrawTextCenter(server_config_card.rec, "Round count", 64, WHITE);
-            }
-        }
-
-        if (current_player == master_player) {
-            button_render(&start_game_button);
-        }
-
-        if (selected_player_build != -1) {
-            int icon_tooltip = -1;
-            card_render(&player_build_card);
-            Rectangle header = {player_build_card.rec.x, player_build_card.rec.y + 75, player_build_card.rec.width, 64};
-            DrawTextCenter(header, TextFormat("Viewing %s build", players[selected_player_build].info.name), 54, WHITE);
-            player *p = &players[selected_player_build];
-            player_info *info = &p->info;
-            int x = player_build_card.rec.x + 25;
-            DrawText(TextFormat("Health = %d", info->max_health), x, header.y + 64, 32, WHITE);
-            DrawText(TextFormat("AD = %d", info->ad), x, header.y + 96, 32, WHITE);
-            DrawText(TextFormat("AP = %d", info->ap), x, header.y + 128, 32, WHITE);
-            DrawText("Spells", x, header.y + 160, 32, WHITE);
-            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                Texture2D icon = icons[all_spells[info->spells[i]].icon];
-                Rectangle dst = {x + 60 * i, header.y + 192, 50, 50};
-                icon_render(icon, dst);
-                if (icon_hover(dst)) {
-                    icon_tooltip = info->spells[i];
-                }
-            }
-            button_render(&close_build_card_button);
-
-            if (icon_tooltip != -1) {
-                render_spell_tooltip(&all_spells[icon_tooltip]);
-            }
-        }
-        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+    if (selected_player_build == -1) {
+        card_render(&player_list_card);
+        card_render(&server_config_card);
     }
-    draw_logs();
-    EndDrawing();
+
+    if (gs == GS_WAITING) {
+        int idx = 0;
+        // TODO: We should order names based on who connected first
+        FOREACH_PLAYER(i, player) {
+            int x = player_list_card.rec.x + 8;
+            int y = player_list_card.rec.y + 75 + 46 * idx;
+            Color c = master_player == i ? YELLOW : WHITE;
+            if (i == current_player) {
+                DrawText(TextFormat("- %s (you)", player->info.name), x, y, 36, c);
+            } else {
+                DrawText(TextFormat("- %s", player->info.name), x, y, 36, c);
+            }
+            button_render(&player_build_buttons[idx]);
+            idx++;
+        }
+
+        // Map
+        if (server_config_card.selected_tab == 0) {
+            DrawTextCenter(server_config_card.rec, "Dust 2", 64, WHITE);
+        } else if (server_config_card.selected_tab == 1) {
+            DrawTextCenter(server_config_card.rec, "Round count", 64, WHITE);
+        }
+    }
+
+    if (current_player == master_player) {
+        button_render(&start_game_button);
+    }
+
+    if (selected_player_build != -1) {
+        int icon_tooltip = -1;
+        card_render(&player_build_card);
+        Rectangle header = {player_build_card.rec.x, player_build_card.rec.y + 75, player_build_card.rec.width, 64};
+        DrawTextCenter(header, TextFormat("Viewing %s build", players[selected_player_build].info.name), 54, WHITE);
+        player *p = &players[selected_player_build];
+        player_info *info = &p->info;
+        int x = player_build_card.rec.x + 25;
+        DrawText(TextFormat("Health = %d", info->max_health), x, header.y + 64, 32, WHITE);
+        DrawText(TextFormat("AD = %d", info->ad), x, header.y + 96, 32, WHITE);
+        DrawText(TextFormat("AP = %d", info->ap), x, header.y + 128, 32, WHITE);
+        DrawText("Spells", x, header.y + 160, 32, WHITE);
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            Texture2D icon = icons[all_spells[info->spells[i]].icon];
+            Rectangle dst = {x + 60 * i, header.y + 192, 50, 50};
+            icon_render(icon, dst);
+            if (icon_hover(dst)) {
+                icon_tooltip = info->spells[i];
+            }
+        }
+        button_render(&close_build_card_button);
+
+        if (icon_tooltip != -1) {
+            render_spell_tooltip(&all_spells[icon_tooltip]);
+        }
+    }
+    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
 }
 
 card server_info_card = CARD(50, 150, card_width, 550, UI_NORD, "Server");
@@ -1470,59 +1461,111 @@ void render_scene_main_menu() {
             }
         }
     }
-    BeginDrawing();
-    {
-        ClearBackground(UI_BLACK);
-        const char *version_text = TextFormat("v%s", GIT_VERSION);
-        int version_width = MeasureText(version_text, 24);
-        DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
-        int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Duel Game", 64);
-        DrawText("Duel Game", title_center, 32, 64, WHITE);
-        card_render(&server_info_card);
-        card_render(&player_info_card);
+    ClearBackground(UI_BLACK);
+    const char *version_text = TextFormat("v%s", GIT_VERSION);
+    int version_width = MeasureText(version_text, 24);
+    DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
+    int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Duel Game", 64);
+    DrawText("Duel Game", title_center, 32, 64, WHITE);
+    card_render(&server_info_card);
+    card_render(&player_info_card);
 
-        for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-            input_render(inputs[i], i == selected_input);
-        }
-        button_render(&confirm_button);
-        if (error != NULL) {
-            DrawText(error, 0, 0, 32, UI_RED);
-        }
+    for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
+        input_render(inputs[i], i == selected_input);
+    }
+    button_render(&confirm_button);
+    if (error != NULL) {
+        DrawText(error, 0, 0, 32, UI_RED);
+    }
 
-        if (player_info_card.selected_tab == 0) {
-            int button_tooltip = -1;
-            int total = 0;
-            for (int i = 0; i < spell_count; i++) {
-                if (button_hover(&spell_select_buttons[i])) {
-                    button_tooltip = i;
-                }
-                button_render(&spell_select_buttons[i]);
-                total += spell_selection[i] == true;
+    if (player_info_card.selected_tab == 0) {
+        int button_tooltip = -1;
+        int total = 0;
+        for (int i = 0; i < spell_count; i++) {
+            if (button_hover(&spell_select_buttons[i])) {
+                button_tooltip = i;
             }
-            DrawText(TextFormat("Total : %d/%d", total, 4), player_info_card.rec.x + 8, server_info_card.rec.y + 75, 32,
-                     WHITE);
-            if (button_tooltip != -1) {
-                render_spell_tooltip(&all_spells[button_tooltip]);
+            button_render(&spell_select_buttons[i]);
+            total += spell_selection[i] == true;
+        }
+        DrawText(TextFormat("Total : %d/%d", total, 4), player_info_card.rec.x + 8, server_info_card.rec.y + 75, 32,
+                 WHITE);
+        if (button_tooltip != -1) {
+            render_spell_tooltip(&all_spells[button_tooltip]);
+        }
+    } else if (player_info_card.selected_tab == 1) {
+        DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8, health_slider.rec.y,
+                 32, WHITE);
+        buttoned_slider_render(&health_slider);
+
+        DrawText(TextFormat("AD", (int)physic_power_slider.slider.value), player_info_card.rec.x + 8,
+                 physic_power_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&physic_power_slider);
+
+        DrawText(TextFormat("AP", (int)magic_power_slider.slider.value), player_info_card.rec.x + 8,
+                 magic_power_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&magic_power_slider);
+
+        DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), player_info_card.rec.x + 8,
+                 player_info_card.rec.y + 75, 32, WHITE);
+    }
+}
+
+#define MAX_PACKET_QUEUE_SIZE 128
+typedef struct {
+    net_packet packets[MAX_PACKET_QUEUE_SIZE];
+    int front, rear, size;
+} packet_queue;
+
+packet_queue pkt_queue = {.front = 0, .rear = -1, .size = 0};
+
+bool pkt_full() {
+    return pkt_queue.size == MAX_PACKET_QUEUE_SIZE;
+}
+
+bool pkt_empty() {
+    return pkt_queue.size == 0;
+}
+
+bool pkt_push(net_packet packet) {
+    if (pkt_full()) {
+        return false;
+    }
+    pkt_queue.rear = (pkt_queue.rear + 1) % MAX_PACKET_QUEUE_SIZE;
+    pkt_queue.packets[pkt_queue.rear] = packet;
+    pkt_queue.size++;
+    return true;
+}
+
+bool pkt_pop(net_packet *out) {
+    if (pkt_empty()) {
+        return false;
+    }
+    *out = pkt_queue.packets[pkt_queue.front];
+    pkt_queue.front = (pkt_queue.front + 1) % MAX_PACKET_QUEUE_SIZE;
+    pkt_queue.size--;
+    return true;
+}
+
+// TODO: It should also send queued packets from the client
+void *network_thread(void *arg) {
+    (void)arg;
+    // Read incoming packets and push it to a queue
+    while (true) {
+        if (client_fd != 0) {
+            net_packet p = {0};
+            if (packet_read(&p, client_fd) < 0) {
+                exit(1);
             }
-        } else if (player_info_card.selected_tab == 1) {
-            DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8,
-                     health_slider.rec.y, 32, WHITE);
-            buttoned_slider_render(&health_slider);
-
-            DrawText(TextFormat("AD", (int)physic_power_slider.slider.value), player_info_card.rec.x + 8,
-                     physic_power_slider.rec.y, 32, WHITE);
-            buttoned_slider_render(&physic_power_slider);
-
-            DrawText(TextFormat("AP", (int)magic_power_slider.slider.value), player_info_card.rec.x + 8,
-                     magic_power_slider.rec.y, 32, WHITE);
-            buttoned_slider_render(&magic_power_slider);
-
-            DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), player_info_card.rec.x + 8,
-                     player_info_card.rec.y + 75, 32, WHITE);
+            // Special case. We want to set the recieve time right now and not wait until we are handling the packet.
+            if (p.type == PKT_PING) {
+                net_packet_ping *ping = (net_packet_ping *)p.content;
+                ping->recieve_time = GetTime() * 1000;
+            }
+            pkt_push(p);
         }
     }
-    draw_logs();
-    EndDrawing();
+    return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -1620,6 +1663,9 @@ int main(int argc, char **argv) {
         player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
     }
 
+    pthread_t t_network;
+    pthread_create(&t_network, NULL, network_thread, NULL);
+
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
@@ -1635,23 +1681,6 @@ int main(int argc, char **argv) {
             log_base = fmax(log_base - 1, 0);
         }
 
-        // Update network
-        if (active_scene == SCENE_LOBBY || active_scene == SCENE_IN_GAME) {
-            fd_set read_fds = master_set;
-            int activity = select(fd_count + 1, &read_fds, NULL, NULL, &timeout);
-            if (activity < 0) {
-                exit(1);
-            }
-
-            if (FD_ISSET(client_fd, &read_fds)) {
-                net_packet p = {0};
-                if (packet_read(&p, client_fd) < 0) {
-                    exit(1);
-                }
-                handle_packet(&p);
-            }
-        }
-
         if (client_fd != 0) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {
@@ -1661,7 +1690,13 @@ int main(int argc, char **argv) {
             }
         }
 
+        net_packet p = {0};
+        if (pkt_pop(&p)) {
+            handle_packet(&p);
+        }
+
         DrawText(TextFormat("FPS=%d", GetFPS()), 0, 0, 24, GREEN);
+        BeginDrawing();
         // Rendering
         if (active_scene == SCENE_MAIN_MENU) {
             render_scene_main_menu();
@@ -1670,6 +1705,8 @@ int main(int argc, char **argv) {
         } else if (active_scene == SCENE_IN_GAME) {
             render_scene_in_game();
         }
+        draw_logs();
+        EndDrawing();
     }
     CloseWindow();
 }
