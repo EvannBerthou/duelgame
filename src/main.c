@@ -5,7 +5,6 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -21,22 +20,99 @@
 extern const spell all_spells[];
 extern const int spell_count;
 
-bool display_logs = false;
+bool console_open = false;
 int log_base = 0;
 #define LOG_LINE_COUNT 20
+#define CONSOLE_INPUT_MAX_LENGTH 32
+char console_input[CONSOLE_INPUT_MAX_LENGTH] = {0};
+int console_input_cursor = 0;
 
-// TODO: Maybe make a full console system instead of just logs ?
-void draw_logs() {
-    if (display_logs) {
-        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), GetColor(0x181818AA));
-        for (int i = 0; i < fmin(LOG_LINE_COUNT, get_log_count()); i++) {
-            int idx = get_log_count() - fmin(LOG_LINE_COUNT, get_log_count()) + i - log_base;
-            if (get_log(idx) == NULL) {
-                continue;
-            }
-            DrawText(get_log(idx), 0, 32 * i, 32, WHITE);
+bool is_console_open() {
+    return console_open;
+}
+
+bool is_console_closed() {
+    return !console_open;
+}
+
+// TODO: Handle more cursor movement
+void update_console() {
+    if (IsKeyPressed(KEY_RIGHT_ALT)) {
+        console_open = !console_open;
+    }
+    if (console_open && (IsKeyPressed(KEY_UP) || IsKeyPressedRepeat(KEY_UP))) {
+        if (log_base + LOG_LINE_COUNT < get_log_count()) {
+            log_base++;
         }
     }
+    if (console_open && (IsKeyPressed(KEY_DOWN) || IsKeyPressedRepeat(KEY_DOWN))) {
+        log_base = fmax(log_base - 1, 0);
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
+        console_input_cursor = fmax(console_input_cursor - 1, 0);
+    }
+
+    if (IsKeyPressed(KEY_ENTER)) {
+        // TODO: Execute command
+        if (console_input_cursor > 0) {
+            LOG("%.*s", console_input_cursor, console_input);
+            console_input_cursor = 0;
+        }
+    }
+
+    char c;
+    while ((c = GetCharPressed())) {
+        if (console_input_cursor < CONSOLE_INPUT_MAX_LENGTH) {
+            console_input[console_input_cursor] = c;
+            console_input_cursor++;
+        }
+    }
+}
+
+// TODO: Maybe make a full console system instead of just logs ?
+// TODO: Logs should not move when there is a new message and we are not on the latests logs
+void render_console() {
+    if (is_console_closed()) {
+        return;
+    }
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), GetColor(0x181818AA));
+    for (int i = 0; i <= fmin(LOG_LINE_COUNT, get_log_count()); i++) {
+        int idx = get_log_count() - fmin(LOG_LINE_COUNT, get_log_count()) + i - log_base;
+        if (get_log(idx) == NULL) {
+            continue;
+        }
+        Color c = WHITE;
+        switch (get_level(idx)) {
+            case LL_INFO:
+                c = WHITE;
+                break;
+            case LL_DEBUG:
+                c = GREEN;
+                break;
+            case LL_WARNING:
+                c = ORANGE;
+                break;
+            case LL_ERROR:
+                c = RED;
+                break;
+            default:
+                c = WHITE;
+                break;
+        }
+        DrawText(get_log(idx), 0, 32 * i, 32, c);
+    }
+
+    // Input
+    const char *console_input_text = TextFormat("%.*s", console_input_cursor, console_input);
+    DrawText(console_input_text, 0, GetScreenHeight() - 32, 32, WHITE);
+    DrawRectangle(MeasureText(console_input_text, 32) + 3, GetScreenHeight() - 32, 4, 32, WHITE);
+
+    // Counter
+    int start_idx = fmax(get_log_count() - log_base - LOG_LINE_COUNT + 1, 0);
+    const char *log_count = TextFormat("%d / %d", start_idx, get_log_count() + 1);
+    int log_count_length = MeasureText(log_count, 32);
+    DrawText(log_count, GetScreenWidth() - log_count_length, 0, 32, WHITE);
 }
 
 #define WIDTH 1280
@@ -489,6 +565,9 @@ player_move player_exec_action(player *p) {
 }
 
 bool is_over_cell(int x, int y) {
+    if (is_console_open()) {
+        return false;
+    }
     const Rectangle cell_rect = {x, y, CELL_SIZE, CELL_SIZE};
     return CheckCollisionPointRec(GetMousePosition(), cell_rect);
 }
@@ -712,12 +791,14 @@ void render_player_actions(player *p) {
         b->type = BT_TEXTURE;
         button_render(b);
 
-        if (button_hover(b)) {
-            hoverred_button = info->spells[i];
-        }
-        if (button_clicked(b)) {
-            info->action = PA_SPELL;
-            p->selected_spell = i;
+        if (is_console_closed()) {
+            if (button_hover(b)) {
+                hoverred_button = info->spells[i];
+            }
+            if (button_clicked(b)) {
+                info->action = PA_SPELL;
+                p->selected_spell = i;
+            }
         }
     }
 
@@ -795,6 +876,7 @@ int connect_to_server(const char *ip, uint16_t port) {
     LOG("Connecting to %s:%d\n", ip, port);
 
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        client_fd = 0;
         return -1;
     }
 
@@ -803,11 +885,13 @@ int connect_to_server(const char *ip, uint16_t port) {
     serv_addr.sin_port = htons(port);
 
     if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
+        client_fd = 0;
         return -1;
     }
 
     int status;
     if ((status = connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) < 0) {
+        client_fd = 0;
         return -1;
     }
 
@@ -1087,7 +1171,7 @@ struct timeval timeout;
 
 bool join_game(const char *ip, int port, const char *username) {
     if (connect_to_server(ip, port) < 0) {
-        fprintf(stderr, "Could not connect to server\n");
+        LOGL(LL_ERROR, "Could not connect to server\n");
         return false;
     }
 
@@ -1107,15 +1191,15 @@ bool join_game(const char *ip, int port, const char *username) {
     return true;
 }
 
-void render_scene_in_game() {
+round_state next_state = RS_WAITING;
+
+void update_scene_in_game() {
     step_animations();
-
-    ClearBackground(GetColor(0x181818FF));
-
     const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
+
     if (gs == GS_STARTED || gs == GS_ENDING) {
-        round_state next_state = state;
-        if (state == RS_PLAYING) {
+        next_state = state;
+        if (state == RS_PLAYING && is_console_closed()) {
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                 if (IsKeyPressed(keybinds[i])) {
                     players[current_player].info.action = PA_SPELL;
@@ -1168,7 +1252,17 @@ void render_scene_in_game() {
                 next_state = RS_PLAYING;
             }
         }
+    } else if (gs == GS_ENDED) {
+        if (IsKeyPressed(KEY_R) && is_console_closed()) {
+            if (current_player == 0) {
+                send_sock(PKT_GAME_RESET, NULL, client_fd);
+            }
+        }
+    }
+}
 
+void render_scene_in_game() {
+    if (gs == GS_STARTED || gs == GS_ENDING) {
         render_map();
 
         // TODO: Always render currently animation player on top
@@ -1208,13 +1302,14 @@ void render_scene_in_game() {
                 DrawText(TextFormat("AP=%d", player->info.ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
             }
         }
+        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+        char time_string[8] = {0};
+        struct tm *time = localtime(&round_timer);
+        strftime(time_string, 8, "%M:%S", time);
+        int width = MeasureText(time_string, 48);
+        DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
+        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     } else if (gs == GS_ENDED) {
-        if (IsKeyPressed(KEY_R)) {
-            if (current_player == 0) {
-                send_sock(PKT_GAME_RESET, NULL, client_fd);
-            }
-        }
-
         if (winner_id == 255) {
             DrawText("Game draw", 0, 0, 64, WHITE);
         } else {
@@ -1225,13 +1320,6 @@ void render_scene_in_game() {
             DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
         }
     }
-    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
-    char time_string[8] = {0};
-    struct tm *time = localtime(&round_timer);
-    strftime(time_string, 8, "%M:%S", time);
-    int width = MeasureText(time_string, 48);
-    DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
-    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
 }
 
 const int card_width = (WIDTH - 150) / 2;
@@ -1245,7 +1333,7 @@ card player_build_card = CARD(50, 150, WIDTH - 100, 550, UI_NORD, "Player build"
 button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, "X", 46);
 int selected_player_build = -1;
 
-void render_scene_lobby() {
+void update_scene_lobby() {
     start_game_button.disabled = player_count() < 2;
 
     if (selected_player_build == -1) {
@@ -1266,8 +1354,9 @@ void render_scene_lobby() {
             selected_player_build = -1;
         }
     }
+}
 
-    ClearBackground(UI_BLACK);
+void render_scene_lobby() {
     int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Lobby", 64);
     DrawText("Lobby", title_center, 32, 64, WHITE);
 
@@ -1395,7 +1484,11 @@ int get_total_stats() {
     return stat_total;
 }
 
-void render_scene_main_menu() {
+void update_scene_main_menu() {
+    if (is_console_open()) {
+        return;
+    }
+
     // First card
     if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
         input_erase(inputs[selected_input]);
@@ -1461,7 +1554,9 @@ void render_scene_main_menu() {
             }
         }
     }
-    ClearBackground(UI_BLACK);
+}
+
+void render_scene_main_menu() {
     const char *version_text = TextFormat("v%s", GIT_VERSION);
     int version_width = MeasureText(version_text, 24);
     DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
@@ -1669,24 +1764,14 @@ int main(int argc, char **argv) {
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
-        if (IsKeyPressed(KEY_RIGHT_ALT)) {
-            display_logs = !display_logs;
-        }
-        if (display_logs && (IsKeyPressed(KEY_UP) || IsKeyPressedRepeat(KEY_UP))) {
-            if (log_base + LOG_LINE_COUNT < get_log_count()) {
-                log_base++;
-            }
-        }
-        if (display_logs && (IsKeyPressed(KEY_DOWN) || IsKeyPressedRepeat(KEY_DOWN))) {
-            log_base = fmax(log_base - 1, 0);
-        }
-
+        update_console();
         if (client_fd != 0) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {
                 net_packet_ping ping = {.send_time = (uint64_t)(GetTime() * 1000)};
                 send_sock(PKT_PING, &ping, client_fd);
                 ping_counter = 1;
+                LOGL(LL_DEBUG, "Ping");
             }
         }
 
@@ -1696,7 +1781,18 @@ int main(int argc, char **argv) {
         }
 
         DrawText(TextFormat("FPS=%d", GetFPS()), 0, 0, 24, GREEN);
+
+        // Update
+        if (active_scene == SCENE_MAIN_MENU) {
+            update_scene_main_menu();
+        } else if (active_scene == SCENE_LOBBY) {
+            update_scene_lobby();
+        } else if (active_scene == SCENE_IN_GAME) {
+            update_scene_in_game();
+        }
+
         BeginDrawing();
+        ClearBackground(GetColor(0x181818FF));
         // Rendering
         if (active_scene == SCENE_MAIN_MENU) {
             render_scene_main_menu();
@@ -1705,7 +1801,7 @@ int main(int argc, char **argv) {
         } else if (active_scene == SCENE_IN_GAME) {
             render_scene_in_game();
         }
-        draw_logs();
+        render_console();
         EndDrawing();
     }
     CloseWindow();

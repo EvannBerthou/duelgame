@@ -9,7 +9,15 @@ int strtoint(const char* str, int* out);
 
 #define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)
 
-void LOG(const char *fmt, ...);
+typedef enum {
+    LL_INFO,
+    LL_WARNING,
+    LL_DEBUG,
+    LL_ERROR,
+} log_level;
+
+void LOG(const char* fmt, ...);
+void LOGL(log_level level, const char* fmt, ...);
 
 #define MAX_SPELL_COUNT 4
 #define MAX_PLAYER_COUNT 4
@@ -111,8 +119,8 @@ typedef struct {
     const spell* spell_effect;
 } player_info;
 
-
-const char *get_log(int idx);
+const char* get_log(int idx);
+log_level get_level(int idx);
 int get_log_count();
 
 #endif

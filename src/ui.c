@@ -4,6 +4,9 @@
 #include <stdbool.h>
 #include <string.h>
 
+extern bool is_console_open();
+extern bool is_console_closed();
+
 // Utils
 
 int get_width_center(Rectangle rec, const char *text, int font_size) {
@@ -20,7 +23,7 @@ void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c) {
 // Input
 
 bool input_write(input_buf *b, char c) {
-    if (b->ptr == b->max_length) {
+    if (b->ptr == b->max_length || is_console_open()) {
         return false;
     }
     b->buf[b->ptr] = c;
@@ -29,7 +32,7 @@ bool input_write(input_buf *b, char c) {
 }
 
 bool input_erase(input_buf *b) {
-    if (b->ptr == 0) {
+    if (b->ptr == 0 || is_console_open()) {
         return false;
     }
     b->ptr--;
@@ -80,7 +83,7 @@ void input_trim(input_buf *b) {
 }
 
 bool input_clicked(input_buf *b) {
-    return CheckCollisionPointRec(GetMousePosition(), b->rec) && IsMouseButtonPressed(0);
+    return CheckCollisionPointRec(GetMousePosition(), b->rec) && IsMouseButtonPressed(0) && is_console_closed();
 }
 
 void input_render(input_buf *b, int active) {
@@ -107,11 +110,11 @@ void input_render(input_buf *b, int active) {
 // Button
 
 bool button_hover(button *b) {
-    return CheckCollisionPointRec(GetMousePosition(), b->rec);
+    return CheckCollisionPointRec(GetMousePosition(), b->rec) && is_console_closed();
 }
 
 bool button_clicked(button *b) {
-    if (b->disabled) {
+    if (b->disabled || is_console_open()) {
         return false;
     }
     if (CheckCollisionPointRec(GetMousePosition(), b->rec)) {
@@ -132,7 +135,7 @@ void button_render(button *b) {
     Color c = b->color;
     if (b->disabled) {
         c = ColorTint(c, DARKGRAY);
-    } else {
+    } else if (is_console_closed()) {
         if (CheckCollisionPointRec(GetMousePosition(), b->rec)) {
             if (IsMouseButtonDown(0)) {
                 c = ColorTint(c, DARKGRAY);
@@ -164,7 +167,7 @@ void button_render(button *b) {
 // Slider
 
 bool slider_decrement(slider *s) {
-    if (s->value == 0) {
+    if (s->value == 0 || is_console_open()) {
         return false;
     }
     s->value--;
@@ -172,7 +175,7 @@ bool slider_decrement(slider *s) {
 }
 
 bool slider_increment(slider *s) {
-    if (s->value == s->max) {
+    if (s->value == s->max || is_console_open()) {
         return false;
     }
     s->value++;
@@ -180,7 +183,7 @@ bool slider_increment(slider *s) {
 }
 
 bool slider_hover(slider *s) {
-    return CheckCollisionPointRec(GetMousePosition(), s->rec);
+    return CheckCollisionPointRec(GetMousePosition(), s->rec) && is_console_closed();
 }
 
 int slider_border = 16;
@@ -207,7 +210,7 @@ void slider_render(slider *s) {
 // Buttonned slider
 
 bool buttoned_slider_decrement(buttoned_slider *bs) {
-    if (bs->slider.value == 0) {
+    if (bs->slider.value == 0 || is_console_open()) {
         return false;
     }
     bs->slider.value = (bs->slider.value - bs->step > 0) ? bs->slider.value - bs->step : 0;
@@ -215,7 +218,7 @@ bool buttoned_slider_decrement(buttoned_slider *bs) {
 }
 
 bool buttoned_slider_increment(buttoned_slider *bs) {
-    if (bs->slider.value == bs->slider.max) {
+    if (bs->slider.value == bs->slider.max || is_console_open()) {
         return false;
     }
     bs->slider.value = (bs->slider.value + bs->step < bs->slider.max) ? bs->slider.value + bs->step : bs->slider.max;
@@ -264,6 +267,10 @@ Rectangle render_box(int x, int y, int w, int h) {
 #define TOOLTIP_TITLE_FONT_SIZE 32
 
 void render_tooltip(Rectangle rec, const char *title, const char *description) {
+    if (is_console_open()) {
+        return;
+    }
+
     int borderSize = 32;
     rec.x += borderSize / 2.f;
     rec.y += borderSize / 2.f;
@@ -318,7 +325,7 @@ void render_tooltip(Rectangle rec, const char *title, const char *description) {
 // Card
 
 bool card_tab_clicked(card *c, int tab) {
-    if (IsMouseButtonPressed(0) == false) {
+    if (IsMouseButtonPressed(0) == false || is_console_open()) {
         return false;
     }
 
@@ -351,7 +358,7 @@ void card_render(card *c) {
         Rectangle tab_rec = {c->rec.x + tab_width * i, c->rec.y, tab_width, 40};
         Color color = c->color;
         if (i != c->selected_tab) {
-            if (CheckCollisionPointRec(GetMousePosition(), tab_rec)) {
+            if (CheckCollisionPointRec(GetMousePosition(), tab_rec) && is_console_closed()) {
                 color = ColorTint(color, LIGHTGRAY);
             } else {
                 color = ColorTint(color, GRAY);
@@ -372,7 +379,7 @@ void card_render(card *c) {
 // Icon
 
 bool icon_hover(Rectangle rec) {
-    return CheckCollisionPointRec(GetMousePosition(), rec);
+    return CheckCollisionPointRec(GetMousePosition(), rec) && is_console_closed();
 }
 
 void icon_render(Texture2D icon, Rectangle rec) {

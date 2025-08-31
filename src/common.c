@@ -5,17 +5,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define MAX_LOG_HISTORY 2048
+#define MAX_LOG_HISTORY 8192
+
 char *log_history[MAX_LOG_HISTORY] = {0};
+log_level log_levels[MAX_LOG_HISTORY] = {0};
 int log_history_ptr = 0;
 
-void LOG(const char *fmt, ...) {
-    va_list args;
+void LOG_(log_level level, const char *fmt, va_list args) {
     char *formatted = NULL;
-    va_start(args, fmt);
     vasprintf(&formatted, fmt, args);
-    va_end(args);
     asprintf(&log_history[log_history_ptr], "[%s(%d)]%s", LOG_PREFIX, getpid(), formatted);
+    log_levels[log_history_ptr] = level;
     free(formatted);
 
     printf("%s", log_history[log_history_ptr]);
@@ -25,6 +25,20 @@ void LOG(const char *fmt, ...) {
     }
 }
 
+void LOG(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    LOG_(LL_INFO, fmt, args);
+    va_end(args);
+}
+
+void LOGL(log_level level, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    LOG_(level, fmt, args);
+    va_end(args);
+}
+
 const char *get_log(int idx) {
     if (idx < log_history_ptr && idx >= 0) {
         return log_history[idx];
@@ -32,8 +46,15 @@ const char *get_log(int idx) {
     return NULL;
 }
 
+log_level get_level(int idx) {
+    if (idx < log_history_ptr && idx >= 0) {
+        return log_levels[idx];
+    }
+    return LL_INFO;
+}
+
 int get_log_count() {
-    return log_history_ptr - 1;
+    return log_history_ptr;
 }
 
 int strtoint(const char *str, int *out) {
