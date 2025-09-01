@@ -57,6 +57,10 @@ int get_log_count() {
     return log_history_ptr;
 }
 
+void clear_logs() {
+    log_history_ptr = 0;
+}
+
 int strtoint(const char *str, int *out) {
     char *endptr = NULL;
     errno = 0;

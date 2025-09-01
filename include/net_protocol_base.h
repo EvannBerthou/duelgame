@@ -15,7 +15,7 @@ typedef struct {
 
 typedef struct {
     uint8_t id;
-    uint8_t master; // Is the player the lobby's master ?
+    uint8_t master;  // Is the player the lobby's master ?
 } net_packet_connected;
 
 typedef struct {
@@ -43,6 +43,9 @@ typedef struct {
     uint8_t y;
     uint8_t effect;
     uint8_t effect_round_left;
+    // Should the game updates the status right as the packet is recieved (true)
+    // or wait for the end of the round (false) ?
+    uint8_t immediate;
 } net_packet_player_update;
 
 // Player build

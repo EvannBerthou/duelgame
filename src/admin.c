@@ -7,32 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include "command.h"
 #include "net.h"
 
 #define ci(X)           \
     do {                \
         if (X == 0)     \
             goto retry; \
-    } while (0)
-
-#define GETTOKI(X)                          \
-    const char *X##str = strtok(NULL, " "); \
-    if (X##str == NULL) {                   \
-        printf("Invalid args\n");           \
-        goto retry;                         \
-    }                                       \
-    int X = 0;                              \
-    strtoint(X##str, &X);                   \
-    do {                                    \
-    } while (0)
-
-#define GETTOKS(X)                     \
-    const char *X = strtok(NULL, " "); \
-    if (X == NULL) {                   \
-        printf("Invalid args\n");      \
-        goto retry;                    \
-    }                                  \
-    do {                               \
     } while (0)
 
 int client_fd = 0;
@@ -60,15 +41,11 @@ int connect_to_server(const char *ip, uint16_t port) {
     return 0;
 }
 
-bool streq(const char *a, const char *b) {
-    return strcmp(a, b) == 0;
-}
-
 int main(int argc, char **argv) {
     char *ip = "127.0.0.1";
     int port = 3000;
 
-    POPARG(argc, argv); // program name
+    POPARG(argc, argv);  // program name
     while (argc > 0) {
         const char *arg = POPARG(argc, argv);
         if (strcmp(arg, "--ip") == 0) {
@@ -111,22 +88,27 @@ int main(int argc, char **argv) {
 
     char buf[64] = {0};
     while (1) {
-    retry:
         if (fgets(buf, 63, stdin) == NULL) {
             printf("Error reading\n");
             exit(1);
         }
         buf[strcspn(buf, "\n")] = '\0';
-        char *tok = strtok(buf, " ");
-        if (streq(tok, "update")) {
-            GETTOKI(id);
-            GETTOKI(prop);
-            GETTOKI(value);
-
-            net_packet_admin_update_player_info update = pkt_admin_update_player_info(id, prop, value);
-            send_sock(PKT_ADMIN_UPDATE_PLAYER_INFO, &update, client_fd);
+        command_result result = handle_command(buf);
+        if (result.valid == false) {
+            if (result.content == NULL) {
+                printf("Unknown command `%s`", buf);
+            } else {
+                printf("%s", (char *)result.content);
+            }
         } else {
-            printf("Unknown command\n");
+            if (result.has_packet) {
+                if (result.content == NULL) {
+                    printf("Error creating packet");
+                } else {
+                    send_sock(result.type, result.content, client_fd);
+                }
+                free(result.content);
+            }
         }
     }
 }

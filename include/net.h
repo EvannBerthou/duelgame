@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "common.h"
+#define NET_PROTOCOL_IMPLEMENTATION
 #include "net_protocol.h"
 
 typedef uint8_t net_packet_type;
@@ -118,6 +120,10 @@ int packet_read(net_packet* p, int fd) {
 }
 
 void send_sock(net_packet_type_enum type, void* p, int fd) {
+    if (fd == 0) {
+        LOGL(LL_ERROR, "Can't send packet when not connected");
+        return;
+    }
     net_packet packet = {0};
     packet.len = 2 + get_packet_length(type, p);
     packet.type = type;

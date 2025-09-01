@@ -18,7 +18,7 @@ typedef struct {
 
 typedef struct {
     uint8_t id;
-    uint8_t master; // Is the player the lobby's master ?
+    uint8_t master;  // Is the player the lobby's master ?
 } net_packet_connected;
 
 typedef struct {
@@ -46,6 +46,9 @@ typedef struct {
     uint8_t y;
     uint8_t effect;
     uint8_t effect_round_left;
+    // Should the game updates the status right as the packet is recieved (true)
+    // or wait for the end of the round (false) ?
+    uint8_t immediate;
 } net_packet_player_update;
 
 // Player build
@@ -109,6 +112,22 @@ typedef enum {
     PKT_ADMIN_CONNECT_RESULT,
     PKT_ADMIN_UPDATE_PLAYER_INFO,
 } net_packet_type_enum;
+net_packet_ping pkt_ping(uint64_t send_time, uint64_t recieve_time);
+net_packet_join pkt_join(uint8_t id, const char *username);
+net_packet_connected pkt_connected(uint8_t id, uint8_t master);
+net_packet_disconnect pkt_disconnect(uint8_t id, uint8_t new_master);
+net_packet_map pkt_map(uint8_t width, uint8_t height, uint8_t type, uint8_t *content);
+net_packet_game_start pkt_game_start();
+net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t ad, uint8_t ap, uint8_t x, uint8_t y, uint8_t effect, uint8_t effect_round_left, uint8_t immediate);
+net_packet_player_build pkt_player_build(uint8_t id, uint8_t base_health, uint8_t *spells, uint8_t ad, uint8_t ap);
+net_packet_player_action pkt_player_action(uint8_t id, uint8_t action, uint8_t x, uint8_t y, uint8_t spell);
+net_packet_round_end pkt_round_end(uint8_t winner_id, uint8_t *player_scores);
+net_packet_game_reset pkt_game_reset();
+net_packet_game_stats pkt_game_stats(uint64_t round_timer);
+net_packet_admin_connect pkt_admin_connect(const char *password);
+net_packet_admin_connect_result pkt_admin_connect_result(uint8_t success);
+net_packet_admin_update_player_info pkt_admin_update_player_info(uint8_t id, uint8_t property, uint8_t value);
+#ifdef NET_PROTOCOL_IMPLEMENTATION
 uint8_t get_packet_length(net_packet_type_enum type, void *p) {
     switch (type) {
         case PKT_PING: return 16;
@@ -121,7 +140,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
             return 3 + (s->width * s->height);
         }
         case PKT_GAME_START: return 0;
-        case PKT_PLAYER_UPDATE: return 9;
+        case PKT_PLAYER_UPDATE: return 10;
         case PKT_PLAYER_BUILD: {
             net_packet_player_build *s = (net_packet_player_build*)p;
             (void)s;
@@ -189,7 +208,7 @@ net_packet_game_start pkt_game_start() {
     (void)s;
     return result;
 }
-net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t ad, uint8_t ap, uint8_t x, uint8_t y, uint8_t effect, uint8_t effect_round_left) {
+net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t max_health, uint8_t ad, uint8_t ap, uint8_t x, uint8_t y, uint8_t effect, uint8_t effect_round_left, uint8_t immediate) {
     net_packet_player_update result = {};
     net_packet_player_update *s = &result;
     (void)s;
@@ -202,6 +221,7 @@ net_packet_player_update pkt_player_update(uint8_t id, uint8_t health, uint8_t m
     s->y = y;
     s->effect = effect;
     s->effect_round_left = effect_round_left;
+    s->immediate = immediate;
     return result;
 }
 net_packet_player_build pkt_player_build(uint8_t id, uint8_t base_health, uint8_t *spells, uint8_t ad, uint8_t ap) {
@@ -323,6 +343,7 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, s->y);
             buf = packu8(buf, s->effect);
             buf = packu8(buf, s->effect_round_left);
+            buf = packu8(buf, s->immediate);
             return buf;
         } break;
         case PKT_PLAYER_BUILD: {
@@ -440,6 +461,7 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             s->y = unpacku8(base);
             s->effect = unpacku8(base);
             s->effect_round_left = unpacku8(base);
+            s->immediate = unpacku8(base);
             return s;
         } break;
         case PKT_PLAYER_BUILD: {
@@ -503,4 +525,5 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
     }
     return NULL;
 }
+#endif
 #endif

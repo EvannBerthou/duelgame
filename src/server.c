@@ -33,14 +33,6 @@ const char ADMIN_PASSWORD[8] = {'p', 'a', 's', 's'};
 int admins[MAX_ADMIN] = {0};
 int admin_count = 0;
 
-bool is_admin(int fd) {
-    for (int i = 0; i < admin_count; i++) {
-        if (admins[i] == fd)
-            return true;
-    }
-    return false;
-}
-
 game_state gs = GS_WAITING;
 int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
 int connection_count = 0;
@@ -53,6 +45,19 @@ int player_round_order[MAX_PLAYER_COUNT] = {0};
 // int player_count = 0;
 uint8_t round_scores[MAX_PLAYER_COUNT] = {0};
 time_t round_start_time = 0;
+
+bool is_admin(int fd) {
+    // Master player does not have to login
+    if (fd == clients[master_player]) {
+        return true;
+    }
+    for (int i = 0; i < admin_count; i++) {
+        if (admins[i] == fd)
+            return true;
+    }
+    return false;
+}
+
 
 const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
@@ -85,7 +90,7 @@ int ci(int a) {
 
 net_packet_player_update pkt_from_info(player_info *p) {
     uint8_t health = p->health >= 0 ? p->health : 0;
-    return pkt_player_update(p->id, health, p->max_health, p->ad, p->ap, p->x, p->y, p->effect, p->effect_round_left);
+    return pkt_player_update(p->id, health, p->max_health, p->ad, p->ap, p->x, p->y, p->effect, p->effect_round_left, false);
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
@@ -453,7 +458,11 @@ void handle_message(int fd) {
             net_packet_admin_update_player_info *info = (net_packet_admin_update_player_info *)p.content;
             if (info->property == PIP_HEALTH) {
                 players[info->id].health = info->value;
+                if (players[info->id].health > players[info->id].max_health) {
+                    players[info->id].max_health = info->value;
+                }
                 net_packet_player_update u = pkt_from_info(&players[info->id]);
+                u.immediate = true;
                 broadcast(PKT_PLAYER_UPDATE, &u);
             }
         }

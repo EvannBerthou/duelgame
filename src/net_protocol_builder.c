@@ -235,6 +235,35 @@ int main(void) {
     }
     printf("} net_packet_type_enum;\n");
 
+    // Signatures
+    for (int i = 0; i < structs_count; i++) {
+        net_struct *s = &structs[i];
+        const char *suffix = s->name + strlen("net_packet_");
+        printf("%s pkt_%s(", s->name, suffix);
+        for (int j = 0; j < s->field_count; j++) {
+            struct_field *f = &s->fields[j];
+            if (f->type == TYPE_UINT8) {
+                printf("uint8_t %s", f->name);
+            } else if (f->type == TYPE_UINT8_PTR) {
+                printf("uint8_t *%s", f->name);
+            } else if (f->type == TYPE_UINT8_ARRAY) {
+                printf("uint8_t *%s", f->name);
+            } else if (f->type == TYPE_CHAR_ARRAY) {
+                printf("const char *%s", f->name);
+            } else if (f->type == TYPE_UINT64) {
+                printf("uint64_t %s", f->name);
+            }
+
+            if (j != s->field_count - 1) {
+                printf(", ");
+            }
+        }
+        printf(");\n");
+    }
+
+
+    printf("#ifdef NET_PROTOCOL_IMPLEMENTATION\n");
+
     // Size
     printf("uint8_t get_packet_length(net_packet_type_enum type, void *p) {\n");
     printf("    switch (type) {\n");
@@ -384,6 +413,7 @@ int main(void) {
     printf("    return NULL;\n");
     printf("}\n");
 
+    printf("#endif\n");
     printf("#endif\n");
 
     return 0;

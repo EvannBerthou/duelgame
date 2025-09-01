@@ -122,5 +122,6 @@ typedef struct {
 const char* get_log(int idx);
 log_level get_level(int idx);
 int get_log_count();
+void clear_logs();
 
 #endif

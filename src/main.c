@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include "command.h"
 #include "common.h"
 #include "net.h"
 #include "net_protocol.h"
@@ -19,6 +20,8 @@
 
 extern const spell all_spells[];
 extern const int spell_count;
+
+int client_fd = 0;
 
 bool console_open = false;
 int log_base = 0;
@@ -57,6 +60,23 @@ void update_console() {
         // TODO: Execute command
         if (console_input_cursor > 0) {
             LOG("%.*s", console_input_cursor, console_input);
+            command_result result = handle_command(console_input);
+            if (result.valid == false) {
+                if (result.content == NULL) {
+                    LOGL(LL_ERROR, "Unknown command `%.*s`", console_input_cursor, console_input);
+                } else {
+                    LOGL(LL_ERROR, "%s", result.content);
+                }
+            } else {
+                if (result.has_packet) {
+                    if (result.content == NULL) {
+                        LOGL(LL_ERROR, "Error creating packet");
+                    } else {
+                        send_sock(result.type, result.content, client_fd);
+                    }
+                    free(result.content);
+                }
+            }
             console_input_cursor = 0;
         }
     }
@@ -870,8 +890,6 @@ void render_infos() {
     }
 }
 
-int client_fd = 0;
-
 int connect_to_server(const char *ip, uint16_t port) {
     LOG("Connecting to %s:%d\n", ip, port);
 
@@ -964,7 +982,6 @@ void init_in_game_ui() {
 //  PKT_PLAYER_UPDATE could also be used just to force player informations when an admin updates it.
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
-        // TODO: We should not compute the diff here but when we recieve it
         net_packet_ping *ping = (net_packet_ping *)p->content;
         last_ping = ping->recieve_time - ping->send_time;
     } else if (p->type == PKT_JOIN) {
@@ -1033,7 +1050,7 @@ void handle_packet(net_packet *p) {
         LOG("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
         player *player = &players[u->id];
 
-        if (gs == GS_WAITING) {
+        if (gs == GS_WAITING || u->immediate) {
             player->info.health = u->health;
             player->info.max_health = u->max_health;
             player->info.ad = u->ad;
@@ -1042,6 +1059,8 @@ void handle_packet(net_packet *p) {
             player->info.y = u->y;
             player->info.effect = u->effect;
             player->info.effect_round_left = u->effect_round_left;
+            health_bars[u->id].value = player->info.health;
+            health_bars[u->id].max = player->info.max_health;
         } else {
             updates[u->id].position = (Vector2){u->x, u->y};
             updates[u->id].health = u->health;
@@ -1110,6 +1129,7 @@ void play_round() {
             if (target != NULL) {
                 target->info.health -= s->damage;
                 health_bars[target->info.id].value = target->info.health;
+                health_bars[target->info.id].max = target->info.max_health;
                 target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                 target->animation_state = PAS_DAMAGE;
                 if (s->effect != SE_NONE) {
@@ -1771,7 +1791,6 @@ int main(int argc, char **argv) {
                 net_packet_ping ping = {.send_time = (uint64_t)(GetTime() * 1000)};
                 send_sock(PKT_PING, &ping, client_fd);
                 ping_counter = 1;
-                LOGL(LL_DEBUG, "Ping");
             }
         }
 
@@ -1792,16 +1811,18 @@ int main(int argc, char **argv) {
         }
 
         BeginDrawing();
-        ClearBackground(GetColor(0x181818FF));
-        // Rendering
-        if (active_scene == SCENE_MAIN_MENU) {
-            render_scene_main_menu();
-        } else if (active_scene == SCENE_LOBBY) {
-            render_scene_lobby();
-        } else if (active_scene == SCENE_IN_GAME) {
-            render_scene_in_game();
+        {
+            ClearBackground(GetColor(0x181818FF));
+            // Rendering
+            if (active_scene == SCENE_MAIN_MENU) {
+                render_scene_main_menu();
+            } else if (active_scene == SCENE_LOBBY) {
+                render_scene_lobby();
+            } else if (active_scene == SCENE_IN_GAME) {
+                render_scene_in_game();
+            }
+            render_console();
         }
-        render_console();
         EndDrawing();
     }
     CloseWindow();
