@@ -3,5 +3,6 @@ server
 assets/*
 !assets/sprites
 !assets/fonts
+!assets/sounds
 compile_commands.json
 .cache
