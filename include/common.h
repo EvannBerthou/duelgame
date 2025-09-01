@@ -26,12 +26,14 @@ typedef enum {
     ST_MOVE,
     ST_TARGET,
     ST_ZONE,
+    ST_STAT,
 } spell_type_enum;
 
 typedef enum {
     SE_NONE,
     SE_STUN,
     SE_BURN,
+    SE_HEAL,
     SE_COUNT,
 } spell_effect;
 
@@ -44,7 +46,7 @@ typedef struct {
     uint8_t icon;
 
     spell_type_enum type;
-    uint8_t damage;
+    int damage;
     uint8_t range;
     uint8_t zone_size;
     uint8_t speed;

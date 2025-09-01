@@ -58,7 +58,6 @@ bool is_admin(int fd) {
     return false;
 }
 
-
 const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
     {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
@@ -90,7 +89,8 @@ int ci(int a) {
 
 net_packet_player_update pkt_from_info(player_info *p) {
     uint8_t health = p->health >= 0 ? p->health : 0;
-    return pkt_player_update(p->id, health, p->max_health, p->ad, p->ap, p->x, p->y, p->effect, p->effect_round_left, false);
+    return pkt_player_update(p->id, health, p->max_health, p->ad, p->ap, p->x, p->y, p->effect, p->effect_round_left,
+                             false);
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
@@ -101,8 +101,15 @@ void broadcast(net_packet_type_enum type, void *content) {
     }
 }
 
+void heal_player(player_info *p, const spell *s) {
+    LOG("Healing player %s\n", p->name);
+    p->health = fmin(fmax(p->health + s->damage, 0), p->max_health);
+    net_packet_player_update u = pkt_from_info(p);
+    broadcast(PKT_PLAYER_UPDATE, &u);
+}
+
 void damage_player(player_info *p, const spell *s) {
-    p->health = fmax(p->health - s->damage, 0);
+    p->health = fmin(fmax(p->health - s->damage, 0), p->max_health);
     if (s->effect != SE_NONE) {
         p->effect = s->effect;
         p->effect_round_left = s->effect_duration;
@@ -115,13 +122,14 @@ void damage_player(player_info *p, const spell *s) {
 
 void reset_player(player_info *player) {
     player->max_health = player->base_health;
-    player->health = player->max_health;
+    player->health = player->base_health;
     player->x = spawn_positions[player->id][0];
     player->y = spawn_positions[player->id][1];
     player->effect = SE_NONE;
     player->effect_round_left = 0;
     player->spell_effect = NULL;
     net_packet_player_update u = pkt_from_info(player);
+    u.immediate = true;
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
 
@@ -179,6 +187,12 @@ void play_round(player_info *player) {
                     damage_player(other, s);
                 }
             }
+        } else if (s->type == ST_STAT) {
+            if (s->effect == SE_HEAL) {
+                heal_player(player, s);
+            }
+        } else {
+            LOGL(LL_ERROR, "Unknown spell type %d from %s\n", s->type, s->name);
         }
         player->state = RS_PLAYING;
     } else {
@@ -441,6 +455,7 @@ void handle_message(int fd) {
             broadcast(PKT_PLAYER_BUILD, &b);
 
             net_packet_player_update u = pkt_from_info(player);
+            u.immediate = true;
             broadcast(PKT_PLAYER_UPDATE, &u);
 
             send_map(connections[i]);
@@ -465,6 +480,11 @@ void handle_message(int fd) {
                 u.immediate = true;
                 broadcast(PKT_PLAYER_UPDATE, &u);
             }
+        } else {
+            char msg[128] = {0};
+            strncpy(msg, "You are not allowed to execute this command", 128);
+            net_packet_server_message response = pkt_server_message(LL_ERROR, msg);
+            send_sock(PKT_SERVER_MESSAGE, &response, fd);
         }
     }
 

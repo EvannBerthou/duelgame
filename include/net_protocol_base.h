@@ -91,3 +91,8 @@ typedef struct {
     uint8_t property;
     uint8_t value;
 } net_packet_admin_update_player_info;
+
+typedef struct {
+    uint8_t level; //Log Level
+    char message[128];
+} net_packet_server_message;

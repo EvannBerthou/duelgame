@@ -96,14 +96,14 @@ int main(int argc, char **argv) {
         command_result result = handle_command(buf);
         if (result.valid == false) {
             if (result.content == NULL) {
-                printf("Unknown command `%s`", buf);
+                LOGL(LL_ERROR, "Unknown command `%s`", buf);
             } else {
-                printf("%s", (char *)result.content);
+                LOGL(LL_ERROR, "%s", result.content);
             }
         } else {
             if (result.has_packet) {
                 if (result.content == NULL) {
-                    printf("Error creating packet");
+                    LOGL(LL_ERROR, "Error creating packet");
                 } else {
                     send_sock(result.type, result.content, client_fd);
                 }

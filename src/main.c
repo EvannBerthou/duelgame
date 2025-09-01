@@ -81,11 +81,13 @@ void update_console() {
         }
     }
 
-    char c;
-    while ((c = GetCharPressed())) {
-        if (console_input_cursor < CONSOLE_INPUT_MAX_LENGTH) {
-            console_input[console_input_cursor] = c;
-            console_input_cursor++;
+    if (is_console_open()) {
+        char c;
+        while ((c = GetCharPressed())) {
+            if (console_input_cursor < CONSOLE_INPUT_MAX_LENGTH) {
+                console_input[console_input_cursor] = c;
+                console_input_cursor++;
+            }
         }
     }
 }
@@ -399,8 +401,13 @@ anim_id torch_anim = 0;
 
 #define SLASH_ANIMATION_COUNT 3
 Texture2D slash_attack[SLASH_ANIMATION_COUNT] = {0};
-anim_id slash_animation = NO_ANIMATION;
-Vector2 slash_cell = {0};
+
+#define HEAL_ANIMATION_COUNT 4
+Texture2D heal_attack[HEAL_ANIMATION_COUNT] = {0};
+
+Texture2D *attack_sprites = NULL;
+anim_id attack_animation = NO_ANIMATION;
+Vector2 attack_cell = {0};
 
 void load_assets() {
     font = LoadFont("assets/fonts/default.ttf");
@@ -425,6 +432,9 @@ void load_assets() {
     }
     for (int i = 0; i < SLASH_ANIMATION_COUNT; i++) {
         slash_attack[i] = LoadTexture(TextFormat("assets/sprites/attacks/slash_%d.png", i));
+    }
+    for (int i = 0; i < HEAL_ANIMATION_COUNT; i++) {
+        heal_attack[i] = LoadTexture(TextFormat("assets/sprites/attacks/heal_%d.png", i));
     }
     for (int i = 0; i < SI_COUNT; i++) {
         icons[i] = LoadTexture(TextFormat("assets/sprites/icons/%s.png", icons_files[i]));
@@ -527,6 +537,11 @@ void compute_spell_range(player *p) {
     set_map(&p->action_range, p->info.x, p->info.y, 1);
 
     int range = get_selected_spell()->range;
+    if (range == 0) {
+        free(q.nodes);
+        return;
+    }
+
     int dx[] = {-1, 1, 0, 0};
     int dy[] = {0, 0, -1, 1};
 
@@ -553,11 +568,10 @@ void compute_spell_range(player *p) {
 
 int player_cast_spell(player *p, Vector2 origin) {
     const spell *s = get_selected_spell();
-    if (s->type == ST_MOVE || s->type == ST_TARGET) {
+    if (s->type == ST_MOVE || s->type == ST_TARGET || s->type == ST_STAT) {
         return can_player_move(p, origin);
     } else {
-        LOG("not implemented\n");
-        exit(1);
+        LOGL(LL_ERROR, "not implemented type\n", s->type);
     }
     return false;
 }
@@ -676,7 +690,7 @@ void render_player(player *p) {
             if (i->health <= 0) {
                 p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
                 p->animation_state = PAS_DYING;
-                slash_animation = NO_ANIMATION;
+                attack_animation = NO_ANIMATION;
             }
         }
     } else if (p->animation_state == PAS_STUNNED) {
@@ -740,25 +754,13 @@ void set_selected_spell(player *p, int spell) {
 
 void render_spell_actions(player *p) {
     const spell *s = get_selected_spell();
-    if (s->type == ST_MOVE) {
+    if (s->type == ST_MOVE || s->type == ST_TARGET || s->type == ST_STAT) {
         for (int x = -s->range; x <= s->range; x++) {
             for (int y = -s->range; y <= s->range; y++) {
                 const int x_pos = p->info.x + x;
                 const int y_pos = p->info.y + y;
                 if (can_player_move(p, (Vector2){x_pos, y_pos})) {
                     Vector2 s = grid2screen((Vector2){x_pos, y_pos});
-                    render_game_slot(s);
-                }
-            }
-        }
-    } else if (s->type == ST_TARGET) {
-        for (int x = -s->range; x <= s->range; x++) {
-            for (int y = -s->range; y <= s->range; y++) {
-                const int x_pos = p->info.x + x;
-                const int y_pos = p->info.y + y;
-                Vector2 g = {x_pos, y_pos};
-                if (can_player_move(p, g)) {
-                    Vector2 s = grid2screen(g);
                     render_game_slot(s);
                 }
             }
@@ -804,18 +806,22 @@ void render_player_actions(player *p) {
             tint = GRAY;
             const char *text = TextFormat("%d", info->cooldowns[i]);
             toolbar_spells_buttons[i].text = text;
+        } else {
+            toolbar_spells_buttons[i].text = NULL;
         }
 
         b->texture = icon;
         b->color = tint;
         b->type = BT_TEXTURE;
+        b->disabled = on_cooldown;
         button_render(b);
 
         if (is_console_closed()) {
             if (button_hover(b)) {
                 hoverred_button = info->spells[i];
             }
-            if (button_clicked(b)) {
+            // TODO: Should not be here ?
+            if (button_clicked(b) && players[current_player].info.cooldowns[i] == 0) {
                 info->action = PA_SPELL;
                 p->selected_spell = i;
             }
@@ -844,7 +850,6 @@ void render_preview_move(Vector2 pos) {
     DrawTexturePro(game_slot, source, dest, (Vector2){0}, 0, GRAY);
 }
 
-// TODO: Preview animation
 void render_player_move(player_move *move) {
     if (move->action == PA_SPELL) {
         Vector2 pos = grid2screen(move->position);
@@ -869,6 +874,9 @@ void render_infos() {
             DrawTextEx(font, TextFormat("%s", info->name), (Vector2){x, y}, 24, 1, BLACK);
         }
 
+        health_bars[i].value = player->info.health;
+        health_bars[i].max = player->info.max_health;
+        // LOGL(LL_DEBUG, "%f/%f", health_bars[i].value, health_bars[i].max);
         slider_render(&health_bars[i]);
         if (slider_hover(&health_bars[i])) {
             over_player = i;
@@ -924,6 +932,7 @@ void player_join(const char *username) {
 
 void reset_game() {
     gs = GS_WAITING;
+    state = RS_PLAYING;
 
     free_map(&game_map);
     free_map(&variants);
@@ -932,6 +941,10 @@ void reset_game() {
 
     for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
         anim_pool[i] = (animation){0};
+    }
+
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        updates[i] = (player_round_update){0};
     }
 
     players[0].color = YELLOW;
@@ -946,6 +959,9 @@ void reset_game() {
         players[i].info.action = PA_SPELL;
         players[i].selected_spell = 0;
         players[i].dead = false;
+        for (int j = 0; j < MAX_SPELL_COUNT; j++) {
+            players[i].info.cooldowns[j] = 0;
+        }
     }
 
     action_count = 0;
@@ -972,8 +988,6 @@ void init_in_game_ui() {
         int x = base_x_offset + player_info_width * i + 16;
         health_bars[i].rec = (Rectangle){x, y, life_bar_width, height};
         health_bars[i].color = RED;
-        health_bars[i].max = players[i].info.max_health;
-        health_bars[i].value = players[i].info.max_health;
     }
 }
 
@@ -1015,6 +1029,7 @@ void handle_packet(net_packet *p) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
         LOG("Setting build for %d\n", b->id);
+        LOG("Build for %d is %d HP %d AD %d AP\n", b->id, b->base_health, b->ad, b->ap);
         player->info.base_health = b->base_health;
         player->info.max_health = b->base_health;
         player->info.health = b->base_health;
@@ -1047,7 +1062,7 @@ void handle_packet(net_packet *p) {
         init_in_game_ui();
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
-        LOG("Player Update %d %d %d H=%d\n", u->id, u->x, u->y, u->health);
+        LOG("Player Update %d %d %d H=%d and %d immediate\n", u->id, u->x, u->y, u->health, u->immediate);
         player *player = &players[u->id];
 
         if (gs == GS_WAITING || u->immediate) {
@@ -1059,8 +1074,6 @@ void handle_packet(net_packet *p) {
             player->info.y = u->y;
             player->info.effect = u->effect;
             player->info.effect_round_left = u->effect_round_left;
-            health_bars[u->id].value = player->info.health;
-            health_bars[u->id].max = player->info.max_health;
         } else {
             updates[u->id].position = (Vector2){u->x, u->y};
             updates[u->id].health = u->health;
@@ -1096,6 +1109,9 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_GAME_STATS) {
         net_packet_game_stats *s = (net_packet_game_stats *)p->content;
         round_timer = s->round_timer;
+    } else if (p->type == PKT_SERVER_MESSAGE) {
+        net_packet_server_message *msg = (net_packet_server_message *)p->content;
+        LOGL(msg->level, "From server: %s", msg->message);
     }
 
     free(p->content);
@@ -1124,12 +1140,11 @@ void play_round() {
             p->moving_target = a->target;
             p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
         } else if (s->type == ST_TARGET) {
-            slash_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, 3);
-            slash_cell = a->target;
+            attack_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
+            attack_sprites = slash_attack;
+            attack_cell = a->target;
             if (target != NULL) {
                 target->info.health -= s->damage;
-                health_bars[target->info.id].value = target->info.health;
-                health_bars[target->info.id].max = target->info.max_health;
                 target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
                 target->animation_state = PAS_DAMAGE;
                 if (s->effect != SE_NONE) {
@@ -1138,6 +1153,20 @@ void play_round() {
                     target->info.spell_effect = s;
                 }
             }
+        } else if (s->type == ST_STAT) {
+            // TODO: Use another animation (health, etc).
+            attack_animation = new_animation(AT_ONESHOT, 0.4f / 4.f, 4);
+            attack_sprites = heal_attack;
+            attack_cell = a->target;
+            if (target != NULL) {
+                target->info.effect = s->effect;
+                target->info.spell_effect = s;
+                if (s->effect == SE_HEAL) {
+                    p->info.health = fmin(p->info.health + s->damage, p->info.max_health);
+                }
+            }
+        } else {
+            LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
         }
     } else if (a->action == PA_CANT_PLAY) {
         if (p->info.effect_round_left > 0) {
@@ -1221,7 +1250,7 @@ void update_scene_in_game() {
         next_state = state;
         if (state == RS_PLAYING && is_console_closed()) {
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                if (IsKeyPressed(keybinds[i])) {
+                if (IsKeyPressed(keybinds[i]) && players[current_player].info.cooldowns[i] == 0) {
                     players[current_player].info.action = PA_SPELL;
                     set_selected_spell(&players[current_player], i);
                 }
@@ -1290,12 +1319,12 @@ void render_scene_in_game() {
             render_player(player);
         }
 
-        if (slash_animation != NO_ANIMATION) {
-            Texture2D slash_texture = slash_attack[get_frame(slash_animation)];
-            Vector2 position = grid2screen(slash_cell);
-            DrawTextureEx(slash_texture, position, 0, 1, WHITE);
-            if (anim_finished(slash_animation)) {
-                slash_animation = NO_ANIMATION;
+        if (attack_animation != NO_ANIMATION) {
+            Texture2D attack_texture = attack_sprites[get_frame(attack_animation)];
+            Vector2 position = grid2screen(attack_cell);
+            DrawTextureEx(attack_texture, position, 0, 1, WHITE);
+            if (anim_finished(attack_animation)) {
+                attack_animation = NO_ANIMATION;
             }
         }
 
@@ -1357,7 +1386,7 @@ void update_scene_lobby() {
     start_game_button.disabled = player_count() < 2;
 
     if (selected_player_build == -1) {
-        if (button_clicked(&start_game_button)) {
+        if (button_clicked(&start_game_button) && master_player == current_player) {
             send_sock(PKT_GAME_START, NULL, client_fd);
         }
 

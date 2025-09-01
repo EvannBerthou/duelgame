@@ -95,6 +95,11 @@ typedef struct {
     uint8_t value;
 } net_packet_admin_update_player_info;
 
+typedef struct {
+    uint8_t level; //Log Level
+    char message[128];
+} net_packet_server_message;
+
 typedef enum {
     PKT_PING,
     PKT_JOIN,
@@ -111,6 +116,7 @@ typedef enum {
     PKT_ADMIN_CONNECT,
     PKT_ADMIN_CONNECT_RESULT,
     PKT_ADMIN_UPDATE_PLAYER_INFO,
+    PKT_SERVER_MESSAGE,
 } net_packet_type_enum;
 net_packet_ping pkt_ping(uint64_t send_time, uint64_t recieve_time);
 net_packet_join pkt_join(uint8_t id, const char *username);
@@ -127,6 +133,7 @@ net_packet_game_stats pkt_game_stats(uint64_t round_timer);
 net_packet_admin_connect pkt_admin_connect(const char *password);
 net_packet_admin_connect_result pkt_admin_connect_result(uint8_t success);
 net_packet_admin_update_player_info pkt_admin_update_player_info(uint8_t id, uint8_t property, uint8_t value);
+net_packet_server_message pkt_server_message(uint8_t level, const char *message);
 #ifdef NET_PROTOCOL_IMPLEMENTATION
 uint8_t get_packet_length(net_packet_type_enum type, void *p) {
     switch (type) {
@@ -157,6 +164,7 @@ uint8_t get_packet_length(net_packet_type_enum type, void *p) {
         case PKT_ADMIN_CONNECT: return 8;
         case PKT_ADMIN_CONNECT_RESULT: return 1;
         case PKT_ADMIN_UPDATE_PLAYER_INFO: return 3;
+        case PKT_SERVER_MESSAGE: return 129;
         default: { fprintf(stderr, "Unknown type\n"); exit(1); }
     }
 }
@@ -290,6 +298,14 @@ net_packet_admin_update_player_info pkt_admin_update_player_info(uint8_t id, uin
     s->value = value;
     return result;
 }
+net_packet_server_message pkt_server_message(uint8_t level, const char *message) {
+    net_packet_server_message result = {};
+    net_packet_server_message *s = &result;
+    (void)s;
+    s->level = level;
+    memcpy(s->message, message, 128);
+    return result;
+}
 char *packu8(char *buf, uint8_t u);
 char *packu64(char *buf, uint64_t u);
 char *packsv(char *buf, char *str, int len);
@@ -397,6 +413,12 @@ char *packstruct(char *buf, void *content, net_packet_type_enum type) {
             buf = packu8(buf, s->id);
             buf = packu8(buf, s->property);
             buf = packu8(buf, s->value);
+            return buf;
+        } break;
+        case PKT_SERVER_MESSAGE: {
+            net_packet_server_message *s = (net_packet_server_message*)content;
+            buf = packu8(buf, s->level);
+            buf = packsv(buf, s->message, 128);
             return buf;
         } break;
     }
@@ -520,6 +542,13 @@ void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {
             s->id = unpacku8(base);
             s->property = unpacku8(base);
             s->value = unpacku8(base);
+            return s;
+        } break;
+        case PKT_SERVER_MESSAGE: {
+            net_packet_server_message *s = malloc(sizeof(net_packet_server_message));
+            if (s == NULL) exit(1);
+            s->level = unpacku8(base);
+            unpacksv(base, s->message, 128);
             return s;
         } break;
     }

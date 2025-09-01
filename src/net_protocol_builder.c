@@ -325,6 +325,7 @@ int main(void) {
             } else if (f->type == TYPE_UINT8_ARRAY) {
                 printf("    memcpy(s->%s, %s, %s);\n", f->name, f->name, f->size);
             } else if (f->type == TYPE_CHAR_ARRAY) {
+                //TODO: Use strcpy ?
                 printf("    memcpy(s->%s, %s, %d);\n", f->name, f->name, f->array_size);
             } else if (f->type == TYPE_UINT64) {
                 printf("    s->%s = %s;\n", f->name, f->name);
