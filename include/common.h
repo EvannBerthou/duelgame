@@ -26,7 +26,7 @@ typedef enum {
     ST_MOVE,
     ST_TARGET,
     ST_ZONE,
-    ST_STAT,
+    ST_STAT, //TODO: Should just be a target ?
 } spell_type_enum;
 
 typedef enum {

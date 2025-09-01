@@ -409,6 +409,18 @@ Texture2D *attack_sprites = NULL;
 anim_id attack_animation = NO_ANIMATION;
 Vector2 attack_cell = {0};
 
+// Sounds
+Sound ui_button_clicked = {0};
+Sound ui_tab_switch = {0};
+Sound move_sound = {0};
+Sound attack_sound = {0};
+Sound stun_sound = {0};
+Sound burn_sound = {0};
+Sound heal_sound = {0};
+Sound death_sound = {0};
+Sound win_round_sound = {0};
+Sound lose_round_sound = {0};
+
 void load_assets() {
     font = LoadFont("assets/fonts/default.ttf");
     simple_border = LoadTexture("assets/sprites/ui/button.png");
@@ -439,6 +451,18 @@ void load_assets() {
     for (int i = 0; i < SI_COUNT; i++) {
         icons[i] = LoadTexture(TextFormat("assets/sprites/icons/%s.png", icons_files[i]));
     }
+
+    ui_button_clicked = LoadSound("assets/sounds/10_UI_Menu_SFX/013_Confirm_03.wav");
+    ui_tab_switch = LoadSound("assets/sounds/10_UI_Menu_SFX/029_Decline_09.wav");
+    // TODO: Should loop over the 3 sounds
+    move_sound = LoadSound("assets/sounds/16_human_walk_stone_2.wav");
+    attack_sound = LoadSound("assets/sounds/07_human_atk_sword_1.wav");
+    stun_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/44_Sleep_01.wav");
+    burn_sound = LoadSound("assets/sounds/8_Atk_Magic_SFX/04_Fire_explosion_04_medium.wav");
+    heal_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/02_Heal_02.wav");
+    death_sound = LoadSound("assets/sounds/10_Battle_SFX/69_Enemy_death_01.wav");
+    win_round_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/16_Atk_buff_04.wav");
+    lose_round_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/17_Def_buff_01.wav");
 }
 
 void compute_map_variants() {
@@ -691,6 +715,7 @@ void render_player(player *p) {
                 p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
                 p->animation_state = PAS_DYING;
                 attack_animation = NO_ANIMATION;
+                PlaySound(death_sound);
             }
         }
     } else if (p->animation_state == PAS_STUNNED) {
@@ -832,15 +857,15 @@ void render_player_actions(player *p) {
         draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_spells_buttons[0].rec.y);
     }
 
-    if (hoverred_button != -1) {
-        render_spell_tooltip(&all_spells[hoverred_button]);
-    }
-
     // In-game rendering
     if (info->cooldowns[p->selected_spell] == 0) {
         if (info->action == PA_SPELL) {
             render_spell_actions(p);
         }
+    }
+
+    if (hoverred_button != -1) {
+        render_spell_tooltip(&all_spells[hoverred_button]);
     }
 }
 
@@ -876,7 +901,6 @@ void render_infos() {
 
         health_bars[i].value = player->info.health;
         health_bars[i].max = player->info.max_health;
-        // LOGL(LL_DEBUG, "%f/%f", health_bars[i].value, health_bars[i].max);
         slider_render(&health_bars[i]);
         if (slider_hover(&health_bars[i])) {
             over_player = i;
@@ -978,6 +1002,7 @@ void init_in_game_ui() {
         toolbar_spells_buttons[i].type = BT_TEXTURE;
         toolbar_spells_buttons[i].font_size = 56;
         toolbar_spells_buttons[i].text = NULL;
+        toolbar_spells_buttons[i].muted = true;
     }
 
     const int player_info_width = (game_map.width * CELL_SIZE) / player_count();
@@ -1135,14 +1160,24 @@ void play_round() {
         }
 
         // TODO: We should do pathfinding instead of sliding across the map
+        // and scale animation time with distance
         if (s->type == ST_MOVE) {
             p->action_animation = new_animation(AT_ONESHOT, .3f, 1);
             p->moving_target = a->target;
             p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
+            PlaySound(move_sound);
         } else if (s->type == ST_TARGET) {
             attack_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
             attack_sprites = slash_attack;
             attack_cell = a->target;
+            if (s->effect == SE_STUN) {
+                PlaySound(stun_sound);
+            } else if (s->effect == SE_BURN) {
+                PlaySound(burn_sound);
+            } else {
+                PlaySound(attack_sound);
+            }
+
             if (target != NULL) {
                 target->info.health -= s->damage;
                 target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
@@ -1154,10 +1189,11 @@ void play_round() {
                 }
             }
         } else if (s->type == ST_STAT) {
-            // TODO: Use another animation (health, etc).
             attack_animation = new_animation(AT_ONESHOT, 0.4f / 4.f, 4);
             attack_sprites = heal_attack;
             attack_cell = a->target;
+            PlaySound(heal_sound);
+
             if (target != NULL) {
                 target->info.effect = s->effect;
                 target->info.spell_effect = s;
@@ -1187,6 +1223,7 @@ void play_effects() {
             LOG("player took a tick of burn and has %d hp left\n", player->info.health);
             player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             player->animation_state = PAS_BURNING;
+            PlaySound(burn_sound);
         }
     }
 }
@@ -1210,6 +1247,11 @@ void end_round() {
     action_count = 0;
     compute_spell_range(&players[current_player]);
     if (gs == GS_ENDING) {
+        if (winner_id == current_player) {
+            PlaySound(win_round_sound);
+        } else {
+            PlaySound(lose_round_sound);
+        }
         gs = GS_ENDED;
     }
 }
@@ -1292,6 +1334,7 @@ void update_scene_in_game() {
                     if (player->info.health <= 0 && player->dead == false) {
                         player->action_animation = new_animation(AT_ONESHOT, 3.f, 1);
                         player->animation_state = PAS_DYING;
+                        PlaySound(death_sound);
                     }
                 }
             }
@@ -1359,6 +1402,7 @@ void render_scene_in_game() {
         DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
         DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     } else if (gs == GS_ENDED) {
+        //TODO: Should be a new scene
         if (winner_id == 255) {
             DrawText("Game draw", 0, 0, 64, WHITE);
         } else {
@@ -1740,6 +1784,7 @@ int main(int argc, char **argv) {
 
     // TODO: Make window resizable
     InitWindow(WIDTH, HEIGHT, "Duel Game");
+    InitAudioDevice();
     SetTargetFPS(60);
 
     load_assets();
@@ -1775,6 +1820,7 @@ int main(int argc, char **argv) {
                 int cell_x = x + 60 * (i % max_row_count);
                 int cell_y = y + 60 * (i / max_row_count);
                 spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons[all_spells[i].icon], NULL, 32);
+                spell_select_buttons[i].muted = true;
                 spell_selection[i] = false;
             }
             for (int i = 0; i < 4; i++) {

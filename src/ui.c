@@ -123,6 +123,9 @@ bool button_clicked(button *b) {
             return false;
         }
         if (b->was_down && IsMouseButtonReleased(0)) {
+            if (b->muted == false) {
+                PlaySound(ui_button_clicked);
+            }
             return true;
         }
     } else {
@@ -337,6 +340,9 @@ bool card_tab_clicked(card *c, int tab) {
 void card_update_tabs(card *c) {
     for (int i = 0; i < c->tab_count; i++) {
         if (card_tab_clicked(c, i)) {
+            if (i != c->selected_tab) {
+                PlaySound(ui_tab_switch);
+            }
             c->selected_tab = i;
         }
     }

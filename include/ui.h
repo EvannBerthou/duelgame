@@ -10,6 +10,8 @@ extern Texture2D simple_border;
 extern Texture2D life_bar_bg;
 extern Texture2D box;
 extern Texture2D spell_box_select;
+extern Sound ui_button_clicked;
+extern Sound ui_tab_switch;
 
 // Colors
 
@@ -59,6 +61,7 @@ typedef struct {
     int font_size;
     bool disabled;
     bool was_down;
+    bool muted;
 } button;
 
 #define BUTTON(x, y, w, h, btn_type, btn_color, btn_texture, btn_text, btn_font_size) \
