@@ -3,13 +3,6 @@
 #include "assets.h"
 #include "raylib.h"
 
-typedef struct {
-    uint32_t type;
-    uint32_t offset;
-    uint32_t size;
-    unsigned char *content;
-} pak_entry;
-
 pak_entry entries[ASSET_COUNT] = {0};
 int offset = 0;
 

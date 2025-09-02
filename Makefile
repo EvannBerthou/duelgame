@@ -29,13 +29,19 @@ run: build/server build/main_game
 packer:
 	gcc src/packer.c -o build/packer -DDEBUG -I./include -L./lib -lraylib -lm
 	./build/packer
+	xxd -i -n assets_pak assets.pak > include/assets_packed.h
 
-release/main_game: src/main.c src/ui.c src/common.c src/command.c include/net_protocol.h
+PACKET_MODE=-DEMBED_ASSETS
+release/main_game: packer src/main.c src/ui.c src/common.c src/command.c include/net_protocol.h
 	gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game_release \
 		-DLOG_PREFIX=\"GAME\" \
+		$(PACKET_MODE) \
 		-I./include -L ./lib -lraylib -lm -ggdb -lpthread
 
-
 clean:
-	rm -rf build
-	rm ./include/net_protocol.h
+	-rm -rf build
+	-rm ./include/net_protocol.h
+	-rm ./assets.pak
+	-rm ./include/assets_packed.h
+
+.PHONY: all packer clean

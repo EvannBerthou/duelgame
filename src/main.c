@@ -428,45 +428,36 @@ Sound win_round_sound = {0};
 Sound lose_round_sound = {0};
 
 void load_assets() {
-    font = LoadFont(ASSET(DEFAULT_FONT));
-    simple_border = LoadTexture(ASSET(SIMPLE_BORDER));
-    box = LoadTexture(ASSET(BOX));
-    spell_box = LoadTexture(ASSET(SPELL_BOX));
-    spell_box_select = LoadTexture(ASSET(SPELL_BOX_SELECT));
-    game_slot = LoadTexture(ASSET(GAME_SLOT));
-    life_bar_bg = LoadTexture(ASSET(LIFE_BAR_BG));
-    floor_textures = LoadTexture(ASSET(FLOOR_TEXTURE));
-    wall_textures = LoadTexture(ASSET(WALL_TEXTURE));
-    player_textures = LoadTexture(ASSET(PLAYER_TEXTURE));
-    wall_torch = LoadTexture(ASSET(WALL_TORCH));
-    slash_attack = LoadTexture(ASSET(SLASH_ATTACK));
-    heal_attack = LoadTexture(ASSET(HEAL_ATTACK));
-    icons_sheet = LoadTexture(ASSET(ICONS));
+    font = load_font(DEFAULT_FONT);
+    simple_border = load_texture(SIMPLE_BORDER);
+    box = load_texture(BOX);
+    spell_box = load_texture(SPELL_BOX);
+    spell_box_select = load_texture(SPELL_BOX_SELECT);
+    game_slot = load_texture(GAME_SLOT);
+    life_bar_bg = load_texture(LIFE_BAR_BG);
+    floor_textures = load_texture(FLOOR_TEXTURE);
+    wall_textures = load_texture(WALL_TEXTURE);
+    player_textures = load_texture(PLAYER_TEXTURE);
+    wall_torch = load_texture(WALL_TORCH);
+    slash_attack = load_texture(SLASH_ATTACK);
+    heal_attack = load_texture(HEAL_ATTACK);
+    icons_sheet = load_texture(ICONS);
     int icon_sprite_width = icons_sheet.height;
     for (int i = 0; i < SI_COUNT; i++) {
         icons[i] = (Rectangle){i * icon_sprite_width, 0, icon_sprite_width, icon_sprite_width};
     }
 
-    // TODO: Helper functions
-#ifndef DEBUG
-    pak_entry ui_button_clicked_entry = ASSET2(UI_BUTTON_CLICKED);
-    Wave ui_button_clicked_wave =
-        LoadWaveFromMemory(".wav", ui_button_clicked_entry.content, ui_button_clicked_entry.size);
-    ui_button_clicked = LoadSoundFromWave(ui_button_clicked_wave);
-    UnloadWave(ui_button_clicked_wave);
-#else
-    ui_button_clicked = LoadSound(ASSET(UI_BUTTON_CLICKED));
-#endif
-    ui_tab_switch = LoadSound(ASSET(UI_TAB_SWITCH));
+    ui_button_clicked = load_sound(UI_BUTTON_CLICKED);
+    ui_tab_switch = load_sound(UI_TAB_SWITCH);
     // TODO: Should loop over the 3 sounds
-    move_sound = LoadSound(ASSET(MOVE_SOUND));
-    attack_sound = LoadSound(ASSET(ATTACK_SOUND));
-    stun_sound = LoadSound(ASSET(STUN_SOUND));
-    burn_sound = LoadSound(ASSET(BURN_SOUND));
-    heal_sound = LoadSound(ASSET(HEAL_SOUND));
-    death_sound = LoadSound(ASSET(DEATH_SOUND));
-    win_round_sound = LoadSound(ASSET(WIN_ROUND_SOUND));
-    lose_round_sound = LoadSound(ASSET(LOSE_ROUND_SOUND));
+    move_sound = load_sound(MOVE_SOUND);
+    attack_sound = load_sound(ATTACK_SOUND);
+    stun_sound = load_sound(STUN_SOUND);
+    burn_sound = load_sound(BURN_SOUND);
+    heal_sound = load_sound(HEAL_SOUND);
+    death_sound = load_sound(DEATH_SOUND);
+    win_round_sound = load_sound(WIN_ROUND_SOUND);
+    lose_round_sound = load_sound(LOSE_ROUND_SOUND);
 }
 
 void compute_map_variants() {

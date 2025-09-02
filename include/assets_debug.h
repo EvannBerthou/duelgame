@@ -40,4 +40,16 @@ const char* ASSET(asset a) {
     return asset_map[a];
 }
 
+Font load_font(asset type) {
+    return LoadFont(ASSET(type));
+}
+
+Sound load_sound(asset type) {
+    return LoadSound(ASSET(type));
+}
+
+Texture2D load_texture(asset type) {
+    return LoadTexture(ASSET(type));
+}
+
 #endif

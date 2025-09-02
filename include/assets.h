@@ -30,6 +30,7 @@ typedef enum {
     ASSET_COUNT,
 } asset;
 
+//TODO: Inlcude extension ?
 typedef struct {
     uint32_t type;
     uint32_t offset;
@@ -37,16 +38,11 @@ typedef struct {
     unsigned char* content;
 } pak_entry;
 
-// #ifndef DEBUG
-// #include "assets_release.h"
-// #else
-// #include "assets_debug.h"
-// #endif
-
-#include "assets_debug.h"
+#ifndef DEBUG
 #include "assets_release.h"
-
-//TODO: Replace with spritesheet
+#else
+#include "assets_debug.h"
+#endif
 
 #define FLOOR_TEXTURE_COUNT 8
 #define PLAYER_ANIMATION_COUNT 4
@@ -54,5 +50,8 @@ typedef struct {
 #define SLASH_ANIMATION_COUNT 3
 #define HEAL_ANIMATION_COUNT 4
 #define WALL_ORIENTATION_COUNT 16
+
+Sound load_sound(asset type);
+Texture2D load_texture(asset type);
 
 #endif

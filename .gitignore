@@ -6,3 +6,5 @@ assets/*
 !assets/sounds
 compile_commands.json
 .cache
+asset.pak
+include/assets_packed.h
