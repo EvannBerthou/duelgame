@@ -7,3 +7,6 @@
 - 3 player game are bugged because you can still play when you are dead
 - Generic queue
 - Anti-cheat
+- Embed ressources inside final executable in release build
+- Spritesheet metadata (sprite width, etc)
+- Reorganise assets

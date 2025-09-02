@@ -150,7 +150,12 @@ void button_render(button *b) {
     if (b->type == BT_COLOR) {
         DrawRectangleRec(b->rec, c);
     } else {
-        Rectangle src = {0, 0, b->texture.width, b->texture.height};
+        Rectangle src;
+        if (b->texture_sprite.width == 0) {
+            src = (Rectangle){0, 0, b->texture.width, b->texture.height};
+        } else {
+            src = b->texture_sprite;
+        }
         DrawTexturePro(b->texture, src, b->rec, (Vector2){0}, 0, c);
     }
 
@@ -388,7 +393,7 @@ bool icon_hover(Rectangle rec) {
     return CheckCollisionPointRec(GetMousePosition(), rec) && is_console_closed();
 }
 
-void icon_render(Texture2D icon, Rectangle rec) {
-    Rectangle src = {0, 0, icon.width, icon.height};
-    DrawTexturePro(icon, src, rec, (Vector2){0}, 0, WHITE);
+extern Texture2D icons_sheet;
+void icon_render(Rectangle icon, Rectangle rec) {
+    DrawTexturePro(icons_sheet, icon, rec, (Vector2){0}, 0, WHITE);
 }

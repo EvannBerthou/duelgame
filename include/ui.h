@@ -57,6 +57,7 @@ typedef struct {
     button_type type;
     Color color;
     Texture2D texture;
+    Rectangle texture_sprite;
     const char *text;
     int font_size;
     bool disabled;
@@ -145,6 +146,6 @@ void card_render(card *c);
 // Icon
 
 bool icon_hover(Rectangle rec);
-void icon_render(Texture2D icon, Rectangle rec);
+void icon_render(Rectangle icon, Rectangle rec);
 
 #endif

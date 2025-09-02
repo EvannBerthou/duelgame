@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include "assets.h"
 #include "command.h"
 #include "common.h"
 #include "net.h"
@@ -20,6 +21,7 @@
 
 extern const spell all_spells[];
 extern const int spell_count;
+extern const char *wall_frames[];
 
 int client_fd = 0;
 
@@ -178,10 +180,8 @@ buttoned_slider magic_power_slider = {0};
 buttoned_slider *stat_sliders[] = {&health_slider, &physic_power_slider, &magic_power_slider};
 const int stat_sliders_count = (int)(sizeof(stat_sliders) / sizeof(stat_sliders[0]));
 
-const char *icons_files[SI_COUNT] =
-    {[SI_UNKNOWN] = "unknown", [SI_MOVE] = "move", [SI_ATTACK] = "attack", [SI_WAND] = "wand"};
-
-Texture2D icons[SI_COUNT] = {0};
+Texture2D icons_sheet = {0};
+Rectangle icons[SI_COUNT] = {0};
 
 int base_x_offset = 0;
 int base_y_offset = 0;
@@ -190,15 +190,6 @@ map_layer game_map = {0};
 map_layer variants = {0};
 map_layer props = {0};
 map_layer props_animations = {0};
-
-#define WALL_ORIENTATION_COUNT 16
-
-// Each name states where the wall are.
-const char *wall_frames[WALL_ORIENTATION_COUNT] = {
-    "top_right_bottom_left", "top_right_left", "top_right_bottom", "top_right",
-    "top_bottom_left",       "top_left",       "top_bottom",       "top",
-    "right_bottom_left",     "right_left",     "right_bottom",     "right",
-    "bottom_left",           "left",           "bottom",           "mid"};
 
 typedef enum {
     AT_LOOP,
@@ -271,6 +262,31 @@ int get_frame(anim_id id) {
         return 0;
     }
     return anim_pool[id].current_frame;
+}
+
+Rectangle get_sprite_anim(Texture2D sheet, anim_id id) {
+    int frame = get_frame(id);
+    int sprite_width = sheet.width / anim_pool[id].max_frame;
+    return (Rectangle){frame * sprite_width, 0, sprite_width, sheet.height};
+}
+
+Rectangle get_sprite(Texture2D sheet, int max_frame, int frame) {
+    int sprite_width = sheet.width / max_frame;
+    return (Rectangle){frame * sprite_width, 0, sprite_width, sheet.height};
+}
+
+void DrawSpriteRecFromSheetTint(Texture2D sheet, Rectangle src, Vector2 pos, int scale, Color tint) {
+    Rectangle dst = (Rectangle){pos.x, pos.y, src.width * scale, src.height * scale};
+    DrawTexturePro(sheet, src, dst, (Vector2){0}, 0, tint);
+}
+
+void DrawSpriteFromSheetTint(Texture2D sheet, anim_id id, Vector2 pos, int scale, Color tint) {
+    Rectangle src = get_sprite_anim(sheet, id);
+    DrawSpriteRecFromSheetTint(sheet, src, pos, scale, tint);
+}
+
+void DrawSpriteFromSheet(Texture2D sheet, anim_id id, Vector2 pos, int scale) {
+    DrawSpriteFromSheetTint(sheet, id, pos, scale, WHITE);
 }
 
 double get_process(anim_id id) {
@@ -387,25 +403,15 @@ button toolbar_spells_buttons[MAX_SPELL_COUNT] = {0};
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s);
 
-#define FLOOR_TEXTURE_COUNT 8
-Texture2D floor_textures[FLOOR_TEXTURE_COUNT] = {0};
-
-Texture2D wall_textures[WALL_ORIENTATION_COUNT] = {0};
-
-#define PLAYER_ANIMATION_COUNT 4
-Texture2D player_textures[PLAYER_ANIMATION_COUNT] = {0};
-
-#define WALL_TORCH_ANIMATION_COUNT 8
-Texture2D wall_torch[WALL_TORCH_ANIMATION_COUNT] = {0};
+Texture2D floor_textures = {0};
+Texture2D wall_textures = {0};
+Texture2D player_textures = {0};
+Texture2D wall_torch = {0};
 anim_id torch_anim = 0;
+Texture2D slash_attack = {0};
+Texture2D heal_attack = {0};
 
-#define SLASH_ANIMATION_COUNT 3
-Texture2D slash_attack[SLASH_ANIMATION_COUNT] = {0};
-
-#define HEAL_ANIMATION_COUNT 4
-Texture2D heal_attack[HEAL_ANIMATION_COUNT] = {0};
-
-Texture2D *attack_sprites = NULL;
+Texture2D attack_sprites = {0};
 anim_id attack_animation = NO_ANIMATION;
 Vector2 attack_cell = {0};
 
@@ -422,47 +428,45 @@ Sound win_round_sound = {0};
 Sound lose_round_sound = {0};
 
 void load_assets() {
-    font = LoadFont("assets/fonts/default.ttf");
-    simple_border = LoadTexture("assets/sprites/ui/button.png");
-    box = LoadTexture("assets/sprites/ui/box.png");
-    spell_box = LoadTexture("assets/sprites/ui/spell_box.png");
-    spell_box_select = LoadTexture("assets/sprites/ui/spell_box_select.png");
-    game_slot = LoadTexture("assets/sprites/ui/game_slot.png");
-    life_bar_bg = LoadTexture("assets/sprites/ui/life_bar_bg.png");
-
-    for (int i = 0; i < FLOOR_TEXTURE_COUNT; i++) {
-        floor_textures[i] = LoadTexture(TextFormat("assets/sprites/floor_%d.png", i + 1));
-    }
-    for (int i = 0; i < WALL_ORIENTATION_COUNT; i++) {
-        wall_textures[i] = LoadTexture(TextFormat("assets/sprites/walls/wall_%s.png", wall_frames[i]));
-    }
-    for (int i = 0; i < PLAYER_ANIMATION_COUNT; i++) {
-        player_textures[i] = LoadTexture(TextFormat("assets/sprites/wizzard_f_idle_anim_f%d.png", i));
-    }
-    for (int i = 0; i < WALL_TORCH_ANIMATION_COUNT; i++) {
-        wall_torch[i] = LoadTexture(TextFormat("assets/sprites/wall_torch_anim_f%d.png", i));
-    }
-    for (int i = 0; i < SLASH_ANIMATION_COUNT; i++) {
-        slash_attack[i] = LoadTexture(TextFormat("assets/sprites/attacks/slash_%d.png", i));
-    }
-    for (int i = 0; i < HEAL_ANIMATION_COUNT; i++) {
-        heal_attack[i] = LoadTexture(TextFormat("assets/sprites/attacks/heal_%d.png", i));
-    }
+    font = LoadFont(ASSET(DEFAULT_FONT));
+    simple_border = LoadTexture(ASSET(SIMPLE_BORDER));
+    box = LoadTexture(ASSET(BOX));
+    spell_box = LoadTexture(ASSET(SPELL_BOX));
+    spell_box_select = LoadTexture(ASSET(SPELL_BOX_SELECT));
+    game_slot = LoadTexture(ASSET(GAME_SLOT));
+    life_bar_bg = LoadTexture(ASSET(LIFE_BAR_BG));
+    floor_textures = LoadTexture(ASSET(FLOOR_TEXTURE));
+    wall_textures = LoadTexture(ASSET(WALL_TEXTURE));
+    player_textures = LoadTexture(ASSET(PLAYER_TEXTURE));
+    wall_torch = LoadTexture(ASSET(WALL_TORCH));
+    slash_attack = LoadTexture(ASSET(SLASH_ATTACK));
+    heal_attack = LoadTexture(ASSET(HEAL_ATTACK));
+    icons_sheet = LoadTexture(ASSET(ICONS));
+    int icon_sprite_width = icons_sheet.height;
     for (int i = 0; i < SI_COUNT; i++) {
-        icons[i] = LoadTexture(TextFormat("assets/sprites/icons/%s.png", icons_files[i]));
+        icons[i] = (Rectangle){i * icon_sprite_width, 0, icon_sprite_width, icon_sprite_width};
     }
 
-    ui_button_clicked = LoadSound("assets/sounds/10_UI_Menu_SFX/013_Confirm_03.wav");
-    ui_tab_switch = LoadSound("assets/sounds/10_UI_Menu_SFX/029_Decline_09.wav");
+    // TODO: Helper functions
+#ifndef DEBUG
+    pak_entry ui_button_clicked_entry = ASSET2(UI_BUTTON_CLICKED);
+    Wave ui_button_clicked_wave =
+        LoadWaveFromMemory(".wav", ui_button_clicked_entry.content, ui_button_clicked_entry.size);
+    ui_button_clicked = LoadSoundFromWave(ui_button_clicked_wave);
+    UnloadWave(ui_button_clicked_wave);
+#else
+    ui_button_clicked = LoadSound(ASSET(UI_BUTTON_CLICKED));
+#endif
+    ui_tab_switch = LoadSound(ASSET(UI_TAB_SWITCH));
     // TODO: Should loop over the 3 sounds
-    move_sound = LoadSound("assets/sounds/16_human_walk_stone_2.wav");
-    attack_sound = LoadSound("assets/sounds/07_human_atk_sword_1.wav");
-    stun_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/44_Sleep_01.wav");
-    burn_sound = LoadSound("assets/sounds/8_Atk_Magic_SFX/04_Fire_explosion_04_medium.wav");
-    heal_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/02_Heal_02.wav");
-    death_sound = LoadSound("assets/sounds/10_Battle_SFX/69_Enemy_death_01.wav");
-    win_round_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/16_Atk_buff_04.wav");
-    lose_round_sound = LoadSound("assets/sounds/8_Buffs_Heals_SFX/17_Def_buff_01.wav");
+    move_sound = LoadSound(ASSET(MOVE_SOUND));
+    attack_sound = LoadSound(ASSET(ATTACK_SOUND));
+    stun_sound = LoadSound(ASSET(STUN_SOUND));
+    burn_sound = LoadSound(ASSET(BURN_SOUND));
+    heal_sound = LoadSound(ASSET(HEAL_SOUND));
+    death_sound = LoadSound(ASSET(DEATH_SOUND));
+    win_round_sound = LoadSound(ASSET(WIN_ROUND_SOUND));
+    lose_round_sound = LoadSound(ASSET(LOSE_ROUND_SOUND));
 }
 
 void compute_map_variants() {
@@ -630,13 +634,25 @@ bool is_over_cell(int x, int y) {
     return CheckCollisionPointRec(GetMousePosition(), cell_rect);
 }
 
+// TODO: Rework with enum ?
 Texture2D get_cell_texture(int x, int y) {
     int cell_type = get_map(&game_map, x, y);
-    if (cell_type == 0)
-        return floor_textures[get_map(&variants, x, y)];
-    if (cell_type == 1)
-        return wall_textures[get_map(&variants, x, y)];
+    if (cell_type == 0) {
+        return floor_textures;
+    } else if (cell_type == 1) {
+        return wall_textures;
+    }
     return (Texture2D){0};
+}
+
+int get_cell_sprite_count(int x, int y) {
+    int cell_type = get_map(&game_map, x, y);
+    if (cell_type == 0) {
+        return FLOOR_TEXTURE_COUNT;
+    } else if (cell_type == 1) {
+        return WALL_ORIENTATION_COUNT;
+    }
+    return 1;
 }
 
 Color get_cell_color(int cell_type) {
@@ -647,9 +663,9 @@ Color get_cell_color(int cell_type) {
     return SKYBLUE;
 }
 
-Texture2D get_prop_texture(int prop_type, int anim_id) {
+Texture2D get_prop_texture(int prop_type) {
     if (prop_type == 1)
-        return wall_torch[get_frame(anim_id)];
+        return wall_torch;
     return (Texture2D){0};
 }
 
@@ -658,10 +674,12 @@ void render_map() {
         for (int x = 0; x < game_map.width; x++) {
             const int x_pos = base_x_offset + x * CELL_SIZE;
             const int y_pos = base_y_offset + y * CELL_SIZE;
+            Vector2 pos = {x_pos, y_pos};
             Texture2D t = get_cell_texture(x, y);
             if (t.id != 0) {
                 Color tint = is_over_cell(x_pos, y_pos) ? RED : WHITE;
-                DrawTextureEx(t, (Vector2){x_pos, y_pos}, 0, 4, tint);
+                Rectangle src = get_sprite(t, get_cell_sprite_count(x, y), get_map(&variants, x, y));
+                DrawSpriteRecFromSheetTint(t, src, pos, 4, tint);
             } else {
                 Color c = PURPLE;
                 DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
@@ -672,10 +690,10 @@ void render_map() {
 
     for (int y = 0; y < game_map.height; y++) {
         for (int x = 0; x < game_map.width; x++) {
-            const int x_pos = base_x_offset + x * CELL_SIZE + 8;
-            const int y_pos = base_y_offset + y * CELL_SIZE - 8;
-            Texture2D texture = get_prop_texture(get_map(&props, x, y), get_map(&props_animations, x, y));
-            DrawTextureEx(texture, (Vector2){x_pos, y_pos}, 0, 3, WHITE);
+            Vector2 pos = {base_x_offset + x * CELL_SIZE + 8, base_y_offset + y * CELL_SIZE - 8};
+            Texture2D spritesheet = get_prop_texture(get_map(&props, x, y));
+            anim_id a = get_map(&props_animations, x, y);
+            DrawSpriteFromSheet(spritesheet, a, pos, 3);
         }
     }
 }
@@ -689,7 +707,7 @@ void render_player(player *p) {
     int x_pos = base_x_offset + i->x * CELL_SIZE + 8;
     int y_pos = base_y_offset + i->y * CELL_SIZE - 24;
     Vector2 player_position = {x_pos, y_pos};
-    Texture2D player_texture = player_textures[get_frame(p->animation)];
+    Rectangle player_sprite = get_sprite_anim(player_textures, p->animation);
     Color c = WHITE;
 
     // Player is doing the slide animation
@@ -720,7 +738,7 @@ void render_player(player *p) {
         }
     } else if (p->animation_state == PAS_STUNNED) {
         c = GRAY;
-        player_texture = player_textures[0];
+        player_sprite = get_sprite(player_textures, PLAYER_ANIMATION_COUNT, 0);
     } else if (p->animation_state == PAS_BURNING) {
         c = ORANGE;
     } else if (p->animation_state == PAS_BUMPING) {
@@ -752,7 +770,7 @@ void render_player(player *p) {
         p->animation_state = PAS_NONE;
     }
 
-    DrawTextureEx(player_texture, player_position, 0, 3, c);
+    DrawSpriteRecFromSheetTint(player_textures, player_sprite, player_position, 3, c);
 }
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s) {
@@ -825,7 +843,7 @@ void render_player_actions(player *p) {
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         button *b = &toolbar_spells_buttons[i];
         bool on_cooldown = info->cooldowns[i] > 0;
-        Texture2D icon = icons[all_spells[info->spells[i]].icon];
+        Rectangle icon = icons[all_spells[info->spells[i]].icon];
         Color tint = WHITE;
         if (on_cooldown) {
             tint = GRAY;
@@ -835,7 +853,8 @@ void render_player_actions(player *p) {
             toolbar_spells_buttons[i].text = NULL;
         }
 
-        b->texture = icon;
+        b->texture = icons_sheet;
+        b->texture_sprite = icon;
         b->color = tint;
         b->type = BT_TEXTURE;
         b->disabled = on_cooldown;
@@ -997,7 +1016,8 @@ void init_in_game_ui() {
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         int x = base_x_offset + (CELL_SIZE + 8) * i;
         toolbar_spells_buttons[i].rec = (Rectangle){x, toolbar_y, CELL_SIZE, CELL_SIZE};
-        toolbar_spells_buttons[i].texture = icons[all_spells[my_spells[i]].icon];
+        toolbar_spells_buttons[i].texture = icons_sheet;
+        toolbar_spells_buttons[i].texture_sprite = icons[all_spells[my_spells[i]].icon];
         toolbar_spells_buttons[i].color = WHITE;
         toolbar_spells_buttons[i].type = BT_TEXTURE;
         toolbar_spells_buttons[i].font_size = 56;
@@ -1285,7 +1305,6 @@ bool join_game(const char *ip, int port, const char *username) {
 round_state next_state = RS_WAITING;
 
 void update_scene_in_game() {
-    step_animations();
     const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
 
     if (gs == GS_STARTED || gs == GS_ENDING) {
@@ -1363,9 +1382,8 @@ void render_scene_in_game() {
         }
 
         if (attack_animation != NO_ANIMATION) {
-            Texture2D attack_texture = attack_sprites[get_frame(attack_animation)];
             Vector2 position = grid2screen(attack_cell);
-            DrawTextureEx(attack_texture, position, 0, 1, WHITE);
+            DrawSpriteFromSheet(attack_sprites, attack_animation, position, 1);
             if (anim_finished(attack_animation)) {
                 attack_animation = NO_ANIMATION;
             }
@@ -1402,7 +1420,7 @@ void render_scene_in_game() {
         DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
         DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     } else if (gs == GS_ENDED) {
-        //TODO: Should be a new scene
+        // TODO: Should be a new scene
         if (winner_id == 255) {
             DrawText("Game draw", 0, 0, 64, WHITE);
         } else {
@@ -1499,7 +1517,7 @@ void render_scene_lobby() {
         DrawText(TextFormat("AP = %d", info->ap), x, header.y + 128, 32, WHITE);
         DrawText("Spells", x, header.y + 160, 32, WHITE);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-            Texture2D icon = icons[all_spells[info->spells[i]].icon];
+            Rectangle icon = icons[all_spells[info->spells[i]].icon];
             Rectangle dst = {x + 60 * i, header.y + 192, 50, 50};
             icon_render(icon, dst);
             if (icon_hover(dst)) {
@@ -1819,7 +1837,8 @@ int main(int argc, char **argv) {
             for (int i = 0; i < spell_count; i++) {
                 int cell_x = x + 60 * (i % max_row_count);
                 int cell_y = y + 60 * (i / max_row_count);
-                spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons[all_spells[i].icon], NULL, 32);
+                spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons_sheet, NULL, 32);
+                spell_select_buttons[i].texture_sprite = icons[all_spells[i].icon];
                 spell_select_buttons[i].muted = true;
                 spell_selection[i] = false;
             }
@@ -1859,6 +1878,7 @@ int main(int argc, char **argv) {
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
+        step_animations();
         update_console();
         if (client_fd != 0) {
             ping_counter -= GetFrameTime();

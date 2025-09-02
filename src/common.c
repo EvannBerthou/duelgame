@@ -12,6 +12,11 @@ log_level log_levels[MAX_LOG_HISTORY] = {0};
 int log_history_ptr = 0;
 
 void LOG_(log_level level, const char *fmt, va_list args) {
+#ifndef DEBUG
+    if (level == LL_DEBUG) {
+        return;
+    }
+#endif
     char *formatted = NULL;
     vasprintf(&formatted, fmt, args);
     asprintf(&log_history[log_history_ptr], "[%s(%d)]%s", LOG_PREFIX, getpid(), formatted);
