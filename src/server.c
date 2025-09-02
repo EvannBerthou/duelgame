@@ -40,6 +40,7 @@ int master_player = 0;
 
 int clients[MAX_PLAYER_COUNT] = {0};
 player_info players[MAX_PLAYER_COUNT] = {0};
+bool player_ready[MAX_PLAYER_COUNT] = {0};
 // Stores the order in which players will do their actions
 int player_round_order[MAX_PLAYER_COUNT] = {0};
 // int player_count = 0;
@@ -351,6 +352,10 @@ void handle_message(int fd) {
 
         send_map(fd);
     } else if (p.type == PKT_GAME_START) {
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            round_scores[i] = 0;
+        }
+        round_start_time = time(NULL);
         start_game();
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: Handle error
@@ -418,21 +423,53 @@ void handle_message(int fd) {
                 }
             }
 
-            uint8_t end_verdict = GAME_NOT_ENDED;
-            if (alive_count == 1) {
+            if (alive_count < 2) {
+                uint8_t end_verdict = GAME_TIE;
+                if (alive_count == 1) {
+                    FOREACH_PLAYER(i, player) {
+                        if (player->health > 0) {
+                            LOG("Player %s won the round !\n", players[i].name);
+                            end_verdict = i;
+                            round_scores[i]++;
+                        }
+                    }
+                } else if (alive_count == 0) {
+                    LOG("Nobody won the game...\n");
+                    end_verdict = GAME_TIE;
+                }
+
+                net_packet_round_end end = pkt_round_end(end_verdict, round_scores);
+                broadcast(PKT_ROUND_END, &end);
+
                 FOREACH_PLAYER(i, player) {
-                    if (player->health > 0) {
-                        LOG("Player %s won the game !\n", players[i].name);
-                        end_verdict = i;
-                        round_scores[i]++;
+                    if (round_scores[i] == 3) {
+                        net_packet_game_end game_end = pkt_game_end(player->id, round_scores);
+                        broadcast(PKT_GAME_END, &game_end);
                     }
                 }
-            } else if (alive_count == 0) {
-                LOG("Nobody won the game...\n");
-                end_verdict = GAME_TIE;
+
+                gs = GS_WAITING;
+            } else {
+                broadcast(PKT_TURN_END, NULL);
             }
-            net_packet_round_end end = pkt_round_end(end_verdict, round_scores);
-            broadcast(PKT_ROUND_END, &end);
+        }
+    } else if (p.type == PKT_PLAYER_READY) {
+        player_ready[get_player_from_fd(fd)->id] = true;
+        int ready_count = 0;
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            ready_count += player_ready[i];
+        }
+        if (ready_count == player_count()) {
+            FOREACH_PLAYER(i, player) {
+                reset_player(player);
+                net_packet_player_build b =
+                    pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
+                broadcast(PKT_PLAYER_BUILD, &b);
+
+                net_packet_player_update u = pkt_from_info(player);
+                broadcast(PKT_PLAYER_UPDATE, &u);
+            }
+            broadcast(PKT_ROUND_START, NULL);
         }
     } else if (p.type == PKT_GAME_RESET) {
         // Only first player (owner) can reset the game
@@ -442,6 +479,10 @@ void handle_message(int fd) {
             return;
         }
         LOG("Serv: game reset\n");
+        for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+            round_scores[i] = 0;
+        }
+        round_start_time = time(NULL);
         gs = GS_WAITING;
         broadcast(PKT_GAME_RESET, NULL);
         // We send previously connected players informations to the new player

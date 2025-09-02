@@ -1,5 +1,4 @@
-main_game
-server
+build/*
 assets/*
 !assets/sprites
 !assets/fonts
@@ -7,4 +6,5 @@ assets/*
 compile_commands.json
 .cache
 asset.pak
+include/net_protocol.h
 include/assets_packed.h

@@ -1,5 +1,7 @@
+#define DEBUG
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "assets.h"
 #include "raylib.h"
 
@@ -9,10 +11,9 @@ int offset = 0;
 void pack(int type) {
     const char *path = ASSET(type);
     int size = 0;
-    //TODO: We should not allow this but we have to wait until spritesheets are implemented
     if (!FileExists(path)) {
         printf("File %s does not exists\n", path);
-        entries[type].content = NULL;
+        exit(1);
     } else {
         entries[type].content = LoadFileData(path, &size);
     }
@@ -22,7 +23,7 @@ void pack(int type) {
     offset += size;
 }
 
-//TODO: Add compression ?
+// TODO: Add compression ?
 int main(void) {
     SetTraceLogLevel(LOG_NONE);
     for (int i = 0; i < ASSET_COUNT; i++) {

@@ -59,7 +59,6 @@ void update_console() {
     }
 
     if (IsKeyPressed(KEY_ENTER)) {
-        // TODO: Execute command
         if (console_input_cursor > 0) {
             LOG("%.*s", console_input_cursor, console_input);
             command_result result = handle_command(console_input);
@@ -161,6 +160,7 @@ typedef enum {
     SCENE_MAIN_MENU,
     SCENE_LOBBY,
     SCENE_IN_GAME,
+    SCENE_GAME_ENDED,
 } game_scene;
 
 game_scene active_scene = SCENE_MAIN_MENU;
@@ -254,6 +254,15 @@ void step_animations() {
             }
         }
     }
+}
+
+void reset_animation(anim_id id) {
+    if (anim_pool[id].active == false) {
+        return;
+    }
+    anim_pool[id].current_time = 0;
+    anim_pool[id].current_frame = 0;
+    anim_pool[id].finished = false;
 }
 
 int get_frame(anim_id id) {
@@ -397,6 +406,7 @@ int master_player = 0;
 round_state state = RS_PLAYING;
 game_state gs = GS_WAITING;
 int winner_id = 0;
+int futures_scores[MAX_PLAYER_COUNT] = {0};
 
 uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 2, 3};
 button toolbar_spells_buttons[MAX_SPELL_COUNT] = {0};
@@ -721,7 +731,7 @@ void render_player(player *p) {
         c = RED;
         if (anim_finished(p->action_animation)) {
             if (i->health <= 0) {
-                p->action_animation = new_animation(AT_ONESHOT, 5.f, 1);
+                p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
                 p->animation_state = PAS_DYING;
                 attack_animation = NO_ANIMATION;
                 PlaySound(death_sound);
@@ -964,30 +974,20 @@ void player_join(const char *username) {
     send_sock(PKT_JOIN, &join, client_fd);
 }
 
-void reset_game() {
+void reset_round() {
     gs = GS_WAITING;
     state = RS_PLAYING;
-
-    free_map(&game_map);
-    free_map(&variants);
-    free_map(&props);
-    free_map(&props_animations);
-
-    for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
-        anim_pool[i] = (animation){0};
-    }
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
         updates[i] = (player_round_update){0};
     }
 
-    players[0].color = YELLOW;
-    players[1].color = GREEN;
-    players[2].color = BLUE;
-    players[3].color = RED;
-
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        players[i].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+        if (players[i].animation == NO_ANIMATION) {
+            players[i].animation = new_animation(AT_LOOP, 0.5f, PLAYER_ANIMATION_COUNT);
+        } else {
+            reset_animation(players[i].animation);
+        }
         players[i].action_animation = NO_ANIMATION;
         players[i].animation_state = PAS_NONE;
         players[i].info.action = PA_SPELL;
@@ -998,8 +998,31 @@ void reset_game() {
         }
     }
 
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        round_scores[i] = futures_scores[i];
+    }
+
     action_count = 0;
     action_step = 0;
+}
+
+void reset_game() {
+    reset_round();
+
+    free_map(&game_map);
+    free_map(&variants);
+    free_map(&props);
+    free_map(&props_animations);
+
+    players[0].color = YELLOW;
+    players[1].color = GREEN;
+    players[2].color = BLUE;
+    players[3].color = RED;
+
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        round_scores[i] = 0;
+        futures_scores[i] = 0;
+    }
 }
 
 void init_in_game_ui() {
@@ -1128,16 +1151,27 @@ void handle_packet(net_packet *p) {
         action->target = (Vector2){a->x, a->y};
         action->spell = a->spell;
         action_count++;
+    } else if (p->type == PKT_TURN_END) {
+        state = RS_PLAYING_ROUND;
+    } else if (p->type == PKT_ROUND_START) {
+        gs = GS_STARTED;
     } else if (p->type == PKT_ROUND_END) {
         net_packet_round_end *e = (net_packet_round_end *)p->content;
         LOG("Round ended\n");
         state = RS_PLAYING_ROUND;
-        if (e->winner_id != GAME_NOT_ENDED) {
-            winner_id = e->winner_id;
-            gs = GS_ENDING;
-            FOREACH_PLAYER(i, player) {
-                round_scores[i] = e->player_scores[i];
-            }
+        winner_id = e->winner_id;
+        gs = GS_ROUND_ENDING;
+        // TODO: Only update after death animation is over
+        FOREACH_PLAYER(i, player) {
+            futures_scores[i] = e->player_scores[i];
+        }
+    } else if (p->type == PKT_GAME_END) {
+        net_packet_round_end *e = (net_packet_round_end *)p->content;
+        LOG("Game ended\n");
+        winner_id = e->winner_id;
+        gs = GS_GAME_ENDING;
+        FOREACH_PLAYER(i, player) {
+            futures_scores[i] = e->player_scores[i];
         }
     } else if (p->type == PKT_GAME_RESET) {
         LOG("Client: game reset\n");
@@ -1173,7 +1207,7 @@ void play_round() {
         // TODO: We should do pathfinding instead of sliding across the map
         // and scale animation time with distance
         if (s->type == ST_MOVE) {
-            p->action_animation = new_animation(AT_ONESHOT, .3f, 1);
+            p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
             p->moving_target = a->target;
             p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
             PlaySound(move_sound);
@@ -1257,13 +1291,19 @@ void end_round() {
     action_step = 0;
     action_count = 0;
     compute_spell_range(&players[current_player]);
-    if (gs == GS_ENDING) {
+    if (gs == GS_ROUND_ENDING || gs == GS_GAME_ENDING) {
         if (winner_id == current_player) {
             PlaySound(win_round_sound);
         } else {
             PlaySound(lose_round_sound);
+        };
+        if (gs == GS_GAME_ENDING) {
+            active_scene = SCENE_GAME_ENDED;
+        } else {
+            gs = GS_ROUND_ENDED;
+            reset_round();
+            send_sock(PKT_PLAYER_READY, NULL, client_fd);
         }
-        gs = GS_ENDED;
     }
 }
 
@@ -1295,10 +1335,12 @@ bool join_game(const char *ip, int port, const char *username) {
 
 round_state next_state = RS_WAITING;
 
+int frame = 0;
 void update_scene_in_game() {
+    frame++;
     const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
 
-    if (gs == GS_STARTED || gs == GS_ENDING) {
+    if (gs == GS_STARTED || gs == GS_ROUND_ENDING || gs == GS_GAME_ENDING) {
         next_state = state;
         if (state == RS_PLAYING && is_console_closed()) {
             for (int i = 0; i < MAX_SPELL_COUNT; i++) {
@@ -1342,7 +1384,7 @@ void update_scene_in_game() {
             if (wait_for_animations()) {
                 FOREACH_PLAYER(i, player) {
                     if (player->info.health <= 0 && player->dead == false) {
-                        player->action_animation = new_animation(AT_ONESHOT, 3.f, 1);
+                        player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
                         player->animation_state = PAS_DYING;
                         PlaySound(death_sound);
                     }
@@ -1354,17 +1396,14 @@ void update_scene_in_game() {
                 next_state = RS_PLAYING;
             }
         }
-    } else if (gs == GS_ENDED) {
-        if (IsKeyPressed(KEY_R) && is_console_closed()) {
-            if (current_player == 0) {
-                send_sock(PKT_GAME_RESET, NULL, client_fd);
-            }
-        }
     }
 }
 
 void render_scene_in_game() {
-    if (gs == GS_STARTED || gs == GS_ENDING) {
+    if (gs == GS_WAITING) {
+        render_map();
+        render_infos();
+    } else if (gs == GS_STARTED || gs == GS_ROUND_ENDING || gs == GS_GAME_ENDING) {
         render_map();
 
         // TODO: Always render currently animation player on top
@@ -1403,24 +1442,33 @@ void render_scene_in_game() {
                 DrawText(TextFormat("AP=%d", player->info.ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
             }
         }
-        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
-        char time_string[8] = {0};
-        struct tm *time = localtime(&round_timer);
-        strftime(time_string, 8, "%M:%S", time);
-        int width = MeasureText(time_string, 48);
-        DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
-        DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
-    } else if (gs == GS_ENDED) {
-        // TODO: Should be a new scene
-        if (winner_id == 255) {
-            DrawText("Game draw", 0, 0, 64, WHITE);
-        } else {
-            DrawText(TextFormat("%s won the game !", players[winner_id].info.name), 0, 0, 64, WHITE);
-        }
+    }
+    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+    char time_string[8] = {0};
+    struct tm *time = localtime(&round_timer);
+    strftime(time_string, 8, "%M:%S", time);
+    int width = MeasureText(time_string, 48);
+    DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
+    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+}
 
-        if (current_player == 0) {
-            DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
+void update_scene_round_ended() {
+    if (IsKeyPressed(KEY_R) && is_console_closed()) {
+        if (current_player == master_player) {
+            send_sock(PKT_GAME_RESET, NULL, client_fd);
         }
+    }
+}
+
+void render_scene_round_ended() {
+    if (winner_id == 255) {
+        DrawText("Game draw", 0, 0, 64, WHITE);
+    } else {
+        DrawText(TextFormat("%s won the game !", players[winner_id].info.name), 0, 0, 64, WHITE);
+    }
+
+    if (current_player == 0) {
+        DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
     }
 }
 
@@ -1436,7 +1484,7 @@ button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, 
 int selected_player_build = -1;
 
 void update_scene_lobby() {
-    start_game_button.disabled = player_count() < 2;
+    start_game_button.disabled = master_player != current_player || player_count() < 2;
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
@@ -1854,6 +1902,7 @@ int main(int argc, char **argv) {
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
         players[i].info.id = i;
+        players[i].animation = NO_ANIMATION;
     }
 
     // Lobby
@@ -1894,6 +1943,8 @@ int main(int argc, char **argv) {
             update_scene_lobby();
         } else if (active_scene == SCENE_IN_GAME) {
             update_scene_in_game();
+        } else if (active_scene == SCENE_GAME_ENDED) {
+            update_scene_round_ended();
         }
 
         BeginDrawing();
@@ -1906,6 +1957,8 @@ int main(int argc, char **argv) {
                 render_scene_lobby();
             } else if (active_scene == SCENE_IN_GAME) {
                 render_scene_in_game();
+            } else if (active_scene == SCENE_GAME_ENDED) {
+                render_scene_round_ended();
             }
             render_console();
         }

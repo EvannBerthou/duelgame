@@ -86,8 +86,9 @@ typedef enum {
 typedef enum {
     GS_WAITING,
     GS_STARTED,
-    GS_ENDING,
-    GS_ENDED,
+    GS_ROUND_ENDING,
+    GS_ROUND_ENDED,
+    GS_GAME_ENDING,
     GS_COUNT
 } game_state;
 

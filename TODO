@@ -10,3 +10,5 @@
 - Embed ressources inside final executable in release build
 - Spritesheet metadata (sprite width, etc)
 - Reorganise assets
+- Rename round -> turn and game -> round
+- Remake states (GS, state, etc)

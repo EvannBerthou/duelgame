@@ -19,7 +19,6 @@ typedef struct {
     void* content;
 } net_packet;
 
-#define GAME_NOT_ENDED 254
 #define GAME_TIE 255
 
 typedef enum {

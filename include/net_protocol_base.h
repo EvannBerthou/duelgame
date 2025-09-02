@@ -67,9 +67,23 @@ typedef struct {
 } net_packet_player_action;
 
 typedef struct {
+} net_packet_turn_end;
+
+typedef struct {
+} net_packet_round_start;
+
+typedef struct {
     uint8_t winner_id;
     uint8_t player_scores[MAX_PLAYER_COUNT] NET_SIZE("MAX_PLAYER_COUNT");
 } net_packet_round_end;
+
+typedef struct {
+    uint8_t winner_id;
+    uint8_t player_scores[MAX_PLAYER_COUNT] NET_SIZE("MAX_PLAYER_COUNT");
+} net_packet_game_end;
+
+typedef struct {
+} net_packet_player_ready;
 
 typedef struct {
 } net_packet_game_reset;
