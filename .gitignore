@@ -5,6 +5,6 @@ assets/*
 !assets/sounds
 compile_commands.json
 .cache
-asset.pak
+assets.pak
 include/net_protocol.h
 include/assets_packed.h

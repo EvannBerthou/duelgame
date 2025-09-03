@@ -1,13 +1,59 @@
+#ifdef WINDOWS_BUILD
+// If defined, the following flags inhibit definition of the indicated items.
+#define NOGDICAPMASKS     // CC_*, LC_*, PC_*, CP_*, TC_*, RC_
+#define NOVIRTUALKEYCODES // VK_*
+#define NOWINMESSAGES     // WM_*, EM_*, LB_*, CB_*
+#define NOWINSTYLES       // WS_*, CS_*, ES_*, LBS_*, SBS_*, CBS_*
+#define NOSYSMETRICS      // SM_*
+#define NOMENUS           // MF_*
+#define NOICONS           // IDI_*
+#define NOKEYSTATES       // MK_*
+#define NOSYSCOMMANDS     // SC_*
+#define NORASTEROPS       // Binary and Tertiary raster ops
+#define NOSHOWWINDOW      // SW_*
+#define OEMRESOURCE       // OEM Resource values
+#define NOATOM            // Atom Manager routines
+#define NOCLIPBOARD       // Clipboard routines
+#define NOCOLOR           // Screen colors
+#define NOCTLMGR          // Control and Dialog routines
+#define NODRAWTEXT        // DrawText() and DT_*
+#define NOGDI             // All GDI defines and routines
+#define NOKERNEL          // All KERNEL defines and routines
+#define NOUSER            // All USER defines and routines
+#define NONLS             // All NLS defines and routines
+#define NOMB              // MB_* and MessageBox()
+#define NOMEMMGR          // GMEM_*, LMEM_*, GHND, LHND, associated routines
+#define NOMETAFILE        // typedef METAFILEPICT
+#define NOMINMAX          // Macros min(a,b) and max(a,b)
+#define NOMSG             // typedef MSG and associated routines
+#define NOOPENFILE        // OpenFile(), OemToAnsi, AnsiToOem, and OF_*
+#define NOSCROLL          // SB_* and scrolling routines
+#define NOSERVICE         // All Service Controller routines, SERVICE_ equates, etc.
+#define NOSOUND           // Sound driver routines
+#define NOTEXTMETRIC      // typedef TEXTMETRIC and associated routines
+#define NOWH              // SetWindowsHook and WH_*
+#define NOWINOFFSETS      // GWL_*, GCL_*, associated routines
+#define NOCOMM            // COMM driver routines
+#define NOKANJI           // Kanji support stuff.
+#define NOHELP            // Help engine interface.
+#define NOPROFILER        // Profiler interface.
+#define NODEFERWINDOWPOS  // DeferWindowPos routines
+#define NOMCX             // Modem Configuration Extensions
+#define MMNOSOUND
+typedef struct tagMSG *LPMSG;
+#include <winsock2.h>
+#else
 #include <arpa/inet.h>
-#include <limits.h>
-#include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#endif
+#include <limits.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 #include "assets.h"
@@ -24,6 +70,7 @@ extern const int spell_count;
 extern const char *wall_frames[];
 
 int client_fd = 0;
+bool connected = false;
 
 bool console_open = false;
 int log_base = 0;
@@ -42,7 +89,7 @@ bool is_console_closed() {
 
 // TODO: Handle more cursor movement
 void update_console() {
-    if (IsKeyPressed(KEY_RIGHT_ALT)) {
+    if (IsKeyPressed(KEY_F2)) {
         console_open = !console_open;
     }
     if (console_open && (IsKeyPressed(KEY_UP) || IsKeyPressedRepeat(KEY_UP))) {
@@ -228,7 +275,7 @@ anim_id new_animation(animation_type type, double animation_time, int max_frame)
             return i;
         }
     }
-    LOG("Animation pool is full\n");
+    LOG("Animation pool is full");
     exit(1);
 }
 
@@ -267,7 +314,7 @@ void reset_animation(anim_id id) {
 
 int get_frame(anim_id id) {
     if (id >= MAX_ANIMATION_POOL) {
-        LOG("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        LOG("Invalid ID (%d > %d)", id, MAX_ANIMATION_POOL);
         return 0;
     }
     return anim_pool[id].current_frame;
@@ -300,7 +347,7 @@ void DrawSpriteFromSheet(Texture2D sheet, anim_id id, Vector2 pos, int scale) {
 
 double get_process(anim_id id) {
     if (id >= MAX_ANIMATION_POOL) {
-        LOG("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        LOG("Invalid ID (%d > %d)", id, MAX_ANIMATION_POOL);
         return 0;
     }
 
@@ -318,7 +365,7 @@ double get_process(anim_id id) {
 
 bool anim_finished(anim_id id) {
     if (id >= MAX_ANIMATION_POOL) {
-        LOG("Invalid ID (%d > %d)\n", id, MAX_ANIMATION_POOL);
+        LOG("Invalid ID (%d > %d)", id, MAX_ANIMATION_POOL);
         return false;
     }
 
@@ -600,7 +647,7 @@ int player_cast_spell(player *p, Vector2 origin) {
     if (s->type == ST_MOVE || s->type == ST_TARGET || s->type == ST_STAT) {
         return can_player_move(p, origin);
     } else {
-        LOGL(LL_ERROR, "not implemented type\n", s->type);
+        LOGL(LL_ERROR, "not implemented type", s->type);
     }
     return false;
 }
@@ -942,9 +989,34 @@ void render_infos() {
     }
 }
 
-int connect_to_server(const char *ip, uint16_t port) {
-    LOG("Connecting to %s:%d\n", ip, port);
 
+int connect_to_server(const char *ip, uint16_t port) {
+    LOG("Connecting to %s:%d", ip, port);
+
+#ifdef WINDOWS_BUILD
+    WSADATA wsaData = {0};
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData)) {
+        LOG("WSAStartup failed");
+        return -1;
+    }
+
+    if ((client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        client_fd = 0;
+        return -1;
+    }
+
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr.s_addr = inet_addr(ip);
+
+    if (connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        closesocket(client_fd);
+        client_fd = 0;
+        return -1;
+    }
+    return 0;
+#else
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         client_fd = 0;
         return -1;
@@ -955,12 +1027,14 @@ int connect_to_server(const char *ip, uint16_t port) {
     serv_addr.sin_port = htons(port);
 
     if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
+        close(client_fd);
         client_fd = 0;
         return -1;
     }
+#endif
 
-    int status;
-    if ((status = connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) < 0) {
+    if (connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        close(client_fd);
         client_fd = 0;
         return -1;
     }
@@ -1059,13 +1133,13 @@ void handle_packet(net_packet *p) {
         last_ping = ping->recieve_time - ping->send_time;
     } else if (p->type == PKT_JOIN) {
         net_packet_join *join = (net_packet_join *)p->content;
-        LOG("Joined: %.*s with ID=%d\n", 8, join->username, join->id);
+        LOG("Joined: %.*s with ID=%d", 8, join->username, join->id);
         memcpy(players[join->id].info.name, join->username, 8);
         players[join->id].info.name[8] = '\0';
         players[join->id].info.connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
-        LOG("My ID is %d\n", c->id);
+        LOG("My ID is %d", c->id);
         current_player = c->id;
         master_player = c->master;
 
@@ -1073,13 +1147,13 @@ void handle_packet(net_packet *p) {
         int base_health = 50 + health_slider.slider.value;
         int ad = physic_power_slider.slider.value;
         int ap = magic_power_slider.slider.value;
-        LOG("Joining with %d ad and %d ap\n", ad, ap);
+        LOG("Joining with %d ad and %d ap", ad, ap);
         net_packet_player_build b =
             pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
-        LOG("Player %d disconnected\n", d->id);
+        LOG("Player %d disconnected", d->id);
         players[d->id].info.connected = false;
         master_player = d->new_master;
         active_scene = SCENE_LOBBY;
@@ -1087,8 +1161,8 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_PLAYER_BUILD) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
-        LOG("Setting build for %d\n", b->id);
-        LOG("Build for %d is %d HP %d AD %d AP\n", b->id, b->base_health, b->ad, b->ap);
+        LOG("Setting build for %d", b->id);
+        LOG("Build for %d is %d HP %d AD %d AP", b->id, b->base_health, b->ad, b->ap);
         player->info.base_health = b->base_health;
         player->info.max_health = b->base_health;
         player->info.health = b->base_health;
@@ -1099,7 +1173,7 @@ void handle_packet(net_packet *p) {
         }
     } else if (p->type == PKT_MAP) {
         net_packet_map *m = (net_packet_map *)p->content;
-        LOG("Map is %d/%d\n", m->width, m->height);
+        LOG("Map is %d/%d", m->width, m->height);
         if (m->type == MLT_BACKGROUND) {
             init_map(&game_map, m->width, m->height, m->content);
             init_map(&players[current_player].action_range, game_map.width, game_map.height, NULL);
@@ -1110,18 +1184,18 @@ void handle_packet(net_packet *p) {
             init_map(&props, m->width, m->height, m->content);
             set_props_animations();
         } else {
-            LOG("Unknown map layer\n");
+            LOG("Unknown map layer");
             exit(1);
         }
     } else if (p->type == PKT_GAME_START) {
-        LOG("Starting Game !!\n");
+        LOG("Starting Game !!");
         active_scene = SCENE_IN_GAME;
         gs = GS_STARTED;
         set_selected_spell(&players[current_player], 0);
         init_in_game_ui();
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
-        LOG("Player Update %d %d %d H=%d and %d immediate\n", u->id, u->x, u->y, u->health, u->immediate);
+        LOG("Player Update %d %d %d H=%d and %d immediate", u->id, u->x, u->y, u->health, u->immediate);
         player *player = &players[u->id];
 
         if (gs == GS_WAITING || u->immediate) {
@@ -1144,7 +1218,7 @@ void handle_packet(net_packet *p) {
         }
     } else if (p->type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p->content;
-        LOG("New action: %d %d\n", a->id, a->spell);
+        LOG("New action: %d %d", a->id, a->spell);
         player_round_action *action = &actions[action_count];
         action->player = a->id;
         action->action = a->action;
@@ -1157,7 +1231,7 @@ void handle_packet(net_packet *p) {
         gs = GS_STARTED;
     } else if (p->type == PKT_ROUND_END) {
         net_packet_round_end *e = (net_packet_round_end *)p->content;
-        LOG("Round ended\n");
+        LOG("Round ended");
         state = RS_PLAYING_ROUND;
         winner_id = e->winner_id;
         gs = GS_ROUND_ENDING;
@@ -1167,14 +1241,14 @@ void handle_packet(net_packet *p) {
         }
     } else if (p->type == PKT_GAME_END) {
         net_packet_round_end *e = (net_packet_round_end *)p->content;
-        LOG("Game ended\n");
+        LOG("Game ended");
         winner_id = e->winner_id;
         gs = GS_GAME_ENDING;
         FOREACH_PLAYER(i, player) {
             futures_scores[i] = e->player_scores[i];
         }
     } else if (p->type == PKT_GAME_RESET) {
-        LOG("Client: game reset\n");
+        LOG("Client: game reset");
         reset_game();
     } else if (p->type == PKT_GAME_STATS) {
         net_packet_game_stats *s = (net_packet_game_stats *)p->content;
@@ -1189,12 +1263,12 @@ void handle_packet(net_packet *p) {
 
 void play_round() {
     player_round_action *a = &actions[action_step];
-    LOG("Playing round %d/%d for %d\n", action_step, action_count, a->player);
+    LOG("Playing round %d/%d for %d", action_step, action_count, a->player);
     player *p = &players[a->player];
 
     if (a->action == PA_SPELL) {
         const spell *s = &all_spells[a->spell];
-        LOG("Casting %s\n", s->name);
+        LOG("Casting %s", s->name);
 
         player *target = NULL;
         FOREACH_PLAYER(i, player) {
@@ -1265,7 +1339,7 @@ void play_effects() {
         info->y = updates[i].position.y;
         if (info->effect == SE_BURN) {
             info->health -= info->spell_effect->damage;
-            LOG("player took a tick of burn and has %d hp left\n", player->info.health);
+            LOG("player took a tick of burn and has %d hp left", player->info.health);
             player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             player->animation_state = PAS_BURNING;
             PlaySound(burn_sound);
@@ -1313,11 +1387,12 @@ struct timeval timeout;
 
 bool join_game(const char *ip, int port, const char *username) {
     if (connect_to_server(ip, port) < 0) {
-        LOGL(LL_ERROR, "Could not connect to server\n");
+        LOGL(LL_ERROR, "Could not connect to server");
         return false;
     }
+    connected = true;
 
-    LOG("Connected to server !\n");
+    LOG("Connected to server !");
 
     reset_game();
     player_join(username);
@@ -1797,7 +1872,7 @@ void *network_thread(void *arg) {
     (void)arg;
     // Read incoming packets and push it to a queue
     while (true) {
-        if (client_fd != 0) {
+        if (connected) {
             net_packet p = {0};
             if (packet_read(&p, client_fd) < 0) {
                 exit(1);
@@ -1828,13 +1903,13 @@ int main(int argc, char **argv) {
         } else if (strcmp(arg, "--port") == 0) {
             const char *value = POPARG(argc, argv);
             if (!strtoint(value, &port)) {
-                LOG("Error parsing port to int '%s'\n", value);
+                LOG("Error parsing port to int '%s'", value);
                 exit(1);
             }
         } else if (strcmp(arg, "--username") == 0) {
             username = POPARG(argc, argv);
         } else {
-            LOG("Unknown arg : '%s'\n", arg);
+            LOG("Unknown arg : '%s'", arg);
             exit(1);
         }
     }
@@ -1915,6 +1990,12 @@ int main(int argc, char **argv) {
     pthread_t t_network;
     pthread_create(&t_network, NULL, network_thread, NULL);
 
+#ifdef WINDOWS_BUILD
+    LOG("Running on Windows");
+#else 
+    LOG("Running on Linux");
+#endif
+
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
@@ -1964,5 +2045,6 @@ int main(int argc, char **argv) {
         }
         EndDrawing();
     }
+    CloseAudioDevice();
     CloseWindow();
 }

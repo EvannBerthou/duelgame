@@ -11,7 +11,7 @@ include/net_protocol.h: build/net_protocol_builder include/net_protocol_base.h
 build/main_game: src/main.c src/ui.c src/common.c src/command.c include/net_protocol.h
 	gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game \
 		-DLOG_PREFIX=\"GAME\" -DDEBUG\
-		-I./include -L ./lib -lraylib -lm -ggdb -lpthread
+		-I./include -L ./lib/linux -lraylib -lm -ggdb -lpthread
 
 build/server: src/server.c src/common.c include/net_protocol.h
 	gcc -Wall -Wextra src/server.c src/common.c -o build/server -DLOG_PREFIX=\"SERVER\" -I./include -ggdb -lm
@@ -27,7 +27,7 @@ run: build/server build/main_game
 	./build/main_game
 
 packer:
-	gcc src/packer.c -o build/packer -DDEBUG -I./include -L./lib -lraylib -lm
+	gcc src/packer.c -o build/packer -I./include -L./lib/linux -lraylib -lm
 	./build/packer
 	xxd -i -n assets_pak assets.pak > include/assets_packed.h
 
@@ -36,7 +36,7 @@ release/main_game: packer src/main.c src/ui.c src/common.c src/command.c include
 	gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game_release \
 		-DLOG_PREFIX=\"GAME\" \
 		$(PACKET_MODE) \
-		-I./include -L ./lib -lraylib -lm -ggdb -lpthread
+		-I./include -L ./lib/linux -lraylib -lm -ggdb -lpthread
 
 clean:
 	-rm -rf build
@@ -45,3 +45,11 @@ clean:
 	-rm ./include/assets_packed.h
 
 .PHONY: all packer clean
+
+windows: packer include/net_protocol.h
+	x86_64-w64-mingw32-gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game_windows \
+		-DLOG_PREFIX=\"GAME\" \
+		-DWINDOWS_BUILD \
+		$(PACKET_MODE) \
+		-static \
+		-I./include -L ./lib/windows -lraylib -lm -ggdb -lpthread -lwinmm -lgdi32 -lws2_32

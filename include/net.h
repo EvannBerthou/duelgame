@@ -2,9 +2,11 @@
 #define NET_H
 
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include "common.h"
@@ -74,6 +76,12 @@ void unpacksv(uint8_t** buf, char* dest, uint8_t len) {
     }
 }
 
+#ifdef WINDOWS_BUILD
+#define send_data(fd, buf, len) send(fd, (char*)buf, len, 0)
+#else
+#define send_data(fd, buf, len) write(fd, buf, len)
+#endif
+
 void write_packet(net_packet* p, int fd) {
     static char buf[256] = {0};
     char* b = buf;
@@ -84,32 +92,46 @@ void write_packet(net_packet* p, int fd) {
     b = buf;
     int packet_size_left = p->len;
     int n = 0;
-    while ((n = write(fd, b, packet_size_left)) > 0) {
+    while ((n = send_data(fd, b, packet_size_left)) > 0) {
         packet_size_left -= n;
         b += n;
     }
+
     if (n < 0) {
-        fprintf(stderr, "Error sending packet of type %d\n", p->type);
+        fprintf(stderr, "Error sending packet of type %d %s", p->type,
+                strerror(errno));
         exit(1);
     }
 }
 
+#ifdef WINDOWS_BUILD
+#define recv_data(fd, buf, len) recv(fd, (char*)buf, len, 0)
+#else
+#define recv_data(fd, buf, len) read(fd, buf, len)
+#endif
+
 // TODO: We should check the size and avoid reading too much
 int packet_read(net_packet* p, int fd) {
     uint8_t packet_len;
-    int n = read(fd, &packet_len, sizeof(packet_len));
-    if (n == 0) {
+    int n = recv_data(fd, &packet_len, sizeof(packet_len));
+    if (n < 0) {
+        LOGL(LL_ERROR, "Error recieving packet header %s", strerror(errno));
         return -1;
     }
     p->len = packet_len;
 
     uint8_t buf[256] = {0};
-    uint8_t* b = buf;
+    uint8_t *b = buf;
     int packet_size_left = packet_len - 1;
     n = 0;
-    while ((n = read(fd, buf, packet_size_left)) > 0) {
+    while ((n = recv_data(fd, b, packet_size_left)) > 0) {
         packet_size_left -= n;
         b += n;
+    }
+    if (n < 0) {
+        LOGL(LL_ERROR, "Error recieving packet of type %d %s", p->type,
+             strerror(errno));
+        return -1;
     }
 
     uint8_t* base = buf;

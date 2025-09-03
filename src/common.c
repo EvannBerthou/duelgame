@@ -17,15 +17,17 @@ void LOG_(log_level level, const char *fmt, va_list args) {
         return;
     }
 #endif
-    char *formatted = NULL;
-    vasprintf(&formatted, fmt, args);
-    asprintf(&log_history[log_history_ptr], "[%s(%d)]%s", LOG_PREFIX, getpid(), formatted);
+    char formatted[1024] = {0};
+    int len = vsnprintf(formatted, sizeof(formatted), fmt, args);
+    int prefix = snprintf(NULL, 0, "[%s(%d)]", LOG_PREFIX, getpid());
+    log_history[log_history_ptr] = malloc(len + prefix + 1);
+    snprintf(log_history[log_history_ptr], len + prefix + 1, "[%s(%d)]%s", LOG_PREFIX, getpid(), formatted);
     log_levels[log_history_ptr] = level;
-    free(formatted);
 
-    printf("%s", log_history[log_history_ptr]);
+    printf("%s\n", log_history[log_history_ptr]);
     log_history_ptr++;
     if (log_history_ptr == MAX_LOG_HISTORY) {
+        //TODO: Free previous log
         log_history_ptr = 0;
     }
 }

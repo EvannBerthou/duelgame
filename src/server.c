@@ -82,7 +82,7 @@ int spawn_positions[][2] = {
 
 int ci(int a) {
     if (a < 0) {
-        LOG("ci\n");
+        LOG("ci");
         exit(-a);
     }
     return a;
@@ -103,7 +103,7 @@ void broadcast(net_packet_type_enum type, void *content) {
 }
 
 void heal_player(player_info *p, const spell *s) {
-    LOG("Healing player %s\n", p->name);
+    LOG("Healing player %s", p->name);
     p->health = fmin(fmax(p->health + s->damage, 0), p->max_health);
     net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
@@ -136,7 +136,7 @@ void reset_player(player_info *player) {
 
 void play_round(player_info *player) {
     if (player->action == PA_CANT_PLAY) {
-        LOG("Player %d can't play this round\n", player->id);
+        LOG("Player %d can't play this round", player->id);
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
         net_packet_player_action action = pkt_player_action(player->id, player->action, player->x, player->y, 0);
@@ -144,7 +144,7 @@ void play_round(player_info *player) {
         player->state = RS_PLAYING;
     } else if (player->action == PA_SPELL) {
         if (player->effect == SE_STUN) {
-            LOG("Player can't do this action because he is stunned\n");
+            LOG("Player can't do this action because he is stunned");
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
             net_packet_player_action action = pkt_player_action(player->id, PA_CANT_PLAY, player->x, player->y, 0);
@@ -153,7 +153,7 @@ void play_round(player_info *player) {
             return;
         }
 
-        LOG("Player %d is using spell %s this round\n", player->id, all_spells[player->spell].name);
+        LOG("Player %d is using spell %s this round", player->id, all_spells[player->spell].name);
         int found = false;
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             if (player->spell == player->spells[i]) {
@@ -162,7 +162,7 @@ void play_round(player_info *player) {
         }
         // TODO: Report an error / kick the player ?
         if (found == false) {
-            LOG("Player is trying to cast a spell which is not in his build\n");
+            LOG("Player is trying to cast a spell which is not in his build");
             exit(0);
         }
 
@@ -193,7 +193,7 @@ void play_round(player_info *player) {
                 heal_player(player, s);
             }
         } else {
-            LOGL(LL_ERROR, "Unknown spell type %d from %s\n", s->type, s->name);
+            LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
         }
         player->state = RS_PLAYING;
     } else {
@@ -208,7 +208,7 @@ player_info *get_player_from_fd(int fd) {
             return &players[i];
         }
     }
-    LOG("Unkown player\n");
+    LOG("Unkown player");
     exit(1);
     return NULL;
 }
@@ -280,7 +280,7 @@ void send_map(int fd) {
 
 void handle_player_disconnect(int fd) {
     FD_CLR(fd, &master_set);
-    LOG("Player %d left\n", fd);
+    LOG("Player %d left", fd);
     player_info *player = get_player_from_fd(fd);
     player->connected = false;
     int new_master = -1;
@@ -317,7 +317,7 @@ void handle_message(int fd) {
         assert(new_player != -1);
 
         net_packet_join *j = (net_packet_join *)p.content;
-        LOG("[%d] Joined %.*s\n", fd, 8, j->username);
+        LOG("[%d] Joined %.*s", fd, 8, j->username);
         j->id = new_player;
 
         // We send previously connected players informations to the new player
@@ -360,7 +360,7 @@ void handle_message(int fd) {
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: Handle error
         if (gs == GS_STARTED) {
-            LOG("Recieved PKT_PLAYER_BUILD but game has already started\n");
+            LOG("Recieved PKT_PLAYER_BUILD but game has already started");
             exit(0);
         }
         net_packet_player_build *b = (net_packet_player_build *)p.content;
@@ -382,7 +382,7 @@ void handle_message(int fd) {
         broadcast(PKT_PLAYER_UPDATE, &u);
     } else if (p.type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p.content;
-        LOG("Player %d played : %d at %d %d\n", a->id, a->action, a->x, a->y);
+        LOG("Player %d played : %d at %d %d", a->id, a->action, a->x, a->y);
 
         players[a->id].action = a->action;
         players[a->id].ax = a->x;
@@ -428,13 +428,13 @@ void handle_message(int fd) {
                 if (alive_count == 1) {
                     FOREACH_PLAYER(i, player) {
                         if (player->health > 0) {
-                            LOG("Player %s won the round !\n", players[i].name);
+                            LOG("Player %s won the round !", players[i].name);
                             end_verdict = i;
                             round_scores[i]++;
                         }
                     }
                 } else if (alive_count == 0) {
-                    LOG("Nobody won the game...\n");
+                    LOG("Nobody won the game...");
                     end_verdict = GAME_TIE;
                 }
 
@@ -475,10 +475,10 @@ void handle_message(int fd) {
         // Only first player (owner) can reset the game
         if (fd != connections[0]) {
             player_info *player = get_player_from_fd(fd);
-            LOG("%s tried to reset the game but they are not the owner.\n", player->name);
+            LOG("%s tried to reset the game but they are not the owner.", player->name);
             return;
         }
-        LOG("Serv: game reset\n");
+        LOG("Serv: game reset");
         for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
             round_scores[i] = 0;
         }
@@ -504,7 +504,7 @@ void handle_message(int fd) {
         broadcast(PKT_GAME_START, NULL);
     } else if (p.type == PKT_ADMIN_CONNECT) {
         net_packet_admin_connect *a = (net_packet_admin_connect *)p.content;
-        LOG("%d is trying to connect as admin with password '%s'\n", fd, a->password);
+        LOG("%d is trying to connect as admin with password '%s'", fd, a->password);
         net_packet_admin_connect_result result = pkt_admin_connect_result(memcmp(a->password, ADMIN_PASSWORD, 8) == 0);
         send_sock(PKT_ADMIN_CONNECT_RESULT, &result, fd);
         admins[admin_count] = fd;
@@ -540,11 +540,11 @@ int main(int argc, char **argv) {
         if (strcmp(arg, "--port") == 0) {
             const char *value = POPARG(argc, argv);
             if (!strtoint(value, &port)) {
-                LOG("Error parsing port to int '%s'\n", value);
+                LOG("Error parsing port to int '%s'", value);
                 exit(1);
             }
         } else {
-            LOG("Unknown arg : '%s'\n", arg);
+            LOG("Unknown arg : '%s'", arg);
         }
     }
 
@@ -561,7 +561,7 @@ int main(int argc, char **argv) {
     ci(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)));
     ci(listen(sockfd, 5));
 
-    LOG("Listening on port %d\n", port);
+    LOG("Listening on port %dn", port);
 
     FD_ZERO(&master_set);
     FD_ZERO(&read_fds);
@@ -579,7 +579,7 @@ int main(int argc, char **argv) {
         read_fds = master_set;
         int activity = ci(select(fd_count + 1, &read_fds, NULL, NULL, &timeout));
         if (activity < 0) {
-            LOG("here?\n");
+            LOG("here?");
             exit(1);
         }
 
@@ -592,11 +592,11 @@ int main(int argc, char **argv) {
                     if (connfd > fd_count) {
                         fd_count = connfd;
                     }
-                    LOG("new connection %d\n", connfd);
+                    LOG("new connection %d", connfd);
                     // TODO: Check if there is any space left
                     if (false) {  // player_count == MAX_PLAYER_COUNT) {
                         // TODO: Tell the player the game is full
-                        LOG("Full\n");
+                        LOG("Full");
                         FD_CLR(connfd, &master_set);
                         close(connfd);
                     } else {
@@ -614,7 +614,7 @@ int main(int argc, char **argv) {
         usleep(16000);  // TODO: Sleep to avoid 100% CPU usage while I implement a better solution
     }
 
-    LOG("Client connected\n");
+    LOG("Client connected");
 
     close(sockfd);
 }
