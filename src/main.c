@@ -1,44 +1,44 @@
 #ifdef WINDOWS_BUILD
 // If defined, the following flags inhibit definition of the indicated items.
-#define NOGDICAPMASKS     // CC_*, LC_*, PC_*, CP_*, TC_*, RC_
-#define NOVIRTUALKEYCODES // VK_*
-#define NOWINMESSAGES     // WM_*, EM_*, LB_*, CB_*
-#define NOWINSTYLES       // WS_*, CS_*, ES_*, LBS_*, SBS_*, CBS_*
-#define NOSYSMETRICS      // SM_*
-#define NOMENUS           // MF_*
-#define NOICONS           // IDI_*
-#define NOKEYSTATES       // MK_*
-#define NOSYSCOMMANDS     // SC_*
-#define NORASTEROPS       // Binary and Tertiary raster ops
-#define NOSHOWWINDOW      // SW_*
-#define OEMRESOURCE       // OEM Resource values
-#define NOATOM            // Atom Manager routines
-#define NOCLIPBOARD       // Clipboard routines
-#define NOCOLOR           // Screen colors
-#define NOCTLMGR          // Control and Dialog routines
-#define NODRAWTEXT        // DrawText() and DT_*
-#define NOGDI             // All GDI defines and routines
-#define NOKERNEL          // All KERNEL defines and routines
-#define NOUSER            // All USER defines and routines
-#define NONLS             // All NLS defines and routines
-#define NOMB              // MB_* and MessageBox()
-#define NOMEMMGR          // GMEM_*, LMEM_*, GHND, LHND, associated routines
-#define NOMETAFILE        // typedef METAFILEPICT
-#define NOMINMAX          // Macros min(a,b) and max(a,b)
-#define NOMSG             // typedef MSG and associated routines
-#define NOOPENFILE        // OpenFile(), OemToAnsi, AnsiToOem, and OF_*
-#define NOSCROLL          // SB_* and scrolling routines
-#define NOSERVICE         // All Service Controller routines, SERVICE_ equates, etc.
-#define NOSOUND           // Sound driver routines
-#define NOTEXTMETRIC      // typedef TEXTMETRIC and associated routines
-#define NOWH              // SetWindowsHook and WH_*
-#define NOWINOFFSETS      // GWL_*, GCL_*, associated routines
-#define NOCOMM            // COMM driver routines
-#define NOKANJI           // Kanji support stuff.
-#define NOHELP            // Help engine interface.
-#define NOPROFILER        // Profiler interface.
-#define NODEFERWINDOWPOS  // DeferWindowPos routines
-#define NOMCX             // Modem Configuration Extensions
+#define NOGDICAPMASKS      // CC_*, LC_*, PC_*, CP_*, TC_*, RC_
+#define NOVIRTUALKEYCODES  // VK_*
+#define NOWINMESSAGES      // WM_*, EM_*, LB_*, CB_*
+#define NOWINSTYLES        // WS_*, CS_*, ES_*, LBS_*, SBS_*, CBS_*
+#define NOSYSMETRICS       // SM_*
+#define NOMENUS            // MF_*
+#define NOICONS            // IDI_*
+#define NOKEYSTATES        // MK_*
+#define NOSYSCOMMANDS      // SC_*
+#define NORASTEROPS        // Binary and Tertiary raster ops
+#define NOSHOWWINDOW       // SW_*
+#define OEMRESOURCE        // OEM Resource values
+#define NOATOM             // Atom Manager routines
+#define NOCLIPBOARD        // Clipboard routines
+#define NOCOLOR            // Screen colors
+#define NOCTLMGR           // Control and Dialog routines
+#define NODRAWTEXT         // DrawText() and DT_*
+#define NOGDI              // All GDI defines and routines
+#define NOKERNEL           // All KERNEL defines and routines
+#define NOUSER             // All USER defines and routines
+#define NONLS              // All NLS defines and routines
+#define NOMB               // MB_* and MessageBox()
+#define NOMEMMGR           // GMEM_*, LMEM_*, GHND, LHND, associated routines
+#define NOMETAFILE         // typedef METAFILEPICT
+#define NOMINMAX           // Macros min(a,b) and max(a,b)
+#define NOMSG              // typedef MSG and associated routines
+#define NOOPENFILE         // OpenFile(), OemToAnsi, AnsiToOem, and OF_*
+#define NOSCROLL           // SB_* and scrolling routines
+#define NOSERVICE          // All Service Controller routines, SERVICE_ equates, etc.
+#define NOSOUND            // Sound driver routines
+#define NOTEXTMETRIC       // typedef TEXTMETRIC and associated routines
+#define NOWH               // SetWindowsHook and WH_*
+#define NOWINOFFSETS       // GWL_*, GCL_*, associated routines
+#define NOCOMM             // COMM driver routines
+#define NOKANJI            // Kanji support stuff.
+#define NOHELP             // Help engine interface.
+#define NOPROFILER         // Profiler interface.
+#define NODEFERWINDOWPOS   // DeferWindowPos routines
+#define NOMCX              // Modem Configuration Extensions
 #define MMNOSOUND
 typedef struct tagMSG *LPMSG;
 #include <winsock2.h>
@@ -65,9 +65,20 @@ typedef struct tagMSG *LPMSG;
 #include "ui.h"
 #include "version.h"
 
+#define WIDTH 1280
+#define HEIGHT 720
+
 extern const spell all_spells[];
 extern const int spell_count;
 extern const char *wall_frames[];
+
+Vector2 get_mouse() {
+    float scale = fminf((float)GetScreenWidth() / WIDTH, (float)GetScreenHeight() / HEIGHT);
+    int offset_x = (GetScreenWidth() - (WIDTH * scale)) / 2;
+    int offset_y = (GetScreenHeight() - (HEIGHT * scale)) / 2;
+    Vector2 mouse = GetMousePosition();
+    return (Vector2){(mouse.x - offset_x) / scale, (mouse.y - offset_y) / scale};
+}
 
 int client_fd = 0;
 bool connected = false;
@@ -184,9 +195,6 @@ void render_console() {
     int log_count_length = MeasureText(log_count, 32);
     DrawText(log_count, GetScreenWidth() - log_count_length, 0, 32, WHITE);
 }
-
-#define WIDTH 1280
-#define HEIGHT 720
 
 #define FOREACH_PLAYER(IT, P)                                                    \
     for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                                \
@@ -658,7 +666,7 @@ player_move player_exec_action(player *p) {
     }
 
     player_info *i = &p->info;
-    const Vector2 g = screen2grid(GetMousePosition());
+    const Vector2 g = screen2grid(get_mouse());
     if (get_map(&game_map, g.x, g.y) != -1 && IsMouseButtonPressed(0)) {
         if (i->action == PA_SPELL) {
             if (i->cooldowns[p->selected_spell] == 0 && player_cast_spell(p, g)) {
@@ -679,7 +687,7 @@ bool is_over_cell(int x, int y) {
         return false;
     }
     const Rectangle cell_rect = {x, y, CELL_SIZE, CELL_SIZE};
-    return CheckCollisionPointRec(GetMousePosition(), cell_rect);
+    return CheckCollisionPointRec(get_mouse(), cell_rect);
 }
 
 // TODO: Rework with enum ?
@@ -857,7 +865,7 @@ void render_spell_actions(player *p) {
             }
         }
     } else if (s->type == ST_ZONE) {
-        Vector2 g = screen2grid(GetMousePosition());
+        Vector2 g = screen2grid(get_mouse());
         for (int x = -s->range; x <= s->range; x++) {
             for (int y = -s->range; y <= s->range; y++) {
                 const Vector2 cell = {g.x + x, g.y + y};
@@ -871,7 +879,7 @@ void render_spell_actions(player *p) {
 }
 
 void render_spell_tooltip(const spell *s) {
-    Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 400, 150};
+    Rectangle rec = {get_mouse().x, get_mouse().y, 400, 150};
     const char *description =
         TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage, s->range, s->speed);
     render_tooltip(rec, s->name, description);
@@ -880,7 +888,7 @@ void render_spell_tooltip(const spell *s) {
 bool is_over_toolbar_cell(uint8_t cell_id) {
     int toolbar_y = base_y_offset + CELL_SIZE * game_map.height + 16;
     Rectangle cell = {base_x_offset + (CELL_SIZE + 8) * cell_id, toolbar_y, CELL_SIZE, CELL_SIZE};
-    Vector2 mouse = GetMousePosition();
+    Vector2 mouse = get_mouse();
     return CheckCollisionPointRec(mouse, cell);
 }
 
@@ -983,12 +991,11 @@ void render_infos() {
 
     if (over_player != -1) {
         player_info *i = &players[over_player].info;
-        Rectangle rec = {GetMousePosition().x, GetMousePosition().y, 200, 75};
+        Rectangle rec = {get_mouse().x, get_mouse().y, 200, 75};
         const char *description = TextFormat("%d/%d", i->health, i->max_health);
         render_tooltip(rec, "Health", description);
     }
 }
-
 
 int connect_to_server(const char *ip, uint16_t port) {
     LOG("Connecting to %s:%d", ip, port);
@@ -1508,7 +1515,7 @@ void render_scene_in_game() {
         FOREACH_PLAYER(i, player) {
             Vector2 screen_pos = grid2screen((Vector2){player->info.x, player->info.y});
             Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
-            Vector2 mp = GetMousePosition();
+            Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
                 Rectangle player_box = render_box(mp.x, mp.y, 350, 150);
                 int box_center = get_width_center(player_box, player->info.name, 32);
@@ -1915,9 +1922,13 @@ int main(int argc, char **argv) {
     }
 
     // TODO: Make window resizable
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     InitAudioDevice();
     SetTargetFPS(60);
+
+    RenderTexture2D target = LoadRenderTexture(WIDTH, HEIGHT);
+    SetTextureFilter(target.texture, TEXTURE_FILTER_POINT);
 
     load_assets();
 
@@ -1992,7 +2003,7 @@ int main(int argc, char **argv) {
 
 #ifdef WINDOWS_BUILD
     LOG("Running on Windows");
-#else 
+#else
     LOG("Running on Linux");
 #endif
 
@@ -2028,7 +2039,7 @@ int main(int argc, char **argv) {
             update_scene_round_ended();
         }
 
-        BeginDrawing();
+        BeginTextureMode(target);
         {
             ClearBackground(GetColor(0x181818FF));
             // Rendering
@@ -2043,8 +2054,21 @@ int main(int argc, char **argv) {
             }
             render_console();
         }
+        EndTextureMode();
+
+        BeginDrawing();
+        {
+            ClearBackground(GetColor(0x181818FF));
+            float scale = fminf((float)GetScreenWidth() / WIDTH, (float)GetScreenHeight() / HEIGHT);
+            int offset_x = (GetScreenWidth() - (WIDTH * scale)) / 2;
+            int offset_y = (GetScreenHeight() - (HEIGHT * scale)) / 2;
+            Rectangle src = {0, 0, WIDTH, -HEIGHT};
+            Rectangle dest = {offset_x, offset_y, (WIDTH * scale), (HEIGHT * scale)};
+            DrawTexturePro(target.texture, src, dest, (Vector2){0}, 0, WHITE);
+        }
         EndDrawing();
     }
+    UnloadRenderTexture(target);
     CloseAudioDevice();
     CloseWindow();
 }
