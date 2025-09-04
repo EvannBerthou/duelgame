@@ -68,6 +68,11 @@ typedef struct tagMSG *LPMSG;
 #define WIDTH 1280
 #define HEIGHT 720
 
+#define V(x, y)  \
+    (Vector2) {  \
+        (x), (y) \
+    }
+
 extern const spell all_spells[];
 extern const int spell_count;
 extern const char *wall_frames[];
@@ -157,7 +162,7 @@ void render_console() {
     if (is_console_closed()) {
         return;
     }
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), GetColor(0x181818AA));
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), GetColor(0x232323AA));
     for (int i = 0; i <= fmin(LOG_LINE_COUNT, get_log_count()); i++) {
         int idx = get_log_count() - fmin(LOG_LINE_COUNT, get_log_count()) + i - log_base;
         if (get_log(idx) == NULL) {
@@ -205,9 +210,9 @@ uint64_t last_ping = 0;
 time_t round_timer = 0;
 int round_scores[MAX_PLAYER_COUNT] = {0};
 
-#define CELL_SIZE 64.0
+#define CELL_SIZE 64
 
-#define MAX_ANIMATION_POOL 16
+#define MAX_ANIMATION_POOL 128
 
 // Scenes
 
@@ -245,6 +250,7 @@ map_layer game_map = {0};
 map_layer variants = {0};
 map_layer props = {0};
 map_layer props_animations = {0};
+RenderTexture2D lightmap = {0};
 
 typedef enum {
     AT_LOOP,
@@ -470,9 +476,11 @@ bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *
 
 Texture2D floor_textures = {0};
 Texture2D wall_textures = {0};
+Texture2D test_wall_textures = {0};
 Texture2D player_textures = {0};
 Texture2D wall_torch = {0};
 anim_id torch_anim = 0;
+Texture2D vine = {0};
 Texture2D slash_attack = {0};
 Texture2D heal_attack = {0};
 
@@ -491,6 +499,8 @@ Sound heal_sound = {0};
 Sound death_sound = {0};
 Sound win_round_sound = {0};
 Sound lose_round_sound = {0};
+Sound error_sound = {0};
+Sound raindrop_sound = {0};
 
 void load_assets() {
     font = load_font(DEFAULT_FONT);
@@ -502,8 +512,10 @@ void load_assets() {
     life_bar_bg = load_texture(LIFE_BAR_BG);
     floor_textures = load_texture(FLOOR_TEXTURE);
     wall_textures = load_texture(WALL_TEXTURE);
+    test_wall_textures = load_texture(TEST_WALL_TEXTURE);
     player_textures = load_texture(PLAYER_TEXTURE);
     wall_torch = load_texture(WALL_TORCH);
+    vine = load_texture(VINE);
     slash_attack = load_texture(SLASH_ATTACK);
     heal_attack = load_texture(HEAL_ATTACK);
     icons_sheet = load_texture(ICONS);
@@ -523,6 +535,8 @@ void load_assets() {
     death_sound = load_sound(DEATH_SOUND);
     win_round_sound = load_sound(WIN_ROUND_SOUND);
     lose_round_sound = load_sound(LOSE_ROUND_SOUND);
+    error_sound = load_sound(ERROR_SOUND);
+    raindrop_sound = load_sound(RAINDROP_SOUND);
 }
 
 void compute_map_variants() {
@@ -552,8 +566,13 @@ void set_props_animations() {
     init_map(&props_animations, game_map.width, game_map.height, NULL);
     for (int y = 0; y < game_map.height; y++) {
         for (int x = 0; x < game_map.width; x++) {
-            if (get_map(&props, x, y)) {
+            int prop_type = get_map(&props, x, y);
+            if (prop_type == 1) {
                 anim_id id = new_animation(AT_LOOP, 0.2f, WALL_TORCH_ANIMATION_COUNT);
+                set_map(&props_animations, x, y, id);
+            } else if (prop_type == 2) {
+                anim_id id = new_animation(AT_LOOP, (rand() % 5) + 2.f, VINE_ANIMATION_COUNT);
+                anim_pool[id].current_frame = rand() % VINE_ANIMATION_COUNT;
                 set_map(&props_animations, x, y, id);
             }
         }
@@ -720,9 +739,28 @@ Color get_cell_color(int cell_type) {
 }
 
 Texture2D get_prop_texture(int prop_type) {
-    if (prop_type == 1)
+    if (prop_type == 1) {
         return wall_torch;
+    } else if (prop_type == 2) {
+        return vine;
+    }
     return (Texture2D){0};
+}
+
+int get_prop_scaling(int prop_type) {
+    if (prop_type == 1) {
+        return 3;
+    } else if (prop_type == 2) {
+        return 4;
+    }
+    return 0;
+}
+
+Vector2 get_prop_offset(int prop_type) {
+    if (prop_type == 1) {
+        return (Vector2){8, -8};
+    }
+    return (Vector2){0};
 }
 
 void render_map() {
@@ -733,9 +771,8 @@ void render_map() {
             Vector2 pos = {x_pos, y_pos};
             Texture2D t = get_cell_texture(x, y);
             if (t.id != 0) {
-                Color tint = is_over_cell(x_pos, y_pos) ? RED : WHITE;
                 Rectangle src = get_sprite(t, get_cell_sprite_count(x, y), get_map(&variants, x, y));
-                DrawSpriteRecFromSheetTint(t, src, pos, 4, tint);
+                DrawSpriteRecFromSheetTint(t, src, pos, 4, WHITE);
             } else {
                 Color c = PURPLE;
                 DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
@@ -746,11 +783,20 @@ void render_map() {
 
     for (int y = 0; y < game_map.height; y++) {
         for (int x = 0; x < game_map.width; x++) {
-            Vector2 pos = {base_x_offset + x * CELL_SIZE + 8, base_y_offset + y * CELL_SIZE - 8};
-            Texture2D spritesheet = get_prop_texture(get_map(&props, x, y));
+            Vector2 pos = {base_x_offset + x * CELL_SIZE, base_y_offset + y * CELL_SIZE};
+            int prop_type = get_map(&props, x, y);
+            Vector2 offset = get_prop_offset(prop_type);
+            pos.x += offset.x;
+            pos.y += offset.y;
+            Texture2D spritesheet = get_prop_texture(prop_type);
             anim_id a = get_map(&props_animations, x, y);
-            DrawSpriteFromSheet(spritesheet, a, pos, 3);
+            DrawSpriteFromSheet(spritesheet, a, pos, get_prop_scaling(prop_type));
         }
+    }
+    Vector2 grid = screen2grid(get_mouse());
+    if (get_map(&game_map, grid.x, grid.y) != -1) {
+        Vector2 cursor = grid2screen(screen2grid(get_mouse()));
+        DrawRectangleV(cursor, (Vector2){CELL_SIZE, CELL_SIZE}, ColorAlpha(RED, 0.3f));
     }
 }
 
@@ -882,7 +928,7 @@ void render_spell_tooltip(const spell *s) {
     Rectangle rec = {get_mouse().x, get_mouse().y, 400, 150};
     const char *description =
         TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage, s->range, s->speed);
-    render_tooltip(rec, s->name, description);
+    set_tooltip(rec, s->name, description);
 }
 
 bool is_over_toolbar_cell(uint8_t cell_id) {
@@ -993,7 +1039,7 @@ void render_infos() {
         player_info *i = &players[over_player].info;
         Rectangle rec = {get_mouse().x, get_mouse().y, 200, 75};
         const char *description = TextFormat("%d/%d", i->health, i->max_health);
-        render_tooltip(rec, "Health", description);
+        set_tooltip(rec, "Health", description);
     }
 }
 
@@ -1417,6 +1463,14 @@ bool join_game(const char *ip, int port, const char *username) {
 
 round_state next_state = RS_WAITING;
 
+#define RAINDROP_COUNT 4
+#define RAINDROP_RAND_SPAWNRATE rand() % 20 + 10
+
+float raindrop_timers[RAINDROP_COUNT] = {0};
+Vector2 raindrop_target[RAINDROP_COUNT] = {0};
+Vector2 raindrop_position[RAINDROP_COUNT] = {0};
+Sound raindrop_sounds[RAINDROP_COUNT] = {0};
+
 int frame = 0;
 void update_scene_in_game() {
     frame++;
@@ -1478,6 +1532,16 @@ void update_scene_in_game() {
                 next_state = RS_PLAYING;
             }
         }
+
+        for (int i = 0; i < RAINDROP_COUNT; i++) {
+            raindrop_timers[i] -= GetFrameTime();
+            // We are now in timing
+            if (raindrop_position[i].y == 0 && raindrop_timers[i] < 0) {
+                raindrop_target[i] = (Vector2){rand() % game_map.width * CELL_SIZE + base_x_offset,
+                                               ((rand() % (game_map.height - 4)) + 4) * CELL_SIZE + base_y_offset};
+                raindrop_position[i] = (Vector2){raindrop_target[i].x + (rand() % CELL_SIZE), base_y_offset};
+            }
+        }
     }
 }
 
@@ -1517,21 +1581,31 @@ void render_scene_in_game() {
             Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
             Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
-                Rectangle player_box = render_box(mp.x, mp.y, 350, 150);
-                int box_center = get_width_center(player_box, player->info.name, 32);
-                DrawText(TextFormat("%s", player->info.name), box_center, player_box.y, 32, BLACK);
-                DrawText(TextFormat("AD=%d", player->info.ad), player_box.x + 8, player_box.y + 46, 32, BLACK);
-                DrawText(TextFormat("AP=%d", player->info.ap), player_box.x + 8, player_box.y + 92, 32, BLACK);
+                set_tooltip((Rectangle){mp.x, mp.y, 350, 150}, player->info.name,
+                            TextFormat("AD=%d\nAP=%d", player->info.ad, player->info.ap));
+            }
+        }
+
+        for (int i = 0; i < RAINDROP_COUNT; i++) {
+            // Raindrop is falling
+            if (raindrop_position[i].y > 0) {
+                DrawRectangle(raindrop_position[i].x, raindrop_position[i].y, 10, 20, ColorAlpha(BLUE, 0.8f));
+                if (raindrop_position[i].y >= raindrop_target[i].y) {
+                    // TODO: Particule splash
+                    PlaySound(raindrop_sounds[i]);
+                    raindrop_timers[i] = RAINDROP_RAND_SPAWNRATE;
+                    raindrop_position[i].y = 0;
+                } else {
+                    raindrop_position[i].y += 850 * GetFrameTime();
+                }
             }
         }
     }
-    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
     char time_string[8] = {0};
     struct tm *time = localtime(&round_timer);
     strftime(time_string, 8, "%M:%S", time);
     int width = MeasureText(time_string, 48);
     DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
-    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
 }
 
 void update_scene_round_ended() {
@@ -1716,6 +1790,18 @@ int get_total_stats() {
     return stat_total;
 }
 
+float error_time_remaining = 0.f;
+
+bool set_error(const char *e) {
+    error = e;
+    if (error != NULL) {
+        error_time_remaining = 3.f;
+        PlaySound(error_sound);
+        return true;
+    }
+    return false;
+}
+
 void update_scene_main_menu() {
     if (is_console_open()) {
         return;
@@ -1725,7 +1811,9 @@ void update_scene_main_menu() {
     if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
         input_erase(inputs[selected_input]);
     } else if (IsKeyPressed(KEY_ENTER)) {
-        error = try_join();
+        if (set_error(try_join()) == false) {
+            PlaySound(ui_button_clicked);
+        }
     } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && !IsKeyDown(KEY_LEFT_SHIFT)) {
         selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
     } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
@@ -1747,9 +1835,13 @@ void update_scene_main_menu() {
         }
     }
 
+    confirm_button.muted = true;
     if (button_clicked(&confirm_button)) {
-        error = try_join();
+        if (set_error(try_join()) == false) {
+            PlaySound(ui_button_clicked);
+        }
     }
+    confirm_button.muted = false;
 
     // Second card
     card_update_tabs(&player_info_card);
@@ -1762,7 +1854,7 @@ void update_scene_main_menu() {
                     total += spell_selection[j] == true;
                 }
                 if (spell_selection[i] == false && total == MAX_SPELL_COUNT) {
-                    error = "Spell selection limit reached";
+                    set_error("Spell selection limit reached");
                 } else {
                     spell_selection[i] = !spell_selection[i];
                     if (spell_selection[i]) {
@@ -1792,7 +1884,7 @@ void render_scene_main_menu() {
     const char *version_text = TextFormat("v%s", GIT_VERSION);
     int version_width = MeasureText(version_text, 24);
     DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
-    int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Duel Game", 64);
+    int title_center = get_width_center((Rectangle){0, 0, WIDTH, 0}, "Duel Game", 64);
     DrawText("Duel Game", title_center, 32, 64, WHITE);
     card_render(&server_info_card);
     card_render(&player_info_card);
@@ -1801,8 +1893,9 @@ void render_scene_main_menu() {
         input_render(inputs[i], i == selected_input);
     }
     button_render(&confirm_button);
-    if (error != NULL) {
-        DrawText(error, 0, 0, 32, UI_RED);
+    if (error != NULL && error_time_remaining > 0) {
+        int error_center = get_width_center((Rectangle){0, 0, WIDTH, 0}, error, 32);
+        DrawText(error, error_center, 96, 32, UI_RED);
     }
 
     if (player_info_card.selected_tab == 0) {
@@ -1929,6 +2022,7 @@ int main(int argc, char **argv) {
 
     RenderTexture2D target = LoadRenderTexture(WIDTH, HEIGHT);
     SetTextureFilter(target.texture, TEXTURE_FILTER_POINT);
+    lightmap = LoadRenderTexture(WIDTH, HEIGHT);
 
     load_assets();
 
@@ -2007,6 +2101,15 @@ int main(int argc, char **argv) {
     LOG("Running on Linux");
 #endif
 
+    for (int i = 0; i < RAINDROP_COUNT; i++) {
+        raindrop_timers[i] = RAINDROP_RAND_SPAWNRATE;
+        raindrop_target[i] = (Vector2){0};
+        raindrop_position[i] = (Vector2){0};
+        raindrop_sounds[i] = LoadSoundAlias(raindrop_sound);
+        SetSoundVolume(raindrop_sounds[i], 0.01f);
+        SetSoundPitch(raindrop_sounds[i], 1.0f + ((rand() % 200 - 100) / 100.f));
+    }
+
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
@@ -2021,12 +2124,14 @@ int main(int argc, char **argv) {
             }
         }
 
+        if (error_time_remaining > 0) {
+            error_time_remaining -= GetFrameTime();
+        }
+
         net_packet p = {0};
         if (pkt_pop(&p)) {
             handle_packet(&p);
         }
-
-        DrawText(TextFormat("FPS=%d", GetFPS()), 0, 0, 24, GREEN);
 
         // Update
         if (active_scene == SCENE_MAIN_MENU) {
@@ -2041,7 +2146,7 @@ int main(int argc, char **argv) {
 
         BeginTextureMode(target);
         {
-            ClearBackground(GetColor(0x181818FF));
+            ClearBackground(GetColor(0x232323FF));
             // Rendering
             if (active_scene == SCENE_MAIN_MENU) {
                 render_scene_main_menu();
@@ -2049,23 +2154,90 @@ int main(int argc, char **argv) {
                 render_scene_lobby();
             } else if (active_scene == SCENE_IN_GAME) {
                 render_scene_in_game();
+                // TODO: HUD Should be on top
+#define OUTER_WALL_COUNT 8
+
+                for (int i = 0; i < game_map.height; i++) {
+                    Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 0);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, i)), 4, WHITE);
+                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 3);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, i)), 4, WHITE);
+                }
+                for (int i = 0; i < game_map.width; i++) {
+                    Rectangle src = get_sprite(wall_textures, WALL_ORIENTATION_COUNT, WALL_ORIENTATION_COUNT - 1);
+                    DrawSpriteRecFromSheetTint(wall_textures, src, grid2screen(V(i, game_map.height)), 4, WHITE);
+                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 5);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(i, -1)), 4, WHITE);
+
+                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 2);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(i, game_map.height)), 4, WHITE);
+                }
+                {
+                    Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 1);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, game_map.height)), 4, WHITE);
+                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 4);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, game_map.height)),
+                                               4, WHITE);
+                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 6);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, -1)), 4, WHITE);
+                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 7);
+                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, -1)), 4, WHITE);
+                }
+                render_infos();
             } else if (active_scene == SCENE_GAME_ENDED) {
                 render_scene_round_ended();
             }
+
             render_console();
         }
         EndTextureMode();
 
+        // Move somewhere else
+        if (active_scene == SCENE_IN_GAME) {
+            BeginTextureMode(lightmap);
+            {
+                ClearBackground((Color){0, 0, 0, 0});
+                for (int y = 0; y < game_map.height; y++) {
+                    for (int x = 0; x < game_map.width; x++) {
+                        Vector2 pos = {base_x_offset + x * CELL_SIZE + 8, base_y_offset + y * CELL_SIZE - 8};
+                        int type = get_map(&props, x, y);
+                        if (type == 1) {
+                            int frame = get_frame(get_map(&props_animations, x, y));
+                            float size = 30 + (frame < 4) * 4;
+                            float alpha = (frame < 4) ? 0.6f : 0.4;
+                            DrawCircle(pos.x + 8 * 3, pos.y + 8 * 3 + size / 2, size, ColorAlpha(ORANGE, alpha));
+                        }
+                    }
+                }
+            }
+            EndTextureMode();
+        }
+
         BeginDrawing();
         {
-            ClearBackground(GetColor(0x181818FF));
+            ClearBackground(GetColor(0x232323FF));
             float scale = fminf((float)GetScreenWidth() / WIDTH, (float)GetScreenHeight() / HEIGHT);
             int offset_x = (GetScreenWidth() - (WIDTH * scale)) / 2;
             int offset_y = (GetScreenHeight() - (HEIGHT * scale)) / 2;
             Rectangle src = {0, 0, WIDTH, -HEIGHT};
             Rectangle dest = {offset_x, offset_y, (WIDTH * scale), (HEIGHT * scale)};
+
             DrawTexturePro(target.texture, src, dest, (Vector2){0}, 0, WHITE);
+
+            if (active_scene == SCENE_IN_GAME) {
+                BeginBlendMode(BLEND_MULTIPLIED);
+                {
+                    DrawTexturePro(lightmap.texture, src, dest, (Vector2){0}, 0, WHITE);
+                }
+                EndBlendMode();
+            }
+            render_tooltip();
+            DrawText(TextFormat("FPS=%d", GetFPS()), 0, 0, 24, GREEN);
+            if (connected) {
+                DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
+            }
         }
+        clear_tooltip();
         EndDrawing();
     }
     UnloadRenderTexture(target);

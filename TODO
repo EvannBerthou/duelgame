@@ -3,12 +3,11 @@
 - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
 - Some kind of runes or stats customization ?
 - Better battle logging (in-game recap ?)
-- Make game window resizable
 - 3 player game are bugged because you can still play when you are dead
 - Generic queue
 - Anti-cheat
-- Embed ressources inside final executable in release build
 - Spritesheet metadata (sprite width, etc)
 - Reorganise assets
 - Remake states (GS, state, etc)
-- Windows build
+- Ligthing
+- Background animations

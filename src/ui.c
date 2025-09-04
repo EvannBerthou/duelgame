@@ -1,7 +1,9 @@
 #include "ui.h"
 #include <ctype.h>
+#include <math.h>
 #include <raylib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern bool is_console_open();
@@ -278,26 +280,43 @@ Rectangle render_box(int x, int y, int w, int h) {
 
 #define TOOLTIP_TITLE_FONT_SIZE 32
 
-void render_tooltip(Rectangle rec, const char *title, const char *description) {
-    if (is_console_open()) {
+static Rectangle tooltip_rec = {0};
+static char tooltip_title[128] = {0};
+static char tooltip_description[256] = {0};
+static bool tooltip_enabled = false;
+
+void set_tooltip(Rectangle rec, const char *title, const char *description) {
+    tooltip_rec = rec;
+    strncpy(tooltip_title, title == NULL ? "(null)" : title, 128);
+    strncpy(tooltip_description, description == NULL ? "(null)": description, 256);
+    tooltip_enabled = true;
+}
+
+void clear_tooltip() {
+    tooltip_enabled = false;
+}
+
+//TODO: Fix because it is rendered after lightmap
+void render_tooltip() {
+    if (is_console_open() || tooltip_enabled == false) {
         return;
     }
 
     int borderSize = 32;
-    rec.x += borderSize / 2.f;
-    rec.y += borderSize / 2.f;
+    tooltip_rec.x += borderSize / 2.f;
+    tooltip_rec.y += borderSize / 2.f;
 
-    if (rec.y + rec.height >= HEIGHT) {
-        rec.y -= rec.height;
-        rec.y -= borderSize;
+    if (tooltip_rec.y + tooltip_rec.height >= HEIGHT) {
+        tooltip_rec.y -= tooltip_rec.height;
+        tooltip_rec.y -= borderSize;
     }
 
-    if (rec.x + rec.width >= WIDTH) {
-        rec.x -= rec.width;
-        rec.x -= borderSize;
+    if (tooltip_rec.x + tooltip_rec.width >= WIDTH) {
+        tooltip_rec.x -= tooltip_rec.width;
+        tooltip_rec.x -= borderSize;
     }
 
-    DrawRectangleRec(rec, UI_NORD);
+    DrawRectangleRec(tooltip_rec, UI_NORD);
 
     NPatchInfo patch = {.source = {0, 0, spell_box_select.width, spell_box_select.height},
                         .left = borderSize,
@@ -305,33 +324,32 @@ void render_tooltip(Rectangle rec, const char *title, const char *description) {
                         .right = borderSize,
                         .bottom = borderSize,
                         .layout = NPATCH_NINE_PATCH};
-    Rectangle dest = {rec.x - borderSize / 2.f, rec.y - borderSize / 2.f, rec.width + borderSize,
-                      rec.height + borderSize};
+    Rectangle dest = {tooltip_rec.x - borderSize / 2.f, tooltip_rec.y - borderSize / 2.f,
+                      tooltip_rec.width + borderSize, tooltip_rec.height + borderSize};
     DrawTextureNPatch(spell_box_select, patch, dest, (Vector2){0, 0}, 0.0f, WHITE);
 
-    Rectangle inner = {rec.x + 16, rec.y + 8, rec.width - 16, rec.height - 8};
-    int text_center = get_width_center(rec, title, TOOLTIP_TITLE_FONT_SIZE);
-    DrawText(title, text_center, inner.y, TOOLTIP_TITLE_FONT_SIZE, WHITE);
+    Rectangle inner = {tooltip_rec.x + 16, tooltip_rec.y + 8, tooltip_rec.width - 16, tooltip_rec.height - 8};
+    int text_center = get_width_center(tooltip_rec, tooltip_title, TOOLTIP_TITLE_FONT_SIZE);
+    DrawText(tooltip_title, text_center, inner.y, TOOLTIP_TITLE_FONT_SIZE, WHITE);
 
     char line[1024] = {0};
     int ptr = 0;
     int line_index = 1;
-    if (description != NULL) {
-        while (*description != '\0') {
-            if (*description == '\n') {
-                line[ptr] = '\0';
-                DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
-                ptr = 0;
-                line_index++;
-            } else {
-                line[ptr] = *description;
-                ptr++;
-            }
-            description++;
+    int desc_ptr = 0;
+    while (tooltip_description[desc_ptr] != '\0') {
+        if (tooltip_description[desc_ptr] == '\n') {
+            line[ptr] = '\0';
+            DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
+            ptr = 0;
+            line_index++;
+        } else {
+            line[ptr] = tooltip_description[desc_ptr];
+            ptr++;
         }
-        line[ptr] = '\0';
-        DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
+        desc_ptr++;
     }
+    line[ptr] = '\0';
+    DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
 }
 
 // Card

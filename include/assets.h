@@ -12,6 +12,7 @@ typedef enum {
     LIFE_BAR_BG,
     FLOOR_TEXTURE,
     WALL_TEXTURE,
+    TEST_WALL_TEXTURE,
     PLAYER_TEXTURE,
     WALL_TORCH,
     SLASH_ATTACK,
@@ -27,6 +28,9 @@ typedef enum {
     DEATH_SOUND,
     WIN_ROUND_SOUND,
     LOSE_ROUND_SOUND,
+    ERROR_SOUND,
+    RAINDROP_SOUND,
+    VINE,
     ASSET_COUNT,
 } asset;
 
@@ -50,6 +54,7 @@ typedef struct {
 #define SLASH_ANIMATION_COUNT 3
 #define HEAL_ANIMATION_COUNT 4
 #define WALL_ORIENTATION_COUNT 16
+#define VINE_ANIMATION_COUNT 3
 
 Sound load_sound(asset type);
 Texture2D load_texture(asset type);

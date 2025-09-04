@@ -31,11 +31,12 @@ packer:
 	./build/packer
 	xxd -i -n assets_pak assets.pak > include/assets_packed.h
 
-PACKET_MODE=-DEMBED_ASSETS
+PACKER_MODE=-DEMBED_ASSETS
+#TODO: Static linking
 release/main_game: packer src/main.c src/ui.c src/common.c src/command.c include/net_protocol.h
 	gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game_release \
 		-DLOG_PREFIX=\"GAME\" \
-		$(PACKET_MODE) \
+		$(PACKER_MODE) \
 		-I./include -L ./lib/linux -lraylib -lm -ggdb -lpthread
 
 clean:
@@ -50,6 +51,6 @@ windows: packer include/net_protocol.h
 	x86_64-w64-mingw32-gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game_windows \
 		-DLOG_PREFIX=\"GAME\" \
 		-DWINDOWS_BUILD \
-		$(PACKET_MODE) \
+		$(PACKER_MODE) \
 		-static \
 		-I./include -L ./lib/windows -lraylib -lm -ggdb -lpthread -lwinmm -lgdi32 -lws2_32

@@ -18,6 +18,7 @@ const char* asset_map[ASSET_COUNT] = {
     [GAME_SLOT] = "assets/sprites/ui/game_slot.png",
     [LIFE_BAR_BG] = "assets/sprites/ui/life_bar_bg.png",
     [WALL_TEXTURE] = "assets/sprites/walls/wall.png",
+    [TEST_WALL_TEXTURE] = "assets/sprites/test_wall.png",
     [PLAYER_TEXTURE] = "assets/sprites/wizzard_idle.png",
     [WALL_TORCH] = "assets/sprites/wall_torch.png",
     [SLASH_ATTACK] = "assets/sprites/attacks/slash.png",
@@ -33,6 +34,9 @@ const char* asset_map[ASSET_COUNT] = {
     [DEATH_SOUND] = "assets/sounds/10_Battle_SFX/69_Enemy_death_01.wav",
     [WIN_ROUND_SOUND] = "assets/sounds/8_Buffs_Heals_SFX/16_Atk_buff_04.wav",
     [LOSE_ROUND_SOUND] = "assets/sounds/8_Buffs_Heals_SFX/17_Def_buff_01.wav",
+    [ERROR_SOUND] = "assets/sounds/10_UI_Menu_SFX/033_Denied_03.wav",
+    [RAINDROP_SOUND] = "assets/sounds/raindrop.wav",
+    [VINE] = "assets/sprites/vines.png",
 };
 
 const char* ASSET(asset a) {

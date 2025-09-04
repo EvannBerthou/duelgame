@@ -118,7 +118,9 @@ void buttoned_slider_render(buttoned_slider *bs);
 // Tooltip
 
 Rectangle render_box(int x, int y, int w, int h);
-void render_tooltip(Rectangle rec, const char *title, const char *description);
+void set_tooltip(Rectangle rec, const char *title, const char *description);
+void clear_tooltip();
+void render_tooltip();
 
 // Card
 
