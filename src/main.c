@@ -156,7 +156,6 @@ void update_console() {
     }
 }
 
-// TODO: Maybe make a full console system instead of just logs ?
 // TODO: Logs should not move when there is a new message and we are not on the latests logs
 void render_console() {
     if (is_console_closed()) {
@@ -485,9 +484,9 @@ Texture2D vine = {0};
 Texture2D slash_attack = {0};
 Texture2D heal_attack = {0};
 
-Texture2D attack_sprites = {0};
-anim_id attack_animation = NO_ANIMATION;
-Vector2 attack_cell = {0};
+Texture2D animation_sprite = {0};
+anim_id current_spell_animation = NO_ANIMATION;
+Vector2 spell_animation_cell = {0};
 
 // Sounds
 Sound ui_button_clicked = {0};
@@ -682,7 +681,7 @@ int player_cast_spell(player *p, Vector2 origin) {
 
 player_move player_exec_action(player *p) {
     if (p->info.effect == SE_STUN) {
-        return (player_move){.action = PA_CANT_PLAY, .position = (Vector2){0, 0}};
+        return (player_move){.action = PA_STUNNED, .position = (Vector2){0, 0}};
     }
 
     player_info *i = &p->info;
@@ -835,7 +834,7 @@ void render_player(player *p) {
             if (i->health <= 0) {
                 p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
                 p->animation_state = PAS_DYING;
-                attack_animation = NO_ANIMATION;
+                current_spell_animation = NO_ANIMATION;
                 PlaySound(death_sound);
             }
         }
@@ -873,6 +872,10 @@ void render_player(player *p) {
         p->animation_state = PAS_NONE;
     }
 
+    // TODO: Make current player more visible. Maybe outline ?
+    if (p->info.id == current_player) {
+        c = ColorTint(c, YELLOW);
+    }
     DrawSpriteRecFromSheetTint(player_textures, player_sprite, player_position, 3, c);
 }
 
@@ -1315,6 +1318,82 @@ void handle_packet(net_packet *p) {
     free(p->content);
 }
 
+void set_spell_animation(spell_animation anim, Vector2 target) {
+    player *player_on_cell = NULL;
+    FOREACH_PLAYER(i, player) {
+        if (v2eq(target, V(player->info.x, player->info.y))) {
+            player_on_cell = player;
+            break;
+        }
+    }
+    switch (anim) {
+        case SA_NONE:
+            break;
+        case SA_SLASH:
+            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
+            animation_sprite = slash_attack;
+            spell_animation_cell = target;
+            PlaySound(attack_sound);
+            break;
+        // TODO: Animation for stun
+        case SA_STUN:
+            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
+            animation_sprite = slash_attack;
+            spell_animation_cell = target;
+            PlaySound(stun_sound);
+            break;
+        case SA_FIREBALL:
+            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
+            animation_sprite = slash_attack;
+            spell_animation_cell = target;
+            PlaySound(burn_sound);
+            break;
+        case SA_BURN:
+            player_on_cell->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+            player_on_cell->animation_state = PAS_BURNING;
+            PlaySound(burn_sound);
+            break;
+        case SA_HEAL:
+            current_spell_animation = new_animation(AT_ONESHOT, 0.4f / 4.f, HEAL_ANIMATION_COUNT);
+            animation_sprite = heal_attack;
+            spell_animation_cell = target;
+            PlaySound(heal_sound);
+            break;
+    }
+}
+
+void apply_effect(const spell *s, player *target) {
+    // We handle immediate effect first
+    if (s->effect == SE_HEAL) {
+        target->info.health = fmin(target->info.health + s->damage, target->info.max_health);
+    } else {
+        target->info.effect = s->effect;
+        target->info.effect_round_left = s->effect_duration;
+        target->info.spell_effect = s;
+    }
+}
+
+void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
+    // TODO: We should do pathfinding instead of sliding across the map
+    // and scale animation time with distance
+    if (s->type == ST_MOVE) {
+        p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+        p->moving_target = cell;
+        p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
+        if (v2eq(cell, V(p->info.x, p->info.y)) == false) {
+            PlaySound(move_sound);
+        }
+    } else if (s->type == ST_TARGET) {
+        if (target != NULL) {
+            target->info.health -= s->damage;
+            target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+            target->animation_state = PAS_DAMAGE;
+        }
+    } else {
+        LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
+    }
+}
+
 void play_round() {
     player_round_action *a = &actions[action_step];
     LOG("Playing round %d/%d for %d", action_step, action_count, a->player);
@@ -1331,53 +1410,12 @@ void play_round() {
                 break;
             }
         }
-
-        // TODO: We should do pathfinding instead of sliding across the map
-        // and scale animation time with distance
-        if (s->type == ST_MOVE) {
-            p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-            p->moving_target = a->target;
-            p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
-            PlaySound(move_sound);
-        } else if (s->type == ST_TARGET) {
-            attack_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
-            attack_sprites = slash_attack;
-            attack_cell = a->target;
-            if (s->effect == SE_STUN) {
-                PlaySound(stun_sound);
-            } else if (s->effect == SE_BURN) {
-                PlaySound(burn_sound);
-            } else {
-                PlaySound(attack_sound);
-            }
-
-            if (target != NULL) {
-                target->info.health -= s->damage;
-                target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-                target->animation_state = PAS_DAMAGE;
-                if (s->effect != SE_NONE) {
-                    target->info.effect = s->effect;
-                    target->info.effect_round_left = s->effect_duration;
-                    target->info.spell_effect = s;
-                }
-            }
-        } else if (s->type == ST_STAT) {
-            attack_animation = new_animation(AT_ONESHOT, 0.4f / 4.f, 4);
-            attack_sprites = heal_attack;
-            attack_cell = a->target;
-            PlaySound(heal_sound);
-
-            if (target != NULL) {
-                target->info.effect = s->effect;
-                target->info.spell_effect = s;
-                if (s->effect == SE_HEAL) {
-                    p->info.health = fmin(p->info.health + s->damage, p->info.max_health);
-                }
-            }
-        } else {
-            LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
+        execute_spell(p, s, a->target, target);
+        set_spell_animation(s->cast_animation, a->target);
+        if (s->effect != SE_NONE && target != NULL) {
+            apply_effect(s, target);
         }
-    } else if (a->action == PA_CANT_PLAY) {
+    } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             p->animation_state = PAS_STUNNED;
@@ -1391,12 +1429,9 @@ void play_effects() {
         player_info *info = &player->info;
         info->x = updates[i].position.x;
         info->y = updates[i].position.y;
-        if (info->effect == SE_BURN) {
-            info->health -= info->spell_effect->damage;
-            LOG("player took a tick of burn and has %d hp left", player->info.health);
-            player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-            player->animation_state = PAS_BURNING;
-            PlaySound(burn_sound);
+        if (info->effect != SE_NONE) {
+            execute_spell(player, info->spell_effect, V(info->x, info->y), player);
+            set_spell_animation(info->spell_effect->effect_animation, V(info->x, info->y));
         }
     }
 }
@@ -1588,11 +1623,11 @@ void render_scene_in_game() {
             render_player(player);
         }
 
-        if (attack_animation != NO_ANIMATION) {
-            Vector2 position = grid2screen(attack_cell);
-            DrawSpriteFromSheet(attack_sprites, attack_animation, position, 1);
-            if (anim_finished(attack_animation)) {
-                attack_animation = NO_ANIMATION;
+        if (current_spell_animation != NO_ANIMATION) {
+            Vector2 position = grid2screen(spell_animation_cell);
+            DrawSpriteFromSheet(animation_sprite, current_spell_animation, position, 1);
+            if (anim_finished(current_spell_animation)) {
+                current_spell_animation = NO_ANIMATION;
             }
         }
 

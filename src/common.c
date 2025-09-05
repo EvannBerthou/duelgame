@@ -27,7 +27,7 @@ void LOG_(log_level level, const char *fmt, va_list args) {
     printf("%s\n", log_history[log_history_ptr]);
     log_history_ptr++;
     if (log_history_ptr == MAX_LOG_HISTORY) {
-        //TODO: Free previous log
+        // TODO: Free previous log
         log_history_ptr = 0;
     }
 }
@@ -84,7 +84,6 @@ int strtoint(const char *str, int *out) {
 // TODO: Add spells with effects (stun, root, DOT, kb)
 const spell all_spells[] = {
     {
-        .id = 0,
         .name = "Move",
         .description = "Moves the player",
         .icon = SI_MOVE,
@@ -93,18 +92,17 @@ const spell all_spells[] = {
         .speed = 100,
         .cooldown = 0,
     },
-    {.id = 1,
-     .name = "Target",
+    {.name = "Target",
+     .cast_animation = SA_SLASH,
      .icon = SI_ATTACK,
      .type = ST_TARGET,
      .damage = 25,
      .range = 3,
      .speed = 90,
      .cooldown = 0},
-    {.id = 2, .name = "Zone", .icon = SI_WAND, .type = ST_TARGET, .damage = 50, .range = 2, .speed = 80, .cooldown = 0},
-    {.id = 3, .name = "Move Slow", .icon = SI_MOVE, .type = ST_MOVE, .range = 1, .speed = 50, .cooldown = 0},
-    {.id = 4,
-     .name = "Stun",
+    {.name = "Move Slow", .icon = SI_MOVE, .type = ST_MOVE, .range = 1, .speed = 50, .cooldown = 0},
+    {.name = "Stun",
+     .cast_animation = SA_STUN,
      .icon = SI_UNKNOWN,
      .type = ST_TARGET,
      .range = 1,
@@ -112,8 +110,9 @@ const spell all_spells[] = {
      .cooldown = 4,
      .effect = SE_STUN,
      .effect_duration = 3},
-    {.id = 5,
-     .name = "Burn",
+    {.name = "Burn",
+     .cast_animation = SA_FIREBALL,
+     .effect_animation = SA_BURN,
      .icon = SI_UNKNOWN,
      .type = ST_TARGET,
      .damage = 5,
@@ -122,9 +121,9 @@ const spell all_spells[] = {
      .cooldown = 4,
      .effect = SE_BURN,
      .effect_duration = 3},
-    {.id = 6,
-     .name = "Heal",
+    {.name = "Heal",
      .description = "Heals the player for 25HP",
+     .cast_animation = SA_HEAL,
      .icon = SI_WAND,
      .type = ST_STAT,
      .damage = 25,
@@ -133,32 +132,6 @@ const spell all_spells[] = {
      .cooldown = 4,
      .effect = SE_HEAL,
      .effect_duration = 0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
-    {0},
 };
 
 const int spell_count = (int)(sizeof(all_spells) / sizeof(all_spells[0]));

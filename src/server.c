@@ -135,7 +135,7 @@ void reset_player(player_info *player) {
 }
 
 void play_round(player_info *player) {
-    if (player->action == PA_CANT_PLAY) {
+    if (player->action == PA_STUNNED) {
         LOG("Player %d can't play this round", player->id);
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
@@ -147,7 +147,7 @@ void play_round(player_info *player) {
             LOG("Player can't do this action because he is stunned");
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
-            net_packet_player_action action = pkt_player_action(player->id, PA_CANT_PLAY, player->x, player->y, 0);
+            net_packet_player_action action = pkt_player_action(player->id, PA_STUNNED, player->x, player->y, 0);
             broadcast(PKT_PLAYER_ACTION, &action);
             player->state = RS_PLAYING;
             return;
@@ -403,8 +403,9 @@ void handle_message(int fd) {
                 play_round(&players[player_round_order[i]]);
             }
             FOREACH_PLAYER(i, player) {
-                if (players->effect == SE_BURN) {
-                    players->health -= player->spell_effect->damage;
+                if (player->effect == SE_BURN) {
+                    LOG("Player is taking damage from burn tick");
+                    player->health -= player->spell_effect->damage;
                 }
                 if (player->effect_round_left > 0) {
                     player->effect_round_left--;

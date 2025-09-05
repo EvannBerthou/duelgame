@@ -39,11 +39,21 @@ typedef enum {
 
 typedef enum { SI_UNKNOWN, SI_MOVE, SI_ATTACK, SI_WAND, SI_COUNT } spell_icon;
 
+typedef enum {
+    SA_NONE,
+    SA_SLASH,
+    SA_STUN,
+    SA_FIREBALL,
+    SA_BURN,
+    SA_HEAL
+} spell_animation;
+
 typedef struct {
-    uint8_t id;
     const char* name;
     const char* description;
     uint8_t icon;
+    spell_animation cast_animation;
+    spell_animation effect_animation;
 
     spell_type_enum type;
     int damage;
@@ -95,7 +105,7 @@ typedef enum {
 typedef enum {
     PA_NONE,
     PA_SPELL,
-    PA_CANT_PLAY,
+    PA_STUNNED,
 } player_action;
 
 typedef struct {

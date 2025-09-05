@@ -32,7 +32,7 @@ void load_packer_from_memory() {
         entries[i].content = malloc(entries[i].size);
         memcpy(entries[i].content, assets_pak + base_offset + entries[i].offset, entries[i].size);
     }
-    LOG("Loaded %d assets from memory.\n", ASSET_COUNT);
+    LOG("Loaded %d assets from memory.", ASSET_COUNT);
     packer_loaded = true;
 }
 #endif
@@ -69,7 +69,7 @@ pak_entry ASSET(asset a) {
         load_packer_from_file("assets.pak");
     }
 #endif
-    LOG("Loading %d from packer.\n", a);
+    LOG("Loading %d from packer.", a);
     return entries[a];
 }
 
