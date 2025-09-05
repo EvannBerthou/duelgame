@@ -7,7 +7,9 @@
 - Generic queue
 - Anti-cheat
 - Spritesheet metadata (sprite width, etc)
-- Reorganise assets
+- Reorganise assets folder
 - Remake states (GS, state, etc)
 - Ligthing
 - Background animations
+- In game UI should move when game is resized (avoid having big gap at the top and bottom of the game)
+- Reduce draw calls

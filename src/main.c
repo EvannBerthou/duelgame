@@ -251,6 +251,7 @@ map_layer variants = {0};
 map_layer props = {0};
 map_layer props_animations = {0};
 RenderTexture2D lightmap = {0};
+RenderTexture2D ui = {0};
 
 typedef enum {
     AT_LOOP,
@@ -1545,9 +1546,39 @@ void update_scene_in_game() {
     }
 }
 
+#define OUTER_WALL_COUNT 8
+void render_outter_map() {
+    for (int i = 0; i < game_map.height; i++) {
+        Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 0);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, i)), 4, WHITE);
+        src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 3);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, i)), 4, WHITE);
+    }
+    for (int i = 0; i < game_map.width; i++) {
+        Rectangle src = get_sprite(wall_textures, WALL_ORIENTATION_COUNT, WALL_ORIENTATION_COUNT - 1);
+        DrawSpriteRecFromSheetTint(wall_textures, src, grid2screen(V(i, game_map.height)), 4, WHITE);
+        src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 5);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(i, -1)), 4, WHITE);
+
+        src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 2);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(i, game_map.height)), 4, WHITE);
+    }
+    {
+        Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 1);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, game_map.height)), 4, WHITE);
+        src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 4);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, game_map.height)), 4, WHITE);
+        src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 6);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, -1)), 4, WHITE);
+        src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 7);
+        DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, -1)), 4, WHITE);
+    }
+}
+
 void render_scene_in_game() {
     if (gs == GS_WAITING) {
         render_map();
+        render_outter_map();
         render_infos();
     } else if (gs == GS_STARTED || gs == GS_ROUND_ENDING || gs == GS_GAME_ENDING) {
         render_map();
@@ -1564,6 +1595,8 @@ void render_scene_in_game() {
                 attack_animation = NO_ANIMATION;
             }
         }
+
+        render_outter_map();
 
         if (state == RS_PLAYING) {
             render_player_actions(&players[current_player]);
@@ -2023,6 +2056,7 @@ int main(int argc, char **argv) {
     RenderTexture2D target = LoadRenderTexture(WIDTH, HEIGHT);
     SetTextureFilter(target.texture, TEXTURE_FILTER_POINT);
     lightmap = LoadRenderTexture(WIDTH, HEIGHT);
+    ui = LoadRenderTexture(WIDTH, HEIGHT);
 
     load_assets();
 
@@ -2154,36 +2188,6 @@ int main(int argc, char **argv) {
                 render_scene_lobby();
             } else if (active_scene == SCENE_IN_GAME) {
                 render_scene_in_game();
-                // TODO: HUD Should be on top
-#define OUTER_WALL_COUNT 8
-
-                for (int i = 0; i < game_map.height; i++) {
-                    Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 0);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, i)), 4, WHITE);
-                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 3);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, i)), 4, WHITE);
-                }
-                for (int i = 0; i < game_map.width; i++) {
-                    Rectangle src = get_sprite(wall_textures, WALL_ORIENTATION_COUNT, WALL_ORIENTATION_COUNT - 1);
-                    DrawSpriteRecFromSheetTint(wall_textures, src, grid2screen(V(i, game_map.height)), 4, WHITE);
-                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 5);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(i, -1)), 4, WHITE);
-
-                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 2);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(i, game_map.height)), 4, WHITE);
-                }
-                {
-                    Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 1);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, game_map.height)), 4, WHITE);
-                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 4);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, game_map.height)),
-                                               4, WHITE);
-                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 6);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(-1, -1)), 4, WHITE);
-                    src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 7);
-                    DrawSpriteRecFromSheetTint(test_wall_textures, src, grid2screen(V(game_map.width, -1)), 4, WHITE);
-                }
-                render_infos();
             } else if (active_scene == SCENE_GAME_ENDED) {
                 render_scene_round_ended();
             }
@@ -2213,6 +2217,13 @@ int main(int argc, char **argv) {
             EndTextureMode();
         }
 
+        BeginTextureMode(ui);
+        {
+            ClearBackground((Color){0, 0, 0, 0});
+            render_tooltip();
+        }
+        EndTextureMode();
+
         BeginDrawing();
         {
             ClearBackground(GetColor(0x232323FF));
@@ -2231,7 +2242,7 @@ int main(int argc, char **argv) {
                 }
                 EndBlendMode();
             }
-            render_tooltip();
+            DrawTexturePro(ui.texture, src, dest, (Vector2){0}, 0, WHITE);
             DrawText(TextFormat("FPS=%d", GetFPS()), 0, 0, 24, GREEN);
             if (connected) {
                 DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);

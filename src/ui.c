@@ -1,9 +1,7 @@
 #include "ui.h"
 #include <ctype.h>
-#include <math.h>
 #include <raylib.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 
 extern bool is_console_open();
@@ -296,7 +294,6 @@ void clear_tooltip() {
     tooltip_enabled = false;
 }
 
-//TODO: Fix because it is rendered after lightmap
 void render_tooltip() {
     if (is_console_open() || tooltip_enabled == false) {
         return;
