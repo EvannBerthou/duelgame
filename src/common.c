@@ -132,7 +132,11 @@ const spell all_spells[] = {
      .cooldown = 4,
      .effect = SE_HEAL,
      .effect_duration = 0},
-};
+    {0},
+    {0},
+    {0},
+    {0},
+    {0}};
 
 const int spell_count = (int)(sizeof(all_spells) / sizeof(all_spells[0]));
 
@@ -175,4 +179,8 @@ void free_map(map_layer *m) {
     m->height = 0;
     free(m->content);
     m->content = NULL;
+}
+
+int get_spell_damage(player_info *info, const spell *s) {
+    return s->damage + info->stats[STAT_AP].value / 4;
 }

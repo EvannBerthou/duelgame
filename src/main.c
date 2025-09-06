@@ -452,10 +452,7 @@ int action_step = 0;
 typedef struct {
     int player;
     Vector2 position;
-    int health;
-    int max_health;
-    int ad;
-    int ap;
+    net_player_stat stats[STAT_COUNT];
     spell_effect effect;
     int effect_round_left;
 } player_round_update;
@@ -831,7 +828,7 @@ void render_player(player *p) {
     } else if (p->animation_state == PAS_DAMAGE) {
         c = RED;
         if (anim_finished(p->action_animation)) {
-            if (i->health <= 0) {
+            if (i->stats[STAT_HEALTH].value <= 0) {
                 p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
                 p->animation_state = PAS_DYING;
                 current_spell_animation = NO_ANIMATION;
@@ -1024,8 +1021,8 @@ void render_infos() {
             DrawTextEx(font, TextFormat("%s", info->name), (Vector2){x, y}, 24, 1, BLACK);
         }
 
-        health_bars[i].value = player->info.health;
-        health_bars[i].max = player->info.max_health;
+        health_bars[i].value = player->info.stats[STAT_HEALTH].value;
+        health_bars[i].max = player->info.stats[STAT_HEALTH].max;
         slider_render(&health_bars[i]);
         if (slider_hover(&health_bars[i])) {
             over_player = i;
@@ -1042,7 +1039,7 @@ void render_infos() {
     if (over_player != -1) {
         player_info *i = &players[over_player].info;
         Rectangle rec = {get_mouse().x, get_mouse().y, 200, 75};
-        const char *description = TextFormat("%d/%d", i->health, i->max_health);
+        const char *description = TextFormat("%d/%d", i->stats[STAT_HEALTH].value, i->stats[STAT_HEALTH].max);
         set_tooltip(rec, "Health", description);
     }
 }
@@ -1219,12 +1216,16 @@ void handle_packet(net_packet *p) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
         LOG("Setting build for %d", b->id);
-        LOG("Build for %d is %d HP %d AD %d AP", b->id, b->base_health, b->ad, b->ap);
-        player->info.base_health = b->base_health;
-        player->info.max_health = b->base_health;
-        player->info.health = b->base_health;
-        player->info.ad = b->ad;
-        player->info.ap = b->ap;
+        LOG("Build for %d is %d HP %d AD %d AP", b->id, b->health, b->ad, b->ap);
+        player->info.stats[STAT_HEALTH].base = b->health;
+        player->info.stats[STAT_HEALTH].max = b->health;
+        player->info.stats[STAT_HEALTH].value = b->health;
+        player->info.stats[STAT_AD].base = b->ad;
+        player->info.stats[STAT_AD].max = b->ad;
+        player->info.stats[STAT_AD].value = b->ad;
+        player->info.stats[STAT_AP].base = b->ap;
+        player->info.stats[STAT_AP].max = b->ap;
+        player->info.stats[STAT_AP].value = b->ap;
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             player->info.spells[i] = b->spells[i];
         }
@@ -1252,24 +1253,23 @@ void handle_packet(net_packet *p) {
         init_in_game_ui();
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
-        LOG("Player Update %d %d %d H=%d and %d immediate", u->id, u->x, u->y, u->health, u->immediate);
+        LOG("Player Update %d %d %d H=%d AD=%d AP=%d (%d immediate)", u->id, u->x, u->y, u->stats[STAT_HEALTH].value,
+            u->stats[STAT_AD].value, u->stats[STAT_AP].value, u->immediate);
         player *player = &players[u->id];
 
         if (gs == GS_WAITING || u->immediate) {
-            player->info.health = u->health;
-            player->info.max_health = u->max_health;
-            player->info.ad = u->ad;
-            player->info.ap = u->ap;
+            for (int i = 0; i < STAT_COUNT; i++) {
+                player->info.stats[i] = u->stats[i];
+            }
             player->info.x = u->x;
             player->info.y = u->y;
             player->info.effect = u->effect;
             player->info.effect_round_left = u->effect_round_left;
         } else {
             updates[u->id].position = (Vector2){u->x, u->y};
-            updates[u->id].health = u->health;
-            updates[u->id].max_health = u->max_health;
-            updates[u->id].ad = u->ad;
-            updates[u->id].ap = u->ap;
+            for (int i = 0; i < STAT_COUNT; i++) {
+                updates[u->id].stats[i] = u->stats[i];
+            }
             updates[u->id].effect = u->effect;
             updates[u->id].effect_round_left = u->effect_round_left;
         }
@@ -1330,7 +1330,7 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
         case SA_NONE:
             break;
         case SA_SLASH:
-            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
+            current_spell_animation = new_animation(AT_ONESHOT, 3.f / 3.f, SLASH_ANIMATION_COUNT);
             animation_sprite = slash_attack;
             spell_animation_cell = target;
             PlaySound(attack_sound);
@@ -1365,7 +1365,8 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
 void apply_effect(const spell *s, player *target) {
     // We handle immediate effect first
     if (s->effect == SE_HEAL) {
-        target->info.health = fmin(target->info.health + s->damage, target->info.max_health);
+        target->info.stats[STAT_HEALTH].value =
+            fmin(target->info.stats[STAT_HEALTH].value + s->damage, target->info.stats[STAT_HEALTH].max);
     } else {
         target->info.effect = s->effect;
         target->info.effect_round_left = s->effect_duration;
@@ -1385,7 +1386,8 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
         }
     } else if (s->type == ST_TARGET) {
         if (target != NULL) {
-            target->info.health -= s->damage;
+            target->info.stats[STAT_HEALTH].value -= get_spell_damage(&p->info, s);
+            LOG("Player %s now has %d HP", target->info.name, target->info.stats[STAT_HEALTH].value);
             target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
             target->animation_state = PAS_DAMAGE;
         }
@@ -1438,9 +1440,9 @@ void play_effects() {
 
 void end_round() {
     FOREACH_PLAYER(i, player) {
-        player->info.health = updates[i].health;
-        player->info.ad = updates[i].ad;
-        player->info.ap = updates[i].ap;
+        for (int i = 0; i < STAT_COUNT; i++) {
+            player->info.stats[i] = updates[i].stats[i];
+        }
         player->info.x = updates[i].position.x;
         player->info.y = updates[i].position.y;
         player->info.effect = updates[i].effect;
@@ -1555,7 +1557,7 @@ void update_scene_in_game() {
             }
             if (wait_for_animations()) {
                 FOREACH_PLAYER(i, player) {
-                    if (player->info.health <= 0 && player->dead == false) {
+                    if (player->info.stats[STAT_HEALTH].value <= 0 && player->dead == false) {
                         player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
                         player->animation_state = PAS_DYING;
                         PlaySound(death_sound);
@@ -1649,8 +1651,9 @@ void render_scene_in_game() {
             Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
             Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
-                set_tooltip((Rectangle){mp.x, mp.y, 350, 150}, player->info.name,
-                            TextFormat("AD=%d\nAP=%d", player->info.ad, player->info.ap));
+                set_tooltip(
+                    (Rectangle){mp.x, mp.y, 350, 150}, player->info.name,
+                    TextFormat("AD=%d\nAP=%d", player->info.stats[STAT_AD].value, player->info.stats[STAT_AP].value));
             }
         }
 
@@ -1775,9 +1778,9 @@ void render_scene_lobby() {
         player *p = &players[selected_player_build];
         player_info *info = &p->info;
         int x = player_build_card.rec.x + 25;
-        DrawText(TextFormat("Health = %d", info->max_health), x, header.y + 64, 32, WHITE);
-        DrawText(TextFormat("AD = %d", info->ad), x, header.y + 96, 32, WHITE);
-        DrawText(TextFormat("AP = %d", info->ap), x, header.y + 128, 32, WHITE);
+        DrawText(TextFormat("Health = %d", info->stats[STAT_HEALTH].max), x, header.y + 64, 32, WHITE);
+        DrawText(TextFormat("AD = %d", info->stats[STAT_AD].value), x, header.y + 96, 32, WHITE);
+        DrawText(TextFormat("AP = %d", info->stats[STAT_AP].value), x, header.y + 128, 32, WHITE);
         DrawText("Spells", x, header.y + 160, 32, WHITE);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             Rectangle icon = icons[all_spells[info->spells[i]].icon];
@@ -1815,6 +1818,9 @@ button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
 button *spell_select_buttons;
 bool *spell_selection;
 
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
 const char *try_join() {
     int total = 0;
     for (int i = 0; i < spell_count; i++) {
@@ -1822,7 +1828,7 @@ const char *try_join() {
     }
 
     if (total != MAX_SPELL_COUNT) {
-        return "You need to select MAX_SPELL_COUNT spells";
+        return "You need to select " STR(MAX_SPELL_COUNT) " spells";
     }
 
     int ptr = 0;
@@ -1976,8 +1982,8 @@ void render_scene_main_menu() {
             button_render(&spell_select_buttons[i]);
             total += spell_selection[i] == true;
         }
-        DrawText(TextFormat("Total : %d/%d", total, 4), player_info_card.rec.x + 8, server_info_card.rec.y + 75, 32,
-                 WHITE);
+        DrawText(TextFormat("Total : %d/%d", total, MAX_SPELL_COUNT), player_info_card.rec.x + 8,
+                 server_info_card.rec.y + 75, 32, WHITE);
         if (button_tooltip != -1) {
             render_spell_tooltip(&all_spells[button_tooltip]);
         }
@@ -2130,7 +2136,7 @@ int main(int argc, char **argv) {
                 spell_select_buttons[i].muted = true;
                 spell_selection[i] = false;
             }
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
                 spell_selection[i] = true;
                 spell_select_buttons[i].color = DARKGRAY;
             }

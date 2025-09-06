@@ -12,14 +12,29 @@ typedef enum {
     TYPE_UINT8_ARRAY,
     TYPE_CHAR_ARRAY,
     TYPE_UINT64,
+    TYPE_CUSTOM,
 } net_struct_field_type;
 
 typedef struct {
     net_struct_field_type type;
+    const char *custom_type;
     const char *name;
     int array_size;
     const char *size;
+    const char *array_size_str;
 } struct_field;
+
+typedef struct {
+    const char *name;
+    struct_field fields[128];
+    int field_count;
+    int variable_size;
+} net_struct;
+
+net_struct structs[128] = {0};
+int structs_count = 0;
+
+int get_struct_size(net_struct *s);
 
 int get_field_size(struct_field *f) {
     if (f->type == TYPE_CHAR_ARRAY) {
@@ -32,19 +47,18 @@ int get_field_size(struct_field *f) {
         return 0;
     } else if (f->type == TYPE_UINT64) {
         return sizeof(uint64_t);
+    } else if (f->type == TYPE_CUSTOM) {
+        for (int i = 0; i < structs_count; i++) {
+            if (strcmp(f->name, structs[i].name) == 0) {
+                return get_struct_size(&structs[i]);
+            }
+        }
     } else {
         printf("Unknown field\n");
         exit(1);
     }
     return 0;
 }
-
-typedef struct {
-    const char *name;
-    struct_field fields[128];
-    int field_count;
-    int variable_size;
-} net_struct;
 
 int get_struct_size(net_struct *s) {
     int sum = 0;
@@ -54,15 +68,23 @@ int get_struct_size(net_struct *s) {
     return sum;
 }
 
-net_struct structs[128] = {0};
-int structs_count = 0;
-
 const char *struct_upper(net_struct *s) {
     int offset = strlen("net_packet_");
     static char upper[128] = {0};
     int len = strlen(s->name) - offset;
     for (int x = 0; x < len; x++) {
         upper[x] = toupper(s->name[offset + x]);
+    }
+    upper[len] = 0;
+    return upper;
+}
+
+const char *struct_upper_str(const char *s) {
+    int offset = strlen("net_packet_");
+    static char upper[128] = {0};
+    int len = strlen(s) - offset;
+    for (int x = 0; x < len; x++) {
+        upper[x] = toupper(s[offset + x]);
     }
     upper[len] = 0;
     return upper;
@@ -90,7 +112,7 @@ void expect_next_token_char(stb_lexer *l, long c) {
     if (l->token != c) {
         stb_lex_location loc = {0};
         stb_c_lexer_get_location(l, l->where_firstchar, &loc);
-        printf("%d:%d: ERROR: expected %ld, but got %ld\n", loc.line_number, loc.line_offset, c, l->token);
+        printf("%d:%d: ERROR: expected char %c but got %ld\n", loc.line_number, loc.line_offset, (char)c, l->token);
         exit(1);
     }
 }
@@ -170,8 +192,30 @@ void parse_struct(stb_lexer *l) {
             f->type = TYPE_UINT64;
             expect_next_token(l, CLEX_id);
             f->name = strdup(l->string);
+            // TODO: Should work with any struct
         } else {
-            printf("Unknown type %s\n", l->string);
+            int exists = 0;
+            for (int i = 0; i < structs_count; i++) {
+                if (strcmp(l->string, structs[i].name) == 0) {
+                    exists = 1;
+                    break;
+                }
+            }
+            if (exists) {
+                f->type = TYPE_CUSTOM;
+                f->custom_type = strdup(l->string);
+                expect_next_token(l, CLEX_id);
+                f->name = strdup(l->string);
+                if (is_next_token_char(l, '[')) {
+                    expect_next_token_char(l, '[');
+                    expect_next_token(l, CLEX_id);
+                    f->array_size_str = strdup(l->string);
+                    expect_next_token_char(l, ']');
+                }
+            } else {
+                fprintf(stderr, "Structure %s does not exists\n", l->string);
+                exit(1);
+            }
         }
 
         if (is_next_token_size(l)) {
@@ -252,6 +296,8 @@ int main(void) {
                 printf("const char *%s", f->name);
             } else if (f->type == TYPE_UINT64) {
                 printf("uint64_t %s", f->name);
+            } else if (f->type == TYPE_CUSTOM) {
+                printf("%s *%s", f->custom_type, f->name);
             }
 
             if (j != s->field_count - 1) {
@@ -260,7 +306,6 @@ int main(void) {
         }
         printf(");\n");
     }
-
 
     printf("#ifdef NET_PROTOCOL_IMPLEMENTATION\n");
 
@@ -306,8 +351,9 @@ int main(void) {
                 printf("const char *%s", f->name);
             } else if (f->type == TYPE_UINT64) {
                 printf("uint64_t %s", f->name);
+            } else if (f->type == TYPE_CUSTOM) {
+                printf("%s *%s", f->custom_type, f->name);
             }
-
             if (j != s->field_count - 1) {
                 printf(", ");
             }
@@ -325,10 +371,14 @@ int main(void) {
             } else if (f->type == TYPE_UINT8_ARRAY) {
                 printf("    memcpy(s->%s, %s, %s);\n", f->name, f->name, f->size);
             } else if (f->type == TYPE_CHAR_ARRAY) {
-                //TODO: Use strcpy ?
+                // TODO: Use strcpy ?
                 printf("    memcpy(s->%s, %s, %d);\n", f->name, f->name, f->array_size);
             } else if (f->type == TYPE_UINT64) {
                 printf("    s->%s = %s;\n", f->name, f->name);
+            } else if (f->type == TYPE_CUSTOM) {
+                printf("    for (int i = 0; i < %s; i++) {\n", f->array_size_str);
+                printf("        s->%s[i] = %s[i];\n", f->name, f->name);
+                printf("    }\n");
             }
         }
         printf("    return result;\n");
@@ -362,6 +412,16 @@ int main(void) {
                     printf("            }\n");
                 } else if (f->type == TYPE_UINT64) {
                     printf("            buf = packu64(buf, s->%s);\n", f->name);
+                } else if (f->type == TYPE_CUSTOM) {
+                    if (f->array_size_str != NULL) {
+                        printf("            for (int i = 0; i < %s; i++) {\n", f->array_size_str);
+                        printf("                buf = packstruct(buf, &s->%s[i], PKT_%s);\n", f->name,
+                               struct_upper_str(f->custom_type));
+                        printf("            }\n");
+                    } else {
+                        printf("TODO %d", __LINE__);
+                        exit(1);
+                    }
                 }
             }
         }
@@ -404,6 +464,19 @@ int main(void) {
                     printf("            }\n");
                 } else if (f->type == TYPE_UINT64) {
                     printf("            s->%s = unpacku64(base);\n", f->name);
+                } else if (f->type == TYPE_CUSTOM) {
+                    if (f->array_size_str != NULL) {
+                        printf("            for (int i = 0; i < %s; i++) {\n", f->array_size_str);
+                        printf("                void *res = unpackstruct(PKT_%s, *base);\n",
+                               struct_upper_str(f->custom_type));
+                        printf("                s->%s[i] = *(%s*)res;\n", f->name, f->custom_type);
+                        printf("                free(res);\n");
+                        printf("                *base += sizeof(%s);\n", f->custom_type);
+                        printf("            }\n");
+                    } else {
+                        printf("TODO %d", __LINE__);
+                        exit(1);
+                    }
                 }
             }
             printf("            return s;\n");

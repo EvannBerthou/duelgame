@@ -89,9 +89,7 @@ int ci(int a) {
 }
 
 net_packet_player_update pkt_from_info(player_info *p) {
-    uint8_t health = p->health >= 0 ? p->health : 0;
-    return pkt_player_update(p->id, health, p->max_health, p->ad, p->ap, p->x, p->y, p->effect, p->effect_round_left,
-                             false);
+    return pkt_player_update(p->id, p->stats, p->x, p->y, p->effect, p->effect_round_left, false);
 }
 
 void broadcast(net_packet_type_enum type, void *content) {
@@ -104,26 +102,29 @@ void broadcast(net_packet_type_enum type, void *content) {
 
 void heal_player(player_info *p, const spell *s) {
     LOG("Healing player %s", p->name);
-    p->health = fmin(fmax(p->health + s->damage, 0), p->max_health);
+    p->stats[STAT_HEALTH].value = fmin(fmax(p->stats[STAT_HEALTH].value + s->damage, 0), p->stats[STAT_HEALTH].max);
     net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
 
-void damage_player(player_info *p, const spell *s) {
-    p->health = fmin(fmax(p->health - s->damage, 0), p->max_health);
+void damage_player(player_info *from, player_info *to, const spell *s) {
+    int damage = get_spell_damage(from, s);
+    to->stats[STAT_HEALTH].value = fmin(fmax(to->stats[STAT_HEALTH].value - damage, 0), to->stats[STAT_HEALTH].max);
     if (s->effect != SE_NONE) {
-        p->effect = s->effect;
-        p->effect_round_left = s->effect_duration;
-        p->spell_effect = s;
+        to->effect = s->effect;
+        to->effect_round_left = s->effect_duration;
+        to->spell_effect = s;
     }
 
-    net_packet_player_update u = pkt_from_info(p);
+    net_packet_player_update u = pkt_from_info(to);
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
 
 void reset_player(player_info *player) {
-    player->max_health = player->base_health;
-    player->health = player->base_health;
+    for (int i = 0; i < STAT_COUNT; i++) {
+        player->stats[i].max = player->stats[i].base;
+        player->stats[i].value = player->stats[i].base;
+    }
     player->x = spawn_positions[player->id][0];
     player->y = spawn_positions[player->id][1];
     player->effect = SE_NONE;
@@ -185,7 +186,7 @@ void play_round(player_info *player) {
         } else if (s->type == ST_TARGET) {
             FOREACH_PLAYER(i, other) {
                 if (other->x == player->ax && other->y == player->ay) {
-                    damage_player(other, s);
+                    damage_player(player, other, s);
                 }
             }
         } else if (s->type == ST_STAT) {
@@ -323,12 +324,12 @@ void handle_message(int fd) {
         // We send previously connected players informations to the new player
         FOREACH_PLAYER(i, player) {
             if (clients[i] != fd) {
-                player_info *player = &players[i];
                 net_packet_join other_user_join = pkt_join(i, player->name);
                 send_sock(PKT_JOIN, &other_user_join, fd);
 
                 net_packet_player_build b =
-                    pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
+                    pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                     player->stats[STAT_AD].value, player->stats[STAT_AP].value);
                 send_sock(PKT_PLAYER_BUILD, &b, fd);
 
                 net_packet_player_update u = pkt_from_info(player);
@@ -372,11 +373,17 @@ void handle_message(int fd) {
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             player->spells[i] = b->spells[i];
         }
-        player->base_health = b->base_health;
-        player->max_health = b->base_health;
-        player->health = player->max_health;
-        player->ad = b->ad;
-        player->ap = b->ap;
+        player->stats[STAT_HEALTH].base = b->health;
+        player->stats[STAT_HEALTH].max = b->health;
+        player->stats[STAT_HEALTH].value = b->health;
+
+        player->stats[STAT_AD].base = b->ad;
+        player->stats[STAT_AD].max = b->ad;
+        player->stats[STAT_AD].value = b->ad;
+
+        player->stats[STAT_AP].base = b->ap;
+        player->stats[STAT_AP].max = b->ap;
+        player->stats[STAT_AP].value = b->ap;
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
@@ -397,6 +404,7 @@ void handle_message(int fd) {
             }
         }
 
+        // TODO: Rework this part ?
         if (all_played) {
             sort_actions();
             FOREACH_PLAYER(i, player) {
@@ -405,7 +413,7 @@ void handle_message(int fd) {
             FOREACH_PLAYER(i, player) {
                 if (player->effect == SE_BURN) {
                     LOG("Player is taking damage from burn tick");
-                    player->health -= player->spell_effect->damage;
+                    player->stats[STAT_HEALTH].value -= get_spell_damage(player, player->spell_effect);
                 }
                 if (player->effect_round_left > 0) {
                     player->effect_round_left--;
@@ -419,7 +427,7 @@ void handle_message(int fd) {
 
             int alive_count = 0;
             FOREACH_PLAYER(i, player) {
-                if (player->health > 0) {
+                if (player->stats[STAT_HEALTH].value > 0) {
                     alive_count++;
                 }
             }
@@ -428,7 +436,7 @@ void handle_message(int fd) {
                 uint8_t end_verdict = GAME_TIE;
                 if (alive_count == 1) {
                     FOREACH_PLAYER(i, player) {
-                        if (player->health > 0) {
+                        if (player->stats[STAT_HEALTH].value > 0) {
                             LOG("Player %s won the round !", players[i].name);
                             end_verdict = i;
                             round_scores[i]++;
@@ -464,7 +472,8 @@ void handle_message(int fd) {
             FOREACH_PLAYER(i, player) {
                 reset_player(player);
                 net_packet_player_build b =
-                    pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
+                    pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                     player->stats[STAT_AD].value, player->stats[STAT_AP].value);
                 broadcast(PKT_PLAYER_BUILD, &b);
 
                 net_packet_player_update u = pkt_from_info(player);
@@ -492,8 +501,8 @@ void handle_message(int fd) {
             net_packet_join other_user_join = pkt_join(i, player->name);
             broadcast(PKT_JOIN, &other_user_join);
 
-            net_packet_player_build b =
-                pkt_player_build(player->id, player->base_health, player->spells, player->ad, player->ap);
+            net_packet_player_build b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                                         player->stats[STAT_AD].value, player->stats[STAT_AP].value);
             broadcast(PKT_PLAYER_BUILD, &b);
 
             net_packet_player_update u = pkt_from_info(player);
@@ -514,9 +523,9 @@ void handle_message(int fd) {
         if (is_admin(fd)) {
             net_packet_admin_update_player_info *info = (net_packet_admin_update_player_info *)p.content;
             if (info->property == PIP_HEALTH) {
-                players[info->id].health = info->value;
-                if (players[info->id].health > players[info->id].max_health) {
-                    players[info->id].max_health = info->value;
+                players[info->id].stats[STAT_HEALTH].value = info->value;
+                if (players[info->id].stats[STAT_HEALTH].value > players[info->id].stats[STAT_HEALTH].max) {
+                    players[info->id].stats[STAT_HEALTH].max = info->value;
                 }
                 net_packet_player_update u = pkt_from_info(&players[info->id]);
                 u.immediate = true;

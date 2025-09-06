@@ -3,6 +3,16 @@
 
 #define NET_SIZE(...)
 
+// Hacky to allow redefinition of net_player_stat. Builder will parse it so it knows about the structure but the compiler will not see it.
+// TODO: remove this
+#if 0
+typedef struct {
+    uint8_t base;
+    uint8_t max;
+    uint8_t value;
+} net_player_stat;
+#endif
+
 typedef struct {
     uint64_t send_time;
     uint64_t recieve_time;
@@ -35,10 +45,7 @@ typedef struct {
 
 typedef struct {
     uint8_t id;
-    uint8_t health;
-    uint8_t max_health;
-    uint8_t ad;
-    uint8_t ap;
+    net_player_stat stats[STAT_COUNT] NET_SIZE("sizeof(net_player_stat) * STAT_COUNT");
     uint8_t x;
     uint8_t y;
     uint8_t effect;
@@ -52,7 +59,7 @@ typedef struct {
 // Includes stats and spells
 typedef struct {
     uint8_t id;
-    uint8_t base_health;
+    uint8_t health;
     uint8_t spells[MAX_SPELL_COUNT] NET_SIZE("MAX_SPELL_COUNT");
     uint8_t ad;
     uint8_t ap;

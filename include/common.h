@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "raylib.h"
 
 int strtoint(const char* str, int* out);
 
@@ -19,7 +20,7 @@ typedef enum {
 void LOG(const char* fmt, ...);
 void LOGL(log_level level, const char* fmt, ...);
 
-#define MAX_SPELL_COUNT 4
+#define MAX_SPELL_COUNT 8
 #define MAX_PLAYER_COUNT 4
 
 typedef enum {
@@ -109,15 +110,32 @@ typedef enum {
 } player_action;
 
 typedef struct {
+    uint8_t base;
+    uint8_t max;
+    uint8_t value;
+} net_player_stat;
+
+typedef enum {
+    STAT_HEALTH,
+    STAT_AP,
+    STAT_AD,
+    STAT_SPEED,
+    STAT_CRIT,
+    STAT_COUNT
+} stat_type;
+
+
+typedef struct {
     uint8_t id;
     bool connected;
     char name[9];
     uint8_t x, y;
-    uint8_t base_health;
-    uint8_t max_health;
-    int health;
-    uint8_t ad;
-    uint8_t ap;
+    net_player_stat stats[STAT_COUNT];
+    // uint8_t base_health;
+    // uint8_t max_health;
+    // int health;
+    // uint8_t ad;
+    // uint8_t ap;
 
     round_state state;
     player_action action;
@@ -136,5 +154,8 @@ const char* get_log(int idx);
 log_level get_level(int idx);
 int get_log_count();
 void clear_logs();
+
+
+int get_spell_damage(player_info *info, const spell *s);
 
 #endif
