@@ -928,7 +928,7 @@ void render_spell_actions(player *p) {
 void render_spell_tooltip(const spell *s) {
     Rectangle rec = {get_mouse().x, get_mouse().y, 400, 150};
     const char *description =
-        TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage, s->range, s->speed);
+        TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->value, s->range, s->speed);
     set_tooltip(rec, s->name, description);
 }
 
@@ -1359,18 +1359,24 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
             spell_animation_cell = target;
             PlaySound(heal_sound);
             break;
-    }
-}
-
-void apply_effect(const spell *s, player *target) {
-    // We handle immediate effect first
-    if (s->effect == SE_HEAL) {
-        target->info.stats[STAT_HEALTH].value =
-            fmin(target->info.stats[STAT_HEALTH].value + s->damage, target->info.stats[STAT_HEALTH].max);
-    } else {
-        target->info.effect = s->effect;
-        target->info.effect_round_left = s->effect_duration;
-        target->info.spell_effect = s;
+        case SA_FOCUS:
+        case SA_POISON_CAST:
+        case SA_POISON_TICK:
+        case SA_ICE_CAST:
+        case SA_ICE_TICK:
+        case SA_SACRIFY:
+        case SA_BLOCK:
+        case SA_CLEANSE:
+        case SA_BANISH:
+        case SA_REVERT:
+        case SA_FORTIFY:
+        case SA_SLOWDOWN:
+        case SA_SPEEDUP:
+            current_spell_animation = new_animation(AT_ONESHOT, 3.f / 3.f, SLASH_ANIMATION_COUNT);
+            animation_sprite = slash_attack;
+            spell_animation_cell = target;
+            PlaySound(attack_sound);
+            break;
     }
 }
 
@@ -1390,6 +1396,14 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
             LOG("Player %s now has %d HP", target->info.name, target->info.stats[STAT_HEALTH].value);
             target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
             target->animation_state = PAS_DAMAGE;
+        }
+    } else if (s->type == ST_STAT) {
+        if (s->stat_max) {
+            target->info.stats[s->stat].max = fmin(target->info.stats[s->stat].max + s->value, 200);
+            target->info.stats[s->stat].value = fmin(target->info.stats[s->stat].value + s->value, 200);
+        } else {
+            target->info.stats[s->stat].value =
+                fmin(target->info.stats[s->stat].value + s->value, target->info.stats[s->stat].max);
         }
     } else {
         LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
@@ -1415,7 +1429,9 @@ void play_round() {
         execute_spell(p, s, a->target, target);
         set_spell_animation(s->cast_animation, a->target);
         if (s->effect != SE_NONE && target != NULL) {
-            apply_effect(s, target);
+            target->info.effect = s->effect;
+            target->info.effect_round_left = s->effect_duration;
+            target->info.spell_effect = s;
         }
     } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left > 0) {
@@ -1440,8 +1456,8 @@ void play_effects() {
 
 void end_round() {
     FOREACH_PLAYER(i, player) {
-        for (int i = 0; i < STAT_COUNT; i++) {
-            player->info.stats[i] = updates[i].stats[i];
+        for (int j = 0; j < STAT_COUNT; j++) {
+            player->info.stats[j] = updates[i].stats[j];
         }
         player->info.x = updates[i].position.x;
         player->info.y = updates[i].position.y;

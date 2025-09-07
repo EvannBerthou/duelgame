@@ -2,26 +2,27 @@ Spell ideas
 
 Offensive spells :
 
-- Burn => Fixed damage
+- Burn => Fixed damage X
 - Poison => % remanining health scaling damage
 - Ice => Damage + reduces target speed
 - Sacrify => Dies but deals lot of damage around you. Can be blocked
+- Focus => Increases next spell damage. Has a 1 turn action cooldown
 
 Defensive spells :
 
 - Blocking => If casted first, will block the next attack. If the ennemy hits with a physical attack, he will be stunned. Has low speed by default so it needs some setup (more speed on stats or other bonuses)
-- Speed boost => Increase the speed of the next spell
 - Knockback => Pushed the player. If he hits an obstacle he is stunned
-
-Stat spells :
-
-- Fortify => Increases max health
-- Focus => Increases next spell damage. Has a 1 turn action cooldown
+- Cleanse => Removes all effects
 - Banish => Target can't use last spell until the end of the round. Can only be used once per round.
     - If casted first, it will ban the spell used in the previous turn (or any previous turn)
     - If casted second, it will ban the sell used during the turn
 - Revert => If casted first does nothing. If casted second, cancels last recieved damage and sends some to the caster.
+
+Stat spells :
+
+- Fortify => Increases max health by 15HP
 - Slow down => Reduces the speed of the target until the end of the round
+- Speed boost => Increase the speed of the next spell
 
 Movement spells :
 

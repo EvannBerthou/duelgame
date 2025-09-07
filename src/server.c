@@ -100,9 +100,13 @@ void broadcast(net_packet_type_enum type, void *content) {
     }
 }
 
-void heal_player(player_info *p, const spell *s) {
-    LOG("Healing player %s", p->name);
-    p->stats[STAT_HEALTH].value = fmin(fmax(p->stats[STAT_HEALTH].value + s->damage, 0), p->stats[STAT_HEALTH].max);
+void update_stats(player_info *p, const spell *s) {
+    if (s->stat_max) {
+        p->stats[s->stat].max = fmin(p->stats[s->stat].max + s->value, 200);
+        p->stats[s->stat].value = fmin(p->stats[s->stat].value + s->value, 200);
+    } else {
+        p->stats[s->stat].value = fmin(fmax(p->stats[s->stat].value + s->value, 0), p->stats[s->stat].max);
+    }
     net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
@@ -190,9 +194,7 @@ void play_round(player_info *player) {
                 }
             }
         } else if (s->type == ST_STAT) {
-            if (s->effect == SE_HEAL) {
-                heal_player(player, s);
-            }
+            update_stats(player, s);
         } else {
             LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
         }

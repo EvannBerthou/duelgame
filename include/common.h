@@ -24,17 +24,20 @@ void LOGL(log_level level, const char* fmt, ...);
 #define MAX_PLAYER_COUNT 4
 
 typedef enum {
+    ST_UNKNOWN,
     ST_MOVE,
     ST_TARGET,
     ST_ZONE,
-    ST_STAT, //TODO: Should just be a target ?
+    ST_AROUND,
+    ST_STAT,
 } spell_type_enum;
 
 typedef enum {
     SE_NONE,
     SE_STUN,
     SE_BURN,
-    SE_HEAL,
+    SE_POISON,
+    SE_SLOW,
     SE_COUNT,
 } spell_effect;
 
@@ -43,11 +46,33 @@ typedef enum { SI_UNKNOWN, SI_MOVE, SI_ATTACK, SI_WAND, SI_COUNT } spell_icon;
 typedef enum {
     SA_NONE,
     SA_SLASH,
+    SA_FOCUS,
     SA_STUN,
     SA_FIREBALL,
     SA_BURN,
-    SA_HEAL
+    SA_POISON_CAST,
+    SA_POISON_TICK,
+    SA_ICE_CAST,
+    SA_ICE_TICK,
+    SA_SACRIFY,
+    SA_BLOCK,
+    SA_CLEANSE,
+    SA_BANISH,
+    SA_REVERT,
+    SA_HEAL,
+    SA_FORTIFY,
+    SA_SLOWDOWN,
+    SA_SPEEDUP,
 } spell_animation;
+
+typedef enum {
+    STAT_HEALTH,
+    STAT_AP,
+    STAT_AD,
+    STAT_SPEED,
+    STAT_CRIT,
+    STAT_COUNT
+} stat_type;
 
 typedef struct {
     const char* name;
@@ -57,7 +82,9 @@ typedef struct {
     spell_animation effect_animation;
 
     spell_type_enum type;
-    int damage;
+    stat_type stat;
+    bool stat_max;
+    int value;
     uint8_t range;
     uint8_t zone_size;
     uint8_t speed;
@@ -115,27 +142,12 @@ typedef struct {
     uint8_t value;
 } net_player_stat;
 
-typedef enum {
-    STAT_HEALTH,
-    STAT_AP,
-    STAT_AD,
-    STAT_SPEED,
-    STAT_CRIT,
-    STAT_COUNT
-} stat_type;
-
-
 typedef struct {
     uint8_t id;
     bool connected;
     char name[9];
     uint8_t x, y;
     net_player_stat stats[STAT_COUNT];
-    // uint8_t base_health;
-    // uint8_t max_health;
-    // int health;
-    // uint8_t ad;
-    // uint8_t ap;
 
     round_state state;
     player_action action;
@@ -155,7 +167,6 @@ log_level get_level(int idx);
 int get_log_count();
 void clear_logs();
 
-
-int get_spell_damage(player_info *info, const spell *s);
+int get_spell_damage(player_info* info, const spell* s);
 
 #endif

@@ -294,6 +294,7 @@ void clear_tooltip() {
     tooltip_enabled = false;
 }
 
+//TODO: tooltip should fit the longest line
 void render_tooltip() {
     if (is_console_open() || tooltip_enabled == false) {
         return;
