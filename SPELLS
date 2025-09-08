@@ -40,3 +40,13 @@ Stats ideas
     - It forces the player to decide if he wants to use his crit now or wait for the next opportunity
 - Speed => Increase all spells speed. Has a base of 0 but can be negative. Should it give more points ?
     - Enables low speed builds
+
+To implements :
+
+Dodge
+Focus
+Sacrify => Implement ST_AROUND
+Block
+Banish
+Revert
+Knockback => Need to compute the direction

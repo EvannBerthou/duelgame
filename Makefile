@@ -1,4 +1,4 @@
-all: build/main_game build/server build/admin
+all: build/main_game build/server
 
 $(shell mkdir -p build)
 

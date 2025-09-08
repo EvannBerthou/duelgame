@@ -102,10 +102,10 @@ void broadcast(net_packet_type_enum type, void *content) {
 
 void update_stats(player_info *p, const spell *s) {
     if (s->stat_max) {
-        p->stats[s->stat].max = fmin(p->stats[s->stat].max + s->value, 200);
-        p->stats[s->stat].value = fmin(p->stats[s->stat].value + s->value, 200);
+        p->stats[s->stat].max = fmin(p->stats[s->stat].max + s->stat_value, 200);
+        p->stats[s->stat].value = fmin(p->stats[s->stat].value + s->stat_value, 200);
     } else {
-        p->stats[s->stat].value = fmin(fmax(p->stats[s->stat].value + s->value, 0), p->stats[s->stat].max);
+        p->stats[s->stat].value = fmin(fmax(p->stats[s->stat].value + s->stat_value, 0), p->stats[s->stat].max);
     }
     net_packet_player_update u = pkt_from_info(p);
     broadcast(PKT_PLAYER_UPDATE, &u);
@@ -115,9 +115,15 @@ void damage_player(player_info *from, player_info *to, const spell *s) {
     int damage = get_spell_damage(from, s);
     to->stats[STAT_HEALTH].value = fmin(fmax(to->stats[STAT_HEALTH].value - damage, 0), to->stats[STAT_HEALTH].max);
     if (s->effect != SE_NONE) {
-        to->effect = s->effect;
-        to->effect_round_left = s->effect_duration;
-        to->spell_effect = s;
+        if (s->effect == SE_CLEANSE) {
+            to->effect = SE_NONE;
+            to->effect_round_left = 0;
+            to->spell_effect = NULL;
+        } else {
+            to->effect = s->effect;
+            to->effect_round_left = s->effect_duration;
+            to->spell_effect = s;
+        }
     }
 
     net_packet_player_update u = pkt_from_info(to);
@@ -190,11 +196,16 @@ void play_round(player_info *player) {
         } else if (s->type == ST_TARGET) {
             FOREACH_PLAYER(i, other) {
                 if (other->x == player->ax && other->y == player->ay) {
-                    damage_player(player, other, s);
+                    if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
+                        if (s->damage_value != 0) {
+                            damage_player(player, other, s);
+                        }
+                        if (s->stat_value != 0) {
+                            update_stats(other, s);
+                        }
+                    }
                 }
             }
-        } else if (s->type == ST_STAT) {
-            update_stats(player, s);
         } else {
             LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
         }
@@ -234,11 +245,14 @@ int compare_players_action(const void *a, const void *b) {
     const spell *s1 = &all_spells[p1->spell];
     const spell *s2 = &all_spells[p2->spell];
 
-    if (s1->speed == s2->speed) {
+    int s1_final_speed = p1->stats[STAT_SPEED].value + s1->speed;
+    int s2_final_speed = p2->stats[STAT_SPEED].value + s2->speed;
+
+    if (s1_final_speed == s2_final_speed) {
         return rand() % 2 == 0 ? 1 : -1;  // If both spell have the same speed, its random (for now ?)
     }
 
-    return all_spells[p2->spell].speed - all_spells[p1->spell].speed;
+    return s2_final_speed - s1_final_speed;
 }
 
 void sort_actions() {
@@ -329,9 +343,9 @@ void handle_message(int fd) {
                 net_packet_join other_user_join = pkt_join(i, player->name);
                 send_sock(PKT_JOIN, &other_user_join, fd);
 
-                net_packet_player_build b =
-                    pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                     player->stats[STAT_AD].value, player->stats[STAT_AP].value);
+                net_packet_player_build b = pkt_player_build(
+                    player->id, player->stats[STAT_HEALTH].base, player->spells, player->stats[STAT_AD].value,
+                    player->stats[STAT_AP].value, player->stats[STAT_SPEED].value);
                 send_sock(PKT_PLAYER_BUILD, &b, fd);
 
                 net_packet_player_update u = pkt_from_info(player);
@@ -375,6 +389,7 @@ void handle_message(int fd) {
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             player->spells[i] = b->spells[i];
         }
+        // TODO: Check that total values are not over the limit
         player->stats[STAT_HEALTH].base = b->health;
         player->stats[STAT_HEALTH].max = b->health;
         player->stats[STAT_HEALTH].value = b->health;
@@ -386,6 +401,10 @@ void handle_message(int fd) {
         player->stats[STAT_AP].base = b->ap;
         player->stats[STAT_AP].max = b->ap;
         player->stats[STAT_AP].value = b->ap;
+
+        player->stats[STAT_SPEED].base = b->speed;
+        player->stats[STAT_SPEED].max = b->speed;
+        player->stats[STAT_SPEED].value = b->speed;
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
         net_packet_player_update u = pkt_from_info(player);
         broadcast(PKT_PLAYER_UPDATE, &u);
@@ -413,13 +432,18 @@ void handle_message(int fd) {
                 play_round(&players[player_round_order[i]]);
             }
             FOREACH_PLAYER(i, player) {
-                if (player->effect == SE_BURN) {
-                    LOG("Player is taking damage from burn tick");
-                    player->stats[STAT_HEALTH].value -= get_spell_damage(player, player->spell_effect);
+                if (player->effect != SE_NONE && (player->spell_effect->cast_type == CT_EFFECT ||
+                                                  player->spell_effect->cast_type == CT_CAST_EFFECT)) {
+                    int damage = get_spell_damage(player, player->spell_effect);
+                    player->stats[STAT_HEALTH].value = fmax(player->stats[STAT_HEALTH].value - damage, 0);
                 }
                 if (player->effect_round_left > 0) {
                     player->effect_round_left--;
                     if (player->effect_round_left == 0) {
+                        // Slow effect is not permanant
+                        if (player->effect == SE_SLOW) {
+                            player->stats[STAT_SPEED].value = player->stats[STAT_SPEED].max;
+                        }
                         player->effect = SE_NONE;
                     }
                 }
@@ -473,9 +497,9 @@ void handle_message(int fd) {
         if (ready_count == player_count()) {
             FOREACH_PLAYER(i, player) {
                 reset_player(player);
-                net_packet_player_build b =
-                    pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                     player->stats[STAT_AD].value, player->stats[STAT_AP].value);
+                net_packet_player_build b = pkt_player_build(
+                    player->id, player->stats[STAT_HEALTH].base, player->spells, player->stats[STAT_AD].value,
+                    player->stats[STAT_AP].value, player->stats[STAT_SPEED].value);
                 broadcast(PKT_PLAYER_BUILD, &b);
 
                 net_packet_player_update u = pkt_from_info(player);
@@ -504,7 +528,8 @@ void handle_message(int fd) {
             broadcast(PKT_JOIN, &other_user_join);
 
             net_packet_player_build b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                                         player->stats[STAT_AD].value, player->stats[STAT_AP].value);
+                                                         player->stats[STAT_AD].value, player->stats[STAT_AP].value,
+                                                         player->stats[STAT_SPEED].value);
             broadcast(PKT_PLAYER_BUILD, &b);
 
             net_packet_player_update u = pkt_from_info(player);

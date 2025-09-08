@@ -1,5 +1,6 @@
 #include "ui.h"
 #include <ctype.h>
+#include <math.h>
 #include <raylib.h>
 #include <stdbool.h>
 #include <string.h>
@@ -208,24 +209,35 @@ void slider_render(slider *s) {
                         .layout = NPATCH_NINE_PATCH};
     DrawTextureNPatch(life_bar_bg, patch, s->rec, (Vector2){0, 0}, 0.0f, WHITE);
 
-    float percent = s->value / s->max;
     int cell_height = s->rec.height - slider_border;
 
-    int inner_x = s->rec.x + slider_border;
-    int inner_y = s->rec.y + slider_border / 2.f;
+    float range = fabsf(s->max) + fabs(s->min);
+    float inner_width = s->rec.width - slider_border * 2;
+    float single_cell_width = inner_width / range;
+    float offset = single_cell_width * fabs(s->min);
 
-    int width = percent * (s->rec.width - slider_border * 2);
+    float inner_x = s->rec.x + slider_border + offset;
+    float inner_y = s->rec.y + slider_border / 2.f;
+
+    float width = s->value * single_cell_width;
+    if (width < 0) {
+        width = -width;
+        inner_x -= width;
+    }
     Rectangle final_rect = {inner_x, inner_y, width, cell_height};
     DrawRectangleRec(final_rect, UI_RED);
+    const char *txt = TextFormat("%d", (int)s->value);
+    int center = get_width_center(s->rec, txt, cell_height);
+    DrawText(txt, center, inner_y, cell_height, WHITE);
 }
 
 // Buttonned slider
 
 bool buttoned_slider_decrement(buttoned_slider *bs) {
-    if (bs->slider.value == 0 || is_console_open()) {
+    if (bs->slider.value == bs->slider.min || is_console_open()) {
         return false;
     }
-    bs->slider.value = (bs->slider.value - bs->step > 0) ? bs->slider.value - bs->step : 0;
+    bs->slider.value = (bs->slider.value - bs->step > bs->slider.min) ? bs->slider.value - bs->step : bs->slider.min;
     return true;
 }
 
@@ -250,6 +262,7 @@ void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step)
     bs->slider.color = WHITE;
     bs->slider.max = max;
     bs->slider.value = 0;
+    bs->slider.min = 0;
     bs->slider.color = UI_RED;
     bs->step = step;
 }

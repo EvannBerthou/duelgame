@@ -92,6 +92,7 @@ typedef struct {
     Rectangle rec;
     Color color;
     float max;
+    float min;
     float value;
 } slider;
 

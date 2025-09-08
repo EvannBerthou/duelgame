@@ -192,7 +192,6 @@ void parse_struct(stb_lexer *l) {
             f->type = TYPE_UINT64;
             expect_next_token(l, CLEX_id);
             f->name = strdup(l->string);
-            // TODO: Should work with any struct
         } else {
             int exists = 0;
             for (int i = 0; i < structs_count; i++) {

@@ -1,5 +1,6 @@
 #include "common.h"
 #include <errno.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,7 +82,6 @@ int strtoint(const char *str, int *out) {
     return 1;
 }
 
-// TODO: Add spells with effects (stun, root, DOT, kb)
 const spell all_spells[] = {
     // Mouvement
     {
@@ -123,7 +123,7 @@ const spell all_spells[] = {
         .cast_animation = SA_SLASH,
         .icon = SI_ATTACK,
         .type = ST_TARGET,
-        .value = 25,
+        .damage_value = 25,
         .range = 3,
         .speed = 90,
     },
@@ -150,8 +150,9 @@ const spell all_spells[] = {
      .description = "Apply burning effect on target. Flat damage.",
      .cast_animation = SA_FIREBALL,
      .effect_animation = SA_BURN,
+     .cast_type = CT_CAST_EFFECT,
      .type = ST_TARGET,
-     .value = 5,
+     .damage_value = 5,
      .range = 1,
      .speed = 150,
      .cooldown = 4,
@@ -162,8 +163,9 @@ const spell all_spells[] = {
         .description = "Apply poison effect on target.\n% remaining health scaling damage",
         .cast_animation = SA_POISON_CAST,
         .effect_animation = SA_POISON_TICK,
+        .cast_type = CT_EFFECT,
         .type = ST_TARGET,
-        .value = 5,
+        .damage_value = 10,
         .range = 1,
         .speed = 125,
         .cooldown = 4,
@@ -171,13 +173,14 @@ const spell all_spells[] = {
         .effect_duration = 3,
     },
     {
-        .name = "Ice", //TODO: Damage + stat value
+        .name = "Ice",
         .description = "Damages the target and slows him down",
         .cast_animation = SA_ICE_CAST,
         .effect_animation = SA_ICE_TICK,
-        .type = ST_STAT,
+        .type = ST_TARGET,
         .stat = STAT_SPEED,
-        .value = -25,
+        .damage_value = 10,
+        .stat_value = -75,
         .range = 2,
         .speed = 75,
         .cooldown = 3,
@@ -189,7 +192,7 @@ const spell all_spells[] = {
         .description = "Explodes the player but deals lot of damage around. Can be blocked",
         .cast_animation = SA_SACRIFY,
         .type = ST_AROUND,
-        .value = 200,
+        .damage_value = 200,
         .range = 3,
         .speed = 150,
     },
@@ -198,7 +201,7 @@ const spell all_spells[] = {
         .name = "Block",
         .description = "If casted first, will block the next attack\nIf the ennemy is hit hits the player, the ennemy "
                        "will be stunned.",
-        .cast_animation = SA_BLOCK,  // TODO
+        .cast_animation = SA_BLOCK,
         .type = ST_TARGET,
         .range = 0,
         .speed = 50,
@@ -212,6 +215,7 @@ const spell all_spells[] = {
         .range = 0,
         .speed = 100,
         .cooldown = 3,
+        .effect = SE_CLEANSE,
     },
     {
         .name = "Banish",
@@ -229,16 +233,23 @@ const spell all_spells[] = {
      .cast_animation = SA_REVERT,
      .type = ST_TARGET,
      .range = 0,
+     .speed = 100,
      .cooldown = 3},
+    {.name = "Knockback",
+     .description = "Pushes the target 2 tiles back.\nIf it hits an obstacle, he will be stunned",
+     .cast_animation = SA_KOCKBACK,
+     .type = ST_TARGET,
+     .range = 2,
+     .speed = 100},
     // Stats
     {
         .name = "Heal",
         .description = "Heals the player for 25HP",
         .cast_animation = SA_HEAL,
         .icon = SI_WAND,
-        .type = ST_STAT,
+        .type = ST_TARGET,
         .stat = STAT_HEALTH,
-        .value = 25,
+        .stat_value = 25,
         .range = 0,
         .speed = 100,
         .cooldown = 4,
@@ -247,10 +258,9 @@ const spell all_spells[] = {
      .description = "Increases max health",
      .cast_animation = SA_FORTIFY,
      .icon = SI_WAND,
-     .type = ST_STAT,
      .stat = STAT_HEALTH,
      .stat_max = true,
-     .value = 15,
+     .stat_value = 15,
      .range = 0,
      .speed = 100,
      .cooldown = 2},
@@ -259,10 +269,10 @@ const spell all_spells[] = {
         .description = "Reduces the speed of the target",
         .cast_animation = SA_SLOWDOWN,
         .icon = SI_WAND,
-        .type = ST_STAT,
+        .type = ST_TARGET,
         .stat = STAT_SPEED,
         .stat_max = true,
-        .value = -25,
+        .stat_value = -25,
         .range = 2,
         .speed = 100,
         .cooldown = 3,
@@ -272,10 +282,10 @@ const spell all_spells[] = {
         .description = "Increases the speed of the target",
         .cast_animation = SA_SPEEDUP,
         .icon = SI_WAND,
-        .type = ST_STAT,
+        .type = ST_TARGET,
         .stat = STAT_SPEED,
         .stat_max = true,
-        .value = 25,
+        .stat_value = 25,
         .range = 2,
         .speed = 100,
         .cooldown = 3,
@@ -325,5 +335,13 @@ void free_map(map_layer *m) {
 }
 
 int get_spell_damage(player_info *info, const spell *s) {
-    return s->value + info->stats[STAT_AP].value / 4;
+    if (s->cast_type == CT_EFFECT && info->effect == SE_NONE) {
+        return 0;
+    }
+
+    if (s->effect == SE_POISON) {
+        return round(info->stats[STAT_HEALTH].value * (s->damage_value / 100.f));
+    }
+
+    return s->damage_value + info->stats[STAT_AP].value / 4;
 }

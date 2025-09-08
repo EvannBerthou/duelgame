@@ -1,12 +1,11 @@
 - Server side cooldown on spells
 - Check server side that moves are valid
 - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
-- Some kind of runes or stats customization ?
 - Better battle logging (in-game recap ?)
 - 3 player game are bugged because you can still play when you are dead
-- Generic queue
 - Anti-cheat
 - Spritesheet metadata (sprite width, etc)
+    - Atlas ?
 - Reorganise assets folder
 - Remake states (GS, state, etc)
 - Ligthing
@@ -14,3 +13,5 @@
 - In game UI should move when game is resized (avoid having big gap at the top and bottom of the game)
 - Reduce draw calls
 - Save and load builds
+- Weird animations at the end of the round when 1 burn + 2 target
+- Player disconnect handling and return to lobby is bugged again...

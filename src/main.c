@@ -236,7 +236,8 @@ Texture2D life_bar_bg = {0};
 buttoned_slider health_slider = {0};
 buttoned_slider physic_power_slider = {0};
 buttoned_slider magic_power_slider = {0};
-buttoned_slider *stat_sliders[] = {&health_slider, &physic_power_slider, &magic_power_slider};
+buttoned_slider speed_slider = {0};
+buttoned_slider *stat_sliders[] = {&health_slider, &physic_power_slider, &magic_power_slider, &speed_slider};
 const int stat_sliders_count = (int)(sizeof(stat_sliders) / sizeof(stat_sliders[0]));
 
 Texture2D icons_sheet = {0};
@@ -668,7 +669,7 @@ void compute_spell_range(player *p) {
 
 int player_cast_spell(player *p, Vector2 origin) {
     const spell *s = get_selected_spell();
-    if (s->type == ST_MOVE || s->type == ST_TARGET || s->type == ST_STAT) {
+    if (s->type == ST_MOVE || s->type == ST_TARGET) {
         return can_player_move(p, origin);
     } else {
         LOGL(LL_ERROR, "not implemented type", s->type);
@@ -900,7 +901,7 @@ void set_selected_spell(player *p, int spell) {
 
 void render_spell_actions(player *p) {
     const spell *s = get_selected_spell();
-    if (s->type == ST_MOVE || s->type == ST_TARGET || s->type == ST_STAT) {
+    if (s->type == ST_MOVE || s->type == ST_TARGET) {
         for (int x = -s->range; x <= s->range; x++) {
             for (int y = -s->range; y <= s->range; y++) {
                 const int x_pos = p->info.x + x;
@@ -928,7 +929,7 @@ void render_spell_actions(player *p) {
 void render_spell_tooltip(const spell *s) {
     Rectangle rec = {get_mouse().x, get_mouse().y, 400, 150};
     const char *description =
-        TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->value, s->range, s->speed);
+        TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage_value, s->range, s->speed);
     set_tooltip(rec, s->name, description);
 }
 
@@ -1201,9 +1202,10 @@ void handle_packet(net_packet *p) {
         int base_health = 50 + health_slider.slider.value;
         int ad = physic_power_slider.slider.value;
         int ap = magic_power_slider.slider.value;
+        int speed = 100 + speed_slider.slider.value;
         LOG("Joining with %d ad and %d ap", ad, ap);
         net_packet_player_build b =
-            pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap);
+            pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap, speed);
         send_sock(PKT_PLAYER_BUILD, &b, client_fd);
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
@@ -1226,6 +1228,9 @@ void handle_packet(net_packet *p) {
         player->info.stats[STAT_AP].base = b->ap;
         player->info.stats[STAT_AP].max = b->ap;
         player->info.stats[STAT_AP].value = b->ap;
+        player->info.stats[STAT_SPEED].base = b->speed;
+        player->info.stats[STAT_SPEED].max = b->speed;
+        player->info.stats[STAT_SPEED].value = b->speed;
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             player->info.spells[i] = b->spells[i];
         }
@@ -1292,7 +1297,6 @@ void handle_packet(net_packet *p) {
         state = RS_PLAYING_ROUND;
         winner_id = e->winner_id;
         gs = GS_ROUND_ENDING;
-        // TODO: Only update after death animation is over
         FOREACH_PLAYER(i, player) {
             futures_scores[i] = e->player_scores[i];
         }
@@ -1330,7 +1334,7 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
         case SA_NONE:
             break;
         case SA_SLASH:
-            current_spell_animation = new_animation(AT_ONESHOT, 3.f / 3.f, SLASH_ANIMATION_COUNT);
+            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
             animation_sprite = slash_attack;
             spell_animation_cell = target;
             PlaySound(attack_sound);
@@ -1369,6 +1373,7 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
         case SA_CLEANSE:
         case SA_BANISH:
         case SA_REVERT:
+        case SA_KOCKBACK:
         case SA_FORTIFY:
         case SA_SLOWDOWN:
         case SA_SPEEDUP:
@@ -1392,18 +1397,22 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
         }
     } else if (s->type == ST_TARGET) {
         if (target != NULL) {
-            target->info.stats[STAT_HEALTH].value -= get_spell_damage(&p->info, s);
-            LOG("Player %s now has %d HP", target->info.name, target->info.stats[STAT_HEALTH].value);
-            target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-            target->animation_state = PAS_DAMAGE;
-        }
-    } else if (s->type == ST_STAT) {
-        if (s->stat_max) {
-            target->info.stats[s->stat].max = fmin(target->info.stats[s->stat].max + s->value, 200);
-            target->info.stats[s->stat].value = fmin(target->info.stats[s->stat].value + s->value, 200);
-        } else {
-            target->info.stats[s->stat].value =
-                fmin(target->info.stats[s->stat].value + s->value, target->info.stats[s->stat].max);
+            int damage = get_spell_damage(&p->info, s);
+            if (damage != 0) {
+                target->info.stats[STAT_HEALTH].value = fmax(target->info.stats[STAT_HEALTH].value - damage, 0);
+                LOG("Player %s now has %d HP", target->info.name, target->info.stats[STAT_HEALTH].value);
+                target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+                target->animation_state = PAS_DAMAGE;
+            }
+            if (s->stat_value != 0) {
+                if (s->stat_max) {
+                    target->info.stats[s->stat].max = fmin(target->info.stats[s->stat].max + s->stat_value, 200);
+                    target->info.stats[s->stat].value = fmin(target->info.stats[s->stat].value + s->stat_value, 200);
+                } else {
+                    target->info.stats[s->stat].value =
+                        fmin(target->info.stats[s->stat].value + s->damage_value, target->info.stats[s->stat].max);
+                }
+            }
         }
     } else {
         LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
@@ -1414,6 +1423,9 @@ void play_round() {
     player_round_action *a = &actions[action_step];
     LOG("Playing round %d/%d for %d", action_step, action_count, a->player);
     player *p = &players[a->player];
+    if (p->dead) {
+        return;
+    }
 
     if (a->action == PA_SPELL) {
         const spell *s = &all_spells[a->spell];
@@ -1426,12 +1438,20 @@ void play_round() {
                 break;
             }
         }
-        execute_spell(p, s, a->target, target);
-        set_spell_animation(s->cast_animation, a->target);
-        if (s->effect != SE_NONE && target != NULL) {
-            target->info.effect = s->effect;
-            target->info.effect_round_left = s->effect_duration;
-            target->info.spell_effect = s;
+        if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
+            execute_spell(p, s, a->target, target);
+            set_spell_animation(s->cast_animation, a->target);
+            if (s->effect != SE_NONE && target != NULL) {
+                if (s->effect == SE_CLEANSE) {
+                    target->info.effect = SE_NONE;
+                    target->info.effect_round_left = 0;
+                    target->info.spell_effect = NULL;
+                } else {
+                    target->info.effect = s->effect;
+                    target->info.effect_round_left = s->effect_duration;
+                    target->info.spell_effect = s;
+                }
+            }
         }
     } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left > 0) {
@@ -1445,11 +1465,15 @@ void play_round() {
 void play_effects() {
     FOREACH_PLAYER(i, player) {
         player_info *info = &player->info;
-        info->x = updates[i].position.x;
-        info->y = updates[i].position.y;
-        if (info->effect != SE_NONE) {
-            execute_spell(player, info->spell_effect, V(info->x, info->y), player);
-            set_spell_animation(info->spell_effect->effect_animation, V(info->x, info->y));
+        if (player->dead == false) {
+            info->x = updates[i].position.x;
+            info->y = updates[i].position.y;
+            if (info->effect != SE_NONE) {
+                if (info->spell_effect->cast_type == CT_EFFECT || info->spell_effect->cast_type == CT_CAST_EFFECT) {
+                    execute_spell(player, info->spell_effect, V(info->x, info->y), player);
+                    set_spell_animation(info->spell_effect->effect_animation, V(info->x, info->y));
+                }
+            }
         }
     }
 }
@@ -1667,9 +1691,9 @@ void render_scene_in_game() {
             Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
             Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
-                set_tooltip(
-                    (Rectangle){mp.x, mp.y, 350, 150}, player->info.name,
-                    TextFormat("AD=%d\nAP=%d", player->info.stats[STAT_AD].value, player->info.stats[STAT_AP].value));
+                set_tooltip((Rectangle){mp.x, mp.y, 350, 150}, player->info.name,
+                            TextFormat("AD=%d\nAP=%d\nSpeed=%d", player->info.stats[STAT_AD].value,
+                                       player->info.stats[STAT_AP].value, player->info.stats[STAT_SPEED].value));
             }
         }
 
@@ -1797,10 +1821,11 @@ void render_scene_lobby() {
         DrawText(TextFormat("Health = %d", info->stats[STAT_HEALTH].max), x, header.y + 64, 32, WHITE);
         DrawText(TextFormat("AD = %d", info->stats[STAT_AD].value), x, header.y + 96, 32, WHITE);
         DrawText(TextFormat("AP = %d", info->stats[STAT_AP].value), x, header.y + 128, 32, WHITE);
-        DrawText("Spells", x, header.y + 160, 32, WHITE);
+        DrawText(TextFormat("Speed = %d", info->stats[STAT_SPEED].value), x, header.y + 160, 32, WHITE);
+        DrawText("Spells", x, header.y + 192, 32, WHITE);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             Rectangle icon = icons[all_spells[info->spells[i]].icon];
-            Rectangle dst = {x + 60 * i, header.y + 192, 50, 50};
+            Rectangle dst = {x + 60 * i, header.y + 224, 50, 50};
             icon_render(icon, dst);
             if (icon_hover(dst)) {
                 icon_tooltip = info->spells[i];
@@ -1877,6 +1902,7 @@ int get_total_stats() {
     stat_total += health_slider.slider.value;
     stat_total += physic_power_slider.slider.value;
     stat_total += magic_power_slider.slider.value;
+    stat_total += fabs(speed_slider.slider.value);
     return stat_total;
 }
 
@@ -1959,11 +1985,17 @@ void update_scene_main_menu() {
         for (int i = 0; i < stat_sliders_count; i++) {
             buttoned_slider *b = stat_sliders[i];
             if (button_clicked(&b->minus)) {
+                int prev_value = b->slider.value;
                 buttoned_slider_decrement(b);
+                if (get_total_stats() > 200) {
+                    b->slider.value = prev_value;
+                }
             }
             if (button_clicked(&b->plus)) {
-                if (get_total_stats() < 150) {
-                    buttoned_slider_increment(b);
+                int prev_value = b->slider.value;
+                buttoned_slider_increment(b);
+                if (get_total_stats() > 200) {
+                    b->slider.value = prev_value;
                 }
             }
         }
@@ -2016,7 +2048,11 @@ void render_scene_main_menu() {
                  magic_power_slider.rec.y, 32, WHITE);
         buttoned_slider_render(&magic_power_slider);
 
-        DrawText(TextFormat("Total stats: %d / 150", get_total_stats()), player_info_card.rec.x + 8,
+        DrawText(TextFormat("Speed", (int)magic_power_slider.slider.value), player_info_card.rec.x + 8,
+                 speed_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&speed_slider);
+
+        DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
                  player_info_card.rec.y + 75, 32, WHITE);
     }
 }
@@ -2104,7 +2140,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    // TODO: Make window resizable
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(WIDTH, HEIGHT, "Duel Game");
     InitAudioDevice();
@@ -2168,6 +2203,10 @@ int main(int argc, char **argv) {
             y += 60;
             buttoned_slider_init(&magic_power_slider,
                                  (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
+            y += 60;
+            buttoned_slider_init(&speed_slider,
+                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 30, 10);
+            speed_slider.slider.min = -30;
         }
     }
 

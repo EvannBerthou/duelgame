@@ -29,7 +29,7 @@ typedef enum {
     ST_TARGET,
     ST_ZONE,
     ST_AROUND,
-    ST_STAT,
+    //ST_STAT,
 } spell_type_enum;
 
 typedef enum {
@@ -39,6 +39,8 @@ typedef enum {
     SE_POISON,
     SE_SLOW,
     SE_COUNT,
+
+    SE_CLEANSE = 100,
 } spell_effect;
 
 typedef enum { SI_UNKNOWN, SI_MOVE, SI_ATTACK, SI_WAND, SI_COUNT } spell_icon;
@@ -59,6 +61,7 @@ typedef enum {
     SA_CLEANSE,
     SA_BANISH,
     SA_REVERT,
+    SA_KOCKBACK,
     SA_HEAL,
     SA_FORTIFY,
     SA_SLOWDOWN,
@@ -74,17 +77,25 @@ typedef enum {
     STAT_COUNT
 } stat_type;
 
+typedef enum {
+    CT_CAST, // Apply the spell only on cast turn
+    CT_EFFECT, // Apply the spell only as an effect
+    CT_CAST_EFFECT, // Apply the spell both on cast turn and as an effect
+} cast_type;
+
 typedef struct {
     const char* name;
     const char* description;
     uint8_t icon;
     spell_animation cast_animation;
     spell_animation effect_animation;
+    cast_type cast_type;
 
     spell_type_enum type;
     stat_type stat;
     bool stat_max;
-    int value;
+    int damage_value;
+    int stat_value;
     uint8_t range;
     uint8_t zone_size;
     uint8_t speed;
