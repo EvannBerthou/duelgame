@@ -48,8 +48,8 @@ typedef struct {
     net_player_stat stats[STAT_COUNT] NET_SIZE("sizeof(net_player_stat) * STAT_COUNT");
     uint8_t x;
     uint8_t y;
-    uint8_t effect;
-    uint8_t effect_round_left;
+    uint8_t effect[SE_COUNT] NET_SIZE("SE_COUNT");
+    uint8_t effect_round_left[SE_COUNT] NET_SIZE("SE_COUNT");
     // Should the game updates the status right as the packet is recieved (true)
     // or wait for the end of the round (false) ?
     uint8_t immediate;

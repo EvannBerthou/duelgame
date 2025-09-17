@@ -1,4 +1,3 @@
-#include <asm-generic/socket.h>
 #include <limits.h>
 #include <math.h>
 #include <netdb.h>
@@ -16,6 +15,7 @@
 
 #define MAP_WIDTH 16
 #define MAP_HEIGHT 8
+#define MAX_ADMIN 4
 
 #define FOREACH_PLAYER(IT, P)                                                    \
     for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                                \
@@ -24,28 +24,46 @@
 
 extern const spell all_spells[];
 
+// Server management
 fd_set master_set, read_fds;
-
-// Admin stuff
-const char ADMIN_PASSWORD[8] = {'p', 'a', 's', 's'};
-#define MAX_ADMIN 4
-
-int admins[MAX_ADMIN] = {0};
-int admin_count = 0;
-
-game_state gs = GS_WAITING;
 int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
 int connection_count = 0;
-int master_player = 0;
 
+// Players
 int clients[MAX_PLAYER_COUNT] = {0};
 player_info players[MAX_PLAYER_COUNT] = {0};
 bool player_ready[MAX_PLAYER_COUNT] = {0};
+int master_player = 0;
+
+// Game logic
+game_state gs = GS_WAITING;
 // Stores the order in which players will do their actions
 int player_round_order[MAX_PLAYER_COUNT] = {0};
-// int player_count = 0;
 uint8_t round_scores[MAX_PLAYER_COUNT] = {0};
 time_t round_start_time = 0;
+
+// Admin stuff
+const char ADMIN_PASSWORD[8] = {'p', 'a', 's', 's'};
+int admins[MAX_ADMIN] = {0};
+int admin_count = 0;
+
+// Utils
+
+int ci(int a) {
+    if (a < 0) {
+        LOG("ci");
+        exit(-a);
+    }
+    return a;
+}
+
+void broadcast(net_packet_type_enum type, void *content) {
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (players[i].connected) {
+            send_sock(type, content, clients[i]);
+        }
+    }
+}
 
 bool is_admin(int fd) {
     // Master player does not have to login
@@ -59,6 +77,17 @@ bool is_admin(int fd) {
     return false;
 }
 
+int player_count() {
+    int player_count = 0;
+    FOREACH_PLAYER(i, player) {
+        player_count++;
+    }
+    return player_count;
+}
+
+// Map
+
+// TODO: Map should not be hardcoded
 const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
     {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
@@ -80,24 +109,30 @@ int spawn_positions[][2] = {
     {3, 0},
 };
 
-int ci(int a) {
-    if (a < 0) {
-        LOG("ci");
-        exit(-a);
+void send_map(int fd) {
+    uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
+    for (int i = 0; i < MAP_HEIGHT; i++) {
+        for (int j = 0; j < MAP_WIDTH; j++) {
+            map[i * MAP_WIDTH + j] = MAP[i][j];
+        }
     }
-    return a;
+    net_packet_map m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
+    send_sock(PKT_MAP, &m, fd);
+
+    uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
+    for (int i = 0; i < MAP_HEIGHT; i++) {
+        for (int j = 0; j < MAP_WIDTH; j++) {
+            props[i * MAP_WIDTH + j] = PROPS[i][j];
+        }
+    }
+    net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
+    send_sock(PKT_MAP, &p, fd);
 }
+
+// Player
 
 net_packet_player_update pkt_from_info(player_info *p) {
     return pkt_player_update(p->id, p->stats, p->x, p->y, p->effect, p->effect_round_left, false);
-}
-
-void broadcast(net_packet_type_enum type, void *content) {
-    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        if (players[i].connected) {
-            send_sock(type, content, clients[i]);
-        }
-    }
 }
 
 void update_stats(player_info *p, const spell *s) {
@@ -116,13 +151,16 @@ void damage_player(player_info *from, player_info *to, const spell *s) {
     to->stats[STAT_HEALTH].value = fmin(fmax(to->stats[STAT_HEALTH].value - damage, 0), to->stats[STAT_HEALTH].max);
     if (s->effect != SE_NONE) {
         if (s->effect == SE_CLEANSE) {
-            to->effect = SE_NONE;
-            to->effect_round_left = 0;
-            to->spell_effect = NULL;
+            for (int i = 0; i < SE_COUNT; i++) {
+                to->effect[i] = false;
+                to->effect_round_left[i] = 0;
+                to->spell_effect[i] = NULL;
+            }
         } else {
-            to->effect = s->effect;
-            to->effect_round_left = s->effect_duration;
-            to->spell_effect = s;
+            LOG("Applying effect %d to %s", s->effect, to->name);
+            to->effect[s->effect] = true;
+            to->effect_round_left[s->effect] = s->effect_duration;
+            to->spell_effect[s->effect] = s;
         }
     }
 
@@ -137,13 +175,28 @@ void reset_player(player_info *player) {
     }
     player->x = spawn_positions[player->id][0];
     player->y = spawn_positions[player->id][1];
-    player->effect = SE_NONE;
-    player->effect_round_left = 0;
-    player->spell_effect = NULL;
+    for (int i = 0; i < SE_COUNT; i++) {
+        player->effect[i] = false;
+        player->effect_round_left[i] = 0;
+        player->spell_effect[i] = NULL;
+    }
     net_packet_player_update u = pkt_from_info(player);
     u.immediate = true;
     broadcast(PKT_PLAYER_UPDATE, &u);
 }
+
+player_info *get_player_from_fd(int fd) {
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (clients[i] == fd) {
+            return &players[i];
+        }
+    }
+    LOG("Unkown player");
+    exit(1);
+    return NULL;
+}
+
+// Game logic
 
 void play_round(player_info *player) {
     if (player->action == PA_STUNNED) {
@@ -154,7 +207,7 @@ void play_round(player_info *player) {
         broadcast(PKT_PLAYER_ACTION, &action);
         player->state = RS_PLAYING;
     } else if (player->action == PA_SPELL) {
-        if (player->effect == SE_STUN) {
+        if (player->effect[SE_STUN]) {
             LOG("Player can't do this action because he is stunned");
             net_packet_player_update u = pkt_from_info(player);
             broadcast(PKT_PLAYER_UPDATE, &u);
@@ -197,9 +250,7 @@ void play_round(player_info *player) {
             FOREACH_PLAYER(i, other) {
                 if (other->x == player->ax && other->y == player->ay) {
                     if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
-                        if (s->damage_value != 0) {
-                            damage_player(player, other, s);
-                        }
+                        damage_player(player, other, s);
                         if (s->stat_value != 0) {
                             update_stats(other, s);
                         }
@@ -214,25 +265,6 @@ void play_round(player_info *player) {
         fprintf(stderr, "Unsupported player action\n");
         exit(1);
     }
-}
-
-player_info *get_player_from_fd(int fd) {
-    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        if (clients[i] == fd) {
-            return &players[i];
-        }
-    }
-    LOG("Unkown player");
-    exit(1);
-    return NULL;
-}
-
-int player_count() {
-    int player_count = 0;
-    FOREACH_PLAYER(i, player) {
-        player_count++;
-    }
-    return player_count;
 }
 
 int compare_players_action(const void *a, const void *b) {
@@ -275,25 +307,7 @@ void start_game() {
     round_start_time = time(NULL);
 }
 
-void send_map(int fd) {
-    uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
-    for (int i = 0; i < MAP_HEIGHT; i++) {
-        for (int j = 0; j < MAP_WIDTH; j++) {
-            map[i * MAP_WIDTH + j] = MAP[i][j];
-        }
-    }
-    net_packet_map m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
-    send_sock(PKT_MAP, &m, fd);
-
-    uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
-    for (int i = 0; i < MAP_HEIGHT; i++) {
-        for (int j = 0; j < MAP_WIDTH; j++) {
-            props[i * MAP_WIDTH + j] = PROPS[i][j];
-        }
-    }
-    net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
-    send_sock(PKT_MAP, &p, fd);
-}
+// Network
 
 void handle_player_disconnect(int fd) {
     FD_CLR(fd, &master_set);
@@ -432,19 +446,21 @@ void handle_message(int fd) {
                 play_round(&players[player_round_order[i]]);
             }
             FOREACH_PLAYER(i, player) {
-                if (player->effect != SE_NONE && (player->spell_effect->cast_type == CT_EFFECT ||
-                                                  player->spell_effect->cast_type == CT_CAST_EFFECT)) {
-                    int damage = get_spell_damage(player, player->spell_effect);
-                    player->stats[STAT_HEALTH].value = fmax(player->stats[STAT_HEALTH].value - damage, 0);
-                }
-                if (player->effect_round_left > 0) {
-                    player->effect_round_left--;
-                    if (player->effect_round_left == 0) {
-                        // Slow effect is not permanant
-                        if (player->effect == SE_SLOW) {
-                            player->stats[STAT_SPEED].value = player->stats[STAT_SPEED].max;
+                for (int j = 0; j < SE_COUNT; j++) {
+                    if (player->effect[j] && (player->spell_effect[j]->cast_type == CT_EFFECT ||
+                                              player->spell_effect[j]->cast_type == CT_CAST_EFFECT)) {
+                        int damage = get_spell_damage(player, player->spell_effect[j]);
+                        player->stats[STAT_HEALTH].value = fmax(player->stats[STAT_HEALTH].value - damage, 0);
+                    }
+                    if (player->effect_round_left[j] > 0) {
+                        player->effect_round_left[j]--;
+                        if (player->effect_round_left[j] == 0) {
+                            // Slow effect is not permanant
+                            if (j == SE_SLOW) {
+                                player->stats[STAT_SPEED].value = player->stats[STAT_SPEED].max;
+                            }
+                            player->effect[j] = false;
                         }
-                        player->effect = SE_NONE;
                     }
                 }
                 net_packet_player_update u = pkt_from_info(&players[i]);
@@ -568,6 +584,8 @@ void handle_message(int fd) {
 
     free(p.content);
 }
+
+// Main
 
 int main(int argc, char **argv) {
     int port = 3000;

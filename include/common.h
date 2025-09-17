@@ -4,7 +4,6 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "raylib.h"
 
 int strtoint(const char* str, int* out);
 
@@ -29,7 +28,6 @@ typedef enum {
     ST_TARGET,
     ST_ZONE,
     ST_AROUND,
-    //ST_STAT,
 } spell_type_enum;
 
 typedef enum {
@@ -168,9 +166,9 @@ typedef struct {
     uint8_t spell;
 
     // TODO: Multiple effects can be active at the same time
-    spell_effect effect;
-    uint8_t effect_round_left;
-    const spell* spell_effect;
+    uint8_t effect[SE_COUNT];
+    uint8_t effect_round_left[SE_COUNT];
+    const spell* spell_effect[SE_COUNT];
 } player_info;
 
 const char* get_log(int idx);

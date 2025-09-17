@@ -335,7 +335,11 @@ void free_map(map_layer *m) {
 }
 
 int get_spell_damage(player_info *info, const spell *s) {
-    if (s->cast_type == CT_EFFECT && info->effect == SE_NONE) {
+    if (s->damage_value == 0) {
+        return 0;
+    }
+
+    if (s->cast_type == CT_EFFECT && info->effect[s->effect] == false) {
         return 0;
     }
 
