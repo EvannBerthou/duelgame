@@ -5,9 +5,11 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+#ifndef WINDOWS_BUILD
+#include <sys/socket.h>
 #include <sys/types.h>
+#endif
 #include <unistd.h>
 #include "common.h"
 #define NET_PROTOCOL_IMPLEMENTATION
@@ -79,7 +81,7 @@ void unpacksv(uint8_t** buf, char* dest, uint8_t len) {
 #ifdef WINDOWS_BUILD
 #define send_data(fd, buf, len) send(fd, (char*)buf, len, 0)
 #else
-#define send_data(fd, buf, len) write(fd, buf, len)
+#define send_data(fd, buf, len) send(fd, buf, len, MSG_NOSIGNAL)
 #endif
 
 void write_packet(net_packet* p, int fd) {
@@ -97,10 +99,11 @@ void write_packet(net_packet* p, int fd) {
         b += n;
     }
 
-    if (n < 0) {
-        fprintf(stderr, "Error sending packet of type %d %s", p->type,
-                strerror(errno));
-        exit(1);
+    if (n == 0) {
+        LOG("Client %d disconnected", fd);
+    } else if (n < 0) {
+        LOGL(LL_ERROR, "Error sending packet of type %d %s", p->type,
+             strerror(errno));
     }
 }
 
@@ -121,14 +124,17 @@ int packet_read(net_packet* p, int fd) {
     p->len = packet_len;
 
     uint8_t buf[256] = {0};
-    uint8_t *b = buf;
+    uint8_t* b = buf;
     int packet_size_left = packet_len - 1;
     n = 0;
     while ((n = recv_data(fd, b, packet_size_left)) > 0) {
         packet_size_left -= n;
         b += n;
     }
-    if (n < 0) {
+    if (n == 0) {
+        LOG("Client %d disconnected", fd);
+        return -1;
+    } else if (n < 0) {
         LOGL(LL_ERROR, "Error recieving packet of type %d %s", p->type,
              strerror(errno));
         return -1;

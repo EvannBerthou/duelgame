@@ -1816,6 +1816,7 @@ void update_scene_main_menu() {
             }
         }
     } else if (player_info_card.selected_tab == 1) {
+        //TODO: We should disable buttons instead of cancelling the action
         for (int i = 0; i < stat_sliders_count; i++) {
             buttoned_slider *b = stat_sliders[i];
             if (button_clicked(&b->minus)) {

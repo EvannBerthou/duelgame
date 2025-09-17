@@ -616,7 +616,7 @@ int main(int argc, char **argv) {
     ci(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)));
     ci(listen(sockfd, 5));
 
-    LOG("Listening on port %dn", port);
+    LOG("Listening on port %d", port);
 
     FD_ZERO(&master_set);
     FD_ZERO(&read_fds);
@@ -634,6 +634,7 @@ int main(int argc, char **argv) {
         read_fds = master_set;
         int activity = ci(select(fd_count + 1, &read_fds, NULL, NULL, &timeout));
         if (activity < 0) {
+            LOGL(LL_ERROR, "Error in select");
             exit(1);
         }
 
