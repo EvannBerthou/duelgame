@@ -96,7 +96,7 @@ extern const int spell_count;
 extern const char *wall_frames[];
 
 // Network
-int client_fd = 0;
+int server_fd = 0;
 bool connected = false;
 uint64_t last_ping = 0;
 fd_set master_set;
@@ -304,6 +304,40 @@ game_state gs = GS_WAITING;
 int base_x_offset = 0;
 int base_y_offset = 0;
 
+typedef enum {
+    MCT_FLOOR,
+    MCT_WALL,
+    MCT_TORCH,
+    MCT_VINE,
+    MCT_COUNT,
+} map_cell_type;
+
+typedef enum {
+    MPT_TORCH,
+    MPT_VINE,
+    MPT_COUNT,
+} map_prop_type;
+
+typedef struct {
+    Texture2D *texture;
+    int sprite_count;
+    int scaling;
+    Vector2 offset;
+} cell_metadata;
+
+cell_metadata cell_metadatas[MCT_COUNT] = {
+    [MCT_FLOOR] = {.texture = &floor_textures, .sprite_count = FLOOR_TEXTURE_COUNT},
+    [MCT_WALL] = {.texture = &wall_textures, .sprite_count = WALL_ORIENTATION_COUNT},
+};
+
+cell_metadata prop_metadatas[MPT_COUNT] = {
+    [MPT_TORCH] = {.texture = &wall_torch,
+                   .sprite_count = WALL_TORCH_ANIMATION_COUNT,
+                   .scaling = 3,
+                   .offset = V(8, -8)},
+    [MPT_VINE] = {.texture = &vine, .sprite_count = VINE_ANIMATION_COUNT, .scaling = 4},
+};
+
 map_layer game_map = {0};
 map_layer variants = {0};
 map_layer props = {0};
@@ -407,7 +441,7 @@ void update_console() {
                     if (result.content == NULL) {
                         LOGL(LL_ERROR, "Error creating packet");
                     } else {
-                        send_sock(result.type, result.content, client_fd);
+                        send_sock(result.type, result.content, server_fd);
                     }
                     free(result.content);
                 }
@@ -674,60 +708,6 @@ void set_props_animations() {
     }
 }
 
-// TODO: Rework with enum ?
-Texture2D get_cell_texture(int x, int y) {
-    int cell_type = get_map(&game_map, x, y);
-    if (cell_type == 0) {
-        return floor_textures;
-    } else if (cell_type == 1) {
-        return wall_textures;
-    }
-    return (Texture2D){0};
-}
-
-int get_cell_sprite_count(int x, int y) {
-    int cell_type = get_map(&game_map, x, y);
-    if (cell_type == 0) {
-        return FLOOR_TEXTURE_COUNT;
-    } else if (cell_type == 1) {
-        return WALL_ORIENTATION_COUNT;
-    }
-    return 1;
-}
-
-Color get_cell_color(int cell_type) {
-    if (cell_type == 0)
-        return PURPLE;
-    if (cell_type == 1)
-        return GRAY;
-    return SKYBLUE;
-}
-
-Texture2D get_prop_texture(int prop_type) {
-    if (prop_type == 1) {
-        return wall_torch;
-    } else if (prop_type == 2) {
-        return vine;
-    }
-    return (Texture2D){0};
-}
-
-int get_prop_scaling(int prop_type) {
-    if (prop_type == 1) {
-        return 3;
-    } else if (prop_type == 2) {
-        return 4;
-    }
-    return 0;
-}
-
-Vector2 get_prop_offset(int prop_type) {
-    if (prop_type == 1) {
-        return (Vector2){8, -8};
-    }
-    return (Vector2){0};
-}
-
 void render_outter_map() {
     for (int i = 0; i < game_map.height; i++) {
         Rectangle src = get_sprite(test_wall_textures, OUTER_WALL_COUNT, 0);
@@ -762,14 +742,16 @@ void render_map() {
             const int x_pos = base_x_offset + x * CELL_SIZE;
             const int y_pos = base_y_offset + y * CELL_SIZE;
             Vector2 pos = {x_pos, y_pos};
-            Texture2D t = get_cell_texture(x, y);
-            if (t.id != 0) {
-                Rectangle src = get_sprite(t, get_cell_sprite_count(x, y), get_map(&variants, x, y));
-                DrawSpriteRecFromSheetTint(t, src, pos, 4, WHITE);
-            } else {
+            int cell_type = get_map(&game_map, x, y);
+            if (cell_type >= MCT_COUNT) {
                 Color c = PURPLE;
                 DrawRectangle(x_pos, y_pos, CELL_SIZE, CELL_SIZE, c);
                 DrawRectangleLines(x_pos, y_pos, CELL_SIZE, CELL_SIZE, BLACK);
+            } else {
+                cell_metadata metadata = cell_metadatas[cell_type];
+                Texture2D t = *metadata.texture;
+                Rectangle src = get_sprite(t, metadata.sprite_count, get_map(&variants, x, y));
+                DrawSpriteRecFromSheetTint(t, src, pos, 4, WHITE);
             }
         }
     }
@@ -778,12 +760,16 @@ void render_map() {
         for (int x = 0; x < game_map.width; x++) {
             Vector2 pos = {base_x_offset + x * CELL_SIZE, base_y_offset + y * CELL_SIZE};
             int prop_type = get_map(&props, x, y);
-            Vector2 offset = get_prop_offset(prop_type);
-            pos.x += offset.x;
-            pos.y += offset.y;
-            Texture2D spritesheet = get_prop_texture(prop_type);
+            if (prop_type >= MPT_COUNT) {
+                LOGL(LL_ERROR, "Unknown prop type with id=%d", prop_type);
+                continue;
+            }
+            cell_metadata metadata = prop_metadatas[prop_type];
+            pos.x += metadata.offset.x;
+            pos.y += metadata.offset.y;
+            Texture2D spritesheet = *metadata.texture;
             anim_id a = get_map(&props_animations, x, y);
-            DrawSpriteFromSheet(spritesheet, a, pos, get_prop_scaling(prop_type));
+            DrawSpriteFromSheet(spritesheet, a, pos, metadata.scaling);
         }
     }
     Vector2 grid = screen2grid(get_mouse());
@@ -791,20 +777,6 @@ void render_map() {
         Vector2 cursor = grid2screen(screen2grid(get_mouse()));
         DrawRectangleV(cursor, (Vector2){CELL_SIZE, CELL_SIZE}, ColorAlpha(RED, 0.3f));
     }
-}
-
-// Rendering
-
-void draw_cell(int x, int y, Color c) {
-    Rectangle source = {0, 0, spell_box.width, spell_box.height};
-    Rectangle dest = {x, y, CELL_SIZE, CELL_SIZE};
-    DrawTexturePro(spell_box, source, dest, (Vector2){0}, 0, c);
-}
-
-void draw_cell_lines(int x, int y) {
-    Rectangle source = {0, 0, spell_box_select.width, spell_box_select.height};
-    Rectangle dest = {x - 8, y - 8, CELL_SIZE + 16, CELL_SIZE + 16};
-    DrawTexturePro(spell_box_select, source, dest, (Vector2){0}, 0, WHITE);
 }
 
 // Spells
@@ -1074,7 +1046,11 @@ void render_player_actions(player *p) {
     }
 
     if (info->action == PA_SPELL) {
-        draw_cell_lines(base_x_offset + (CELL_SIZE + 8) * p->selected_spell, toolbar_spells_buttons[0].rec.y);
+        int x = base_x_offset + (CELL_SIZE + 8) * p->selected_spell;
+        int y = toolbar_spells_buttons[0].rec.y;
+        Rectangle source = {0, 0, spell_box_select.width, spell_box_select.height};
+        Rectangle dest = {x - 8, y - 8, CELL_SIZE + 16, CELL_SIZE + 16};
+        DrawTexturePro(spell_box_select, source, dest, (Vector2){0}, 0, WHITE);
     }
 
     // In-game rendering
@@ -1412,7 +1388,7 @@ void end_round() {
         } else {
             gs = GS_ROUND_ENDED;
             reset_round();
-            send_sock(PKT_PLAYER_READY, NULL, client_fd);
+            send_sock(PKT_PLAYER_READY, NULL, server_fd);
         }
     }
 }
@@ -1445,8 +1421,8 @@ int connect_to_server(const char *ip, uint16_t port) {
     }
     return 0;
 #else
-    if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        client_fd = 0;
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        server_fd = 0;
         return -1;
     }
 
@@ -1455,15 +1431,15 @@ int connect_to_server(const char *ip, uint16_t port) {
     serv_addr.sin_port = htons(port);
 
     if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
-        close(client_fd);
-        client_fd = 0;
+        close(server_fd);
+        server_fd = 0;
         return -1;
     }
 #endif
 
-    if (connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        close(client_fd);
-        client_fd = 0;
+    if (connect(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        close(server_fd);
+        server_fd = 0;
         return -1;
     }
 
@@ -1473,12 +1449,9 @@ int connect_to_server(const char *ip, uint16_t port) {
 void player_join(const char *username) {
     net_packet_join join = {0};
     memcpy(join.username, username, 8);
-    send_sock(PKT_JOIN, &join, client_fd);
+    send_sock(PKT_JOIN, &join, server_fd);
 }
 
-// We do not use pkt_player_update to set health and other things. I think a better way is to only use
-//  PKT_PLAYER_ACTION to simulate the round and maybe resend a pkt_player_update at the end of the round to resync.
-//  PKT_PLAYER_UPDATE could also be used just to force player informations when an admin updates it.
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
         net_packet_ping *ping = (net_packet_ping *)p->content;
@@ -1503,7 +1476,7 @@ void handle_packet(net_packet *p) {
         LOG("Joining with %d ad and %d ap", ad, ap);
         net_packet_player_build b =
             pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap, speed);
-        send_sock(PKT_PLAYER_BUILD, &b, client_fd);
+        send_sock(PKT_PLAYER_BUILD, &b, server_fd);
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
         LOG("Player %d disconnected", d->id);
@@ -1636,8 +1609,8 @@ bool join_game(const char *ip, int port, const char *username) {
     player_join(username);
 
     FD_ZERO(&master_set);
-    FD_SET(client_fd, &master_set);
-    fd_count = client_fd;
+    FD_SET(server_fd, &master_set);
+    fd_count = server_fd;
 
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
@@ -1645,7 +1618,6 @@ bool join_game(const char *ip, int port, const char *username) {
     active_scene = SCENE_LOBBY;
     return true;
 }
-
 
 bool pkt_full() {
     return pkt_queue.size == MAX_PACKET_QUEUE_SIZE;
@@ -1682,7 +1654,7 @@ void *network_thread(void *arg) {
     while (true) {
         if (connected) {
             net_packet p = {0};
-            if (packet_read(&p, client_fd) < 0) {
+            if (packet_read(&p, server_fd) < 0) {
                 exit(1);
             }
             // Special case. We want to set the recieve time right now and not wait until we are handling the packet.
@@ -1698,6 +1670,56 @@ void *network_thread(void *arg) {
 
 // Scenes
 //   Main menu
+void init_scene_main_menu(const char *username) {
+    input_set_text(&ip_buf, "127.0.0.1");
+    input_set_text(&port_buf, "3000");
+    input_set_text(&username_buf, username);
+
+    for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
+        inputs[i]->rec = (Rectangle){server_info_card.rec.x + 8, server_info_card.rec.y + 75 + 60 * i,
+                                     server_info_card.rec.width - 25, 50};
+    }
+    confirm_button.rec =
+        (Rectangle){server_info_card.rec.x + 25, server_info_card.rec.y + server_info_card.rec.height - 100,
+                    server_info_card.rec.width - 50, 75};
+
+    spell_select_buttons = malloc(sizeof(button) * spell_count);
+    spell_selection = malloc(sizeof(bool) * spell_count);
+    {
+        int max_row_count = 9;
+        int x = player_info_card.rec.x + 16;
+        int y = player_info_card.rec.y + 125;
+        for (int i = 0; i < spell_count; i++) {
+            int cell_x = x + 60 * (i % max_row_count);
+            int cell_y = y + 60 * (i / max_row_count);
+            spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons_sheet, NULL, 32);
+            spell_select_buttons[i].texture_sprite = icons[all_spells[i].icon];
+            spell_select_buttons[i].muted = true;
+            spell_selection[i] = false;
+        }
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            spell_selection[i] = true;
+            spell_select_buttons[i].color = DARKGRAY;
+        }
+    }
+    {
+        int w = player_info_card.rec.width - 150;
+        int y = 125;
+        buttoned_slider_init(&health_slider,
+                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
+        y += 60;
+        buttoned_slider_init(&physic_power_slider,
+                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
+        y += 60;
+        buttoned_slider_init(&magic_power_slider,
+                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
+        y += 60;
+        buttoned_slider_init(&speed_slider,
+                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 30, 10);
+        speed_slider.slider.min = -30;
+    }
+}
+
 const char *try_join() {
     int total = 0;
     for (int i = 0; i < spell_count; i++) {
@@ -1816,22 +1838,18 @@ void update_scene_main_menu() {
             }
         }
     } else if (player_info_card.selected_tab == 1) {
-        //TODO: We should disable buttons instead of cancelling the action
         for (int i = 0; i < stat_sliders_count; i++) {
             buttoned_slider *b = stat_sliders[i];
+            b->minus.disabled = (b->slider.min < 0 && b->slider.value <= 0 && get_total_stats() + 10 > 200) ||
+                                (b->slider.min == b->slider.value);
             if (button_clicked(&b->minus)) {
-                int prev_value = b->slider.value;
                 buttoned_slider_decrement(b);
-                if (get_total_stats() > 200) {
-                    b->slider.value = prev_value;
-                }
             }
+
+            b->plus.disabled =
+                (b->slider.value >= 0 && get_total_stats() + 10 > 200) || (b->slider.max == b->slider.value);
             if (button_clicked(&b->plus)) {
-                int prev_value = b->slider.value;
                 buttoned_slider_increment(b);
-                if (get_total_stats() > 200) {
-                    b->slider.value = prev_value;
-                }
             }
         }
     }
@@ -1893,12 +1911,20 @@ void render_scene_main_menu() {
 }
 
 //   Lobby
+void init_scene_lobby() {
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        int x = player_list_card.rec.x + player_list_card.rec.width - 75;
+        int y = player_list_card.rec.y + 75 + 46 * i;
+        player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
+    }
+}
+
 void update_scene_lobby() {
     start_game_button.disabled = master_player != current_player || player_count() < 2;
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
-            send_sock(PKT_GAME_START, NULL, client_fd);
+            send_sock(PKT_GAME_START, NULL, server_fd);
         }
 
         card_update_tabs(&player_list_card);
@@ -1984,6 +2010,17 @@ void render_scene_lobby() {
 }
 
 //   In game
+void init_scene_in_game() {
+    for (int i = 0; i < RAINDROP_COUNT; i++) {
+        raindrop_timers[i] = RAINDROP_RAND_SPAWNRATE;
+        raindrop_target[i] = (Vector2){0};
+        raindrop_position[i] = (Vector2){0};
+        raindrop_sounds[i] = LoadSoundAlias(raindrop_sound);
+        SetSoundVolume(raindrop_sounds[i], 0.01f);
+        SetSoundPitch(raindrop_sounds[i], 1.0f + ((rand() % 200 - 100) / 100.f));
+    }
+}
+
 void update_scene_in_game() {
     const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
 
@@ -2004,7 +2041,7 @@ void update_scene_in_game() {
                 next_state = RS_WAITING;
                 net_packet_player_action a =
                     pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
-                send_sock(PKT_PLAYER_ACTION, &a, client_fd);
+                send_sock(PKT_PLAYER_ACTION, &a, server_fd);
                 players[current_player].round_move = move;
                 players[current_player].info.state = RS_WAITING;
             }
@@ -2126,7 +2163,7 @@ void render_scene_in_game() {
 void update_scene_round_ended() {
     if (IsKeyPressed(KEY_R) && is_console_closed()) {
         if (current_player == master_player) {
-            send_sock(PKT_GAME_RESET, NULL, client_fd);
+            send_sock(PKT_GAME_RESET, NULL, server_fd);
         }
     }
 }
@@ -2146,6 +2183,12 @@ void render_scene_round_ended() {
 // Main
 
 int main(int argc, char **argv) {
+#ifdef WINDOWS_BUILD
+    LOG("Running on Windows");
+#else
+    LOG("Running on Linux");
+#endif
+
     srand(time(NULL) + getpid());
 
     char *ip = NULL;
@@ -2181,64 +2224,17 @@ int main(int argc, char **argv) {
     lightmap = LoadRenderTexture(WIDTH, HEIGHT);
     ui = LoadRenderTexture(WIDTH, HEIGHT);
 
-    load_assets();
-
     if (username == NULL) {
         username = TextFormat("User %d", rand());
     }
 
+    load_assets();
+    init_scene_main_menu(username);
+    init_scene_lobby();
+    init_scene_in_game();
+
     if (ip != NULL) {
         join_game(ip, port, username);
-    } else {
-        // TODO: We should have  "init_scene_*" functions
-        input_set_text(&ip_buf, "127.0.0.1");
-        input_set_text(&port_buf, "3000");
-        input_set_text(&username_buf, username);
-
-        for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-            inputs[i]->rec = (Rectangle){server_info_card.rec.x + 8, server_info_card.rec.y + 75 + 60 * i,
-                                         server_info_card.rec.width - 25, 50};
-        }
-        confirm_button.rec =
-            (Rectangle){server_info_card.rec.x + 25, server_info_card.rec.y + server_info_card.rec.height - 100,
-                        server_info_card.rec.width - 50, 75};
-
-        spell_select_buttons = malloc(sizeof(button) * spell_count);
-        spell_selection = malloc(sizeof(bool) * spell_count);
-        {
-            // TODO: Temporary
-            int max_row_count = 9;
-            int x = player_info_card.rec.x + 16;
-            int y = player_info_card.rec.y + 125;
-            for (int i = 0; i < spell_count; i++) {
-                int cell_x = x + 60 * (i % max_row_count);
-                int cell_y = y + 60 * (i / max_row_count);
-                spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons_sheet, NULL, 32);
-                spell_select_buttons[i].texture_sprite = icons[all_spells[i].icon];
-                spell_select_buttons[i].muted = true;
-                spell_selection[i] = false;
-            }
-            for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-                spell_selection[i] = true;
-                spell_select_buttons[i].color = DARKGRAY;
-            }
-        }
-        {
-            int w = player_info_card.rec.width - 150;
-            int y = 125;
-            buttoned_slider_init(&health_slider,
-                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
-            y += 60;
-            buttoned_slider_init(&physic_power_slider,
-                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
-            y += 60;
-            buttoned_slider_init(&magic_power_slider,
-                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
-            y += 60;
-            buttoned_slider_init(&speed_slider,
-                                 (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 30, 10);
-            speed_slider.slider.min = -30;
-        }
     }
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
@@ -2246,41 +2242,18 @@ int main(int argc, char **argv) {
         players[i].animation = NO_ANIMATION;
     }
 
-    // Lobby
-    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        int x = player_list_card.rec.x + player_list_card.rec.width - 75;
-        int y = player_list_card.rec.y + 75 + 46 * i;
-        player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
-    }
-
     pthread_t t_network;
     pthread_create(&t_network, NULL, network_thread, NULL);
-
-#ifdef WINDOWS_BUILD
-    LOG("Running on Windows");
-#else
-    LOG("Running on Linux");
-#endif
-
-    for (int i = 0; i < RAINDROP_COUNT; i++) {
-        raindrop_timers[i] = RAINDROP_RAND_SPAWNRATE;
-        raindrop_target[i] = (Vector2){0};
-        raindrop_position[i] = (Vector2){0};
-        raindrop_sounds[i] = LoadSoundAlias(raindrop_sound);
-        SetSoundVolume(raindrop_sounds[i], 0.01f);
-        SetSoundPitch(raindrop_sounds[i], 1.0f + ((rand() % 200 - 100) / 100.f));
-    }
-
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
         step_animations();
         update_console();
-        if (client_fd != 0) {
+        if (server_fd != 0) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {
                 net_packet_ping ping = {.send_time = (uint64_t)(GetTime() * 1000)};
-                send_sock(PKT_PING, &ping, client_fd);
+                send_sock(PKT_PING, &ping, server_fd);
                 ping_counter = 1;
             }
         }

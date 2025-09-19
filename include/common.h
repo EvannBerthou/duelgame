@@ -165,7 +165,6 @@ typedef struct {
     uint8_t cooldowns[MAX_SPELL_COUNT];
     uint8_t spell;
 
-    // TODO: Multiple effects can be active at the same time
     uint8_t effect[SE_COUNT];
     uint8_t effect_round_left[SE_COUNT];
     const spell* spell_effect[SE_COUNT];

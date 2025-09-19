@@ -389,7 +389,6 @@ void card_update_tabs(card *c) {
 float card_roundness = 0.05f;
 int shadow_offset = 12;
 
-// TODO: offests are not generic
 void card_render(card *c) {
     // Shadow
     Rectangle card = {c->rec.x, c->rec.y + 40, c->rec.width, c->rec.height - 40};

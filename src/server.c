@@ -13,6 +13,8 @@
 #include "net.h"
 #include "net_protocol.h"
 
+void handle_player_disconnect(int fd);
+
 #define MAP_WIDTH 16
 #define MAP_HEIGHT 8
 #define MAX_ADMIN 4
@@ -224,10 +226,10 @@ void play_round(player_info *player) {
                 found = true;
             }
         }
-        // TODO: Report an error / kick the player ?
         if (found == false) {
             LOG("Player is trying to cast a spell which is not in his build");
-            exit(0);
+            handle_player_disconnect(clients[player->id]);
+            return;
         }
 
         const spell *s = &all_spells[player->spell];
