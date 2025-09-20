@@ -9,8 +9,9 @@ include/net_protocol.h: build/net_protocol_builder include/net_protocol_base.h
 	./build/net_protocol_builder > ./include/net_protocol.h
 
 build/main_game: src/main.c src/ui.c src/common.c src/command.c include/net_protocol.h
-	gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game \
-		-DLOG_PREFIX=\"GAME\" -DDEBUG\
+	gcc -Wall -Wextra -Warray-bounds \
+		src/main.c src/common.c src/ui.c src/command.c -o build/main_game \
+		-DLOG_PREFIX=\"GAME\" -DDEBUG \
 		-I./include -L ./lib/linux -lraylib -lm -ggdb -lpthread
 
 build/server: src/server.c src/common.c include/net_protocol.h

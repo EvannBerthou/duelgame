@@ -103,11 +103,7 @@ fd_set master_set;
 int fd_count;
 struct timeval timeout;
 
-typedef struct {
-    net_packet packets[MAX_PACKET_QUEUE_SIZE];
-    int front, rear, size;
-} packet_queue;
-packet_queue pkt_queue = {.front = 0, .rear = -1, .size = 0};
+queue pkt_queue;
 
 // Console
 bool console_open = false;
@@ -135,6 +131,8 @@ Texture2D game_slot = {0};
 Texture2D life_bar_bg = {0};
 Texture2D icons_sheet = {0};
 Rectangle icons[SI_COUNT] = {0};
+Texture2D effects_sheet = {0};
+Rectangle effects[SE_COUNT] = {0};
 Texture2D floor_textures = {0};
 Texture2D wall_textures = {0};
 Texture2D test_wall_textures = {0};
@@ -313,6 +311,7 @@ typedef enum {
 } map_cell_type;
 
 typedef enum {
+    MPT_NONE,
     MPT_TORCH,
     MPT_VINE,
     MPT_COUNT,
@@ -331,6 +330,7 @@ cell_metadata cell_metadatas[MCT_COUNT] = {
 };
 
 cell_metadata prop_metadatas[MPT_COUNT] = {
+    [MPT_NONE] = {0},
     [MPT_TORCH] = {.texture = &wall_torch,
                    .sprite_count = WALL_TORCH_ANIMATION_COUNT,
                    .scaling = 3,
@@ -577,6 +577,9 @@ Rectangle get_sprite(Texture2D sheet, int max_frame, int frame) {
 }
 
 void DrawSpriteRecFromSheetTint(Texture2D sheet, Rectangle src, Vector2 pos, int scale, Color tint) {
+    if (sheet.id == 0) {
+        return;
+    }
     Rectangle dst = (Rectangle){pos.x, pos.y, src.width * scale, src.height * scale};
     DrawTexturePro(sheet, src, dst, (Vector2){0}, 0, tint);
 }
@@ -649,6 +652,12 @@ void load_assets() {
     int icon_sprite_width = icons_sheet.height;
     for (int i = 0; i < SI_COUNT; i++) {
         icons[i] = (Rectangle){i * icon_sprite_width, 0, icon_sprite_width, icon_sprite_width};
+    }
+
+    effects_sheet = load_texture(EFFECTS);
+    int effect_sprite_width = effects_sheet.height;
+    for (int i = 0; i < SI_COUNT; i++) {
+        effects[i] = (Rectangle){i * effect_sprite_width, 0, effect_sprite_width, effect_sprite_width};
     }
 
     ui_button_clicked = load_sound(UI_BUTTON_CLICKED);
@@ -767,7 +776,7 @@ void render_map() {
             cell_metadata metadata = prop_metadatas[prop_type];
             pos.x += metadata.offset.x;
             pos.y += metadata.offset.y;
-            Texture2D spritesheet = *metadata.texture;
+            Texture2D spritesheet = metadata.texture != NULL ? (*metadata.texture) : (Texture2D){0};
             anim_id a = get_map(&props_animations, x, y);
             DrawSpriteFromSheet(spritesheet, a, pos, metadata.scaling);
         }
@@ -782,31 +791,28 @@ void render_map() {
 // Spells
 typedef struct {
     int x, y, dist;
-} Node;
+} map_node;
 
-typedef struct {
-    Node *nodes;
-    int front, rear;
-} MapQueue;
+queue map_queue;
 
 void compute_spell_range(player *p) {
-    MapQueue q = {.front = 0, .rear = 0};
-    q.nodes = calloc(game_map.width * game_map.height, sizeof(Node));
-    q.nodes[q.rear++] = (Node){p->info.x, p->info.y, 0};
+    reset_queue(&map_queue);
+    map_node entry = {p->info.x, p->info.y, 0};
+    queue_push(&map_queue, &entry);
     clear_map(&p->action_range);
     set_map(&p->action_range, p->info.x, p->info.y, 1);
 
     int range = get_selected_spell()->range;
     if (range == 0) {
-        free(q.nodes);
         return;
     }
 
     int dx[] = {-1, 1, 0, 0};
     int dy[] = {0, 0, -1, 1};
 
-    while (q.front != q.rear) {
-        Node current = q.nodes[q.front++];
+    while (!queue_empty(&map_queue)) {
+        map_node current = {0};
+        queue_pop(&map_queue, &current);
 
         if (current.dist == range) {
             continue;
@@ -818,12 +824,11 @@ void compute_spell_range(player *p) {
 
             if (get_map(&game_map, nx, ny) == 0 && get_map(&p->action_range, nx, ny) == 0) {
                 set_map(&p->action_range, nx, ny, 1);
-                q.nodes[q.rear++] = (Node){nx, ny, current.dist + 1};
+                map_node new_node = {nx, ny, current.dist + 1};
+                queue_push(&map_queue, &new_node);
             }
         }
     }
-
-    free(q.nodes);
 }
 
 bool is_cell_in_zone(Vector2 player, Vector2 origin, Vector2 cell, const spell *s) {
@@ -876,10 +881,9 @@ void render_spell_actions(player *p) {
 }
 
 void render_spell_tooltip(const spell *s) {
-    Rectangle rec = {get_mouse().x, get_mouse().y, 400, 150};
     const char *description =
         TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage_value, s->range, s->speed);
-    set_tooltip(rec, s->name, description);
+    set_tooltip(get_mouse(), s->name, description);
 }
 
 bool is_over_toolbar_cell(uint8_t cell_id) {
@@ -1010,6 +1014,10 @@ void render_player(player *p) {
 }
 
 void render_player_actions(player *p) {
+    if (p->info.effect[SE_STUN]) {
+        return;
+    }
+
     // Toolbar rendering
     int hoverred_button = -1;
     player_info *info = &p->info;
@@ -1088,13 +1096,13 @@ void render_infos() {
         player_info *info = &players[i].info;
         int start_x = base_x_offset + player_info_width * i;
         Rectangle inner = render_box(start_x, 0, player_info_width, base_y_offset);
-        const int x = inner.x;
-        const int y = inner.y;
+        const int x = inner.x + 4;
+        const int y = 16;
 
         if (i == current_player) {
-            DrawTextEx(font, TextFormat("%s (you)", info->name), (Vector2){x, y}, 24, 1, BLACK);
+            DrawText(TextFormat("%s", info->name), x, y, 24, BLACK);
         } else {
-            DrawTextEx(font, TextFormat("%s", info->name), (Vector2){x, y}, 24, 1, BLACK);
+            DrawText(TextFormat("%s", info->name), x, y, 24, BLACK);
         }
 
         health_bars[i].value = player->info.stats[STAT_HEALTH].value;
@@ -1104,20 +1112,23 @@ void render_infos() {
             over_player = i;
         }
 
-        // TODO: Rendering of effect
-        //  if (info->effect_round_left > 0) {
-        //      // TODO: Display an icon instead
-        //      DrawText(TextFormat("Effect %d : %d rounds left", info->effect, info->effect_round_left), x, y + 24, 24,
-        //               BLACK);
-        //  }
+        int effect_count = 0;
+        const int effect_icon_size = 36;
+        for (int j = 0; j < SE_COUNT; j++) {
+            if (info->effect[j]) {
+                int effect_x = x + (effect_icon_size + 8) * effect_count;
+                Rectangle effect_rec = {effect_x, 52, effect_icon_size, effect_icon_size};
+                DrawTexturePro(effects_sheet, effects[j], effect_rec, (Vector2){0}, 0, WHITE);
+                effect_count++;
+            }
+        }
         DrawText(TextFormat("%d", round_scores[i]), x + inner.width - 48, y + (inner.height - 48) / 2, 48, BLACK);
     }
 
     if (over_player != -1) {
         player_info *i = &players[over_player].info;
-        Rectangle rec = {get_mouse().x, get_mouse().y, 200, 75};
         const char *description = TextFormat("%d/%d", i->stats[STAT_HEALTH].value, i->stats[STAT_HEALTH].max);
-        set_tooltip(rec, "Health", description);
+        set_tooltip(get_mouse(), "Health", description);
     }
 }
 
@@ -1137,10 +1148,10 @@ void init_in_game_ui() {
 
     const int player_info_width = (game_map.width * CELL_SIZE) / player_count();
     FOREACH_PLAYER(i, player) {
-        int y = 48;
+        int y = 16;
         int life_bar_width = 0.5 * player_info_width;
         int height = 32;
-        int x = base_x_offset + player_info_width * i + 16;
+        int x = base_x_offset + player_info_width * i + 16 + 150;
         health_bars[i].rec = (Rectangle){x, y, life_bar_width, height};
         health_bars[i].color = RED;
     }
@@ -1198,6 +1209,8 @@ void reset_game() {
     }
 }
 
+// TODO: Add more animations
+// TODO: Use animation queue
 void set_spell_animation(spell_animation anim, Vector2 target) {
     player *player_on_cell = NULL;
     FOREACH_PLAYER(i, player) {
@@ -1215,7 +1228,6 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
             spell_animation_cell = target;
             PlaySound(attack_sound);
             break;
-        // TODO: Animation for stun
         case SA_STUN:
             current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
             animation_sprite = slash_attack;
@@ -1318,18 +1330,10 @@ void play_round() {
             execute_spell(p, s, a->target, target);
             set_spell_animation(s->cast_animation, a->target);
             if (s->effect != SE_NONE && target != NULL) {
-                if (s->effect == SE_CLEANSE) {
-                    for (int i = 0; i < SE_COUNT; i++) {
-                        target->info.effect[i] = false;
-                        target->info.effect_round_left[i] = 0;
-                        target->info.spell_effect[i] = NULL;
-                    }
-                } else {
-                    target->info.effect[s->effect] = true;
-                    target->info.effect_round_left[s->effect] = s->effect_duration;
-                    target->info.spell_effect[s->effect] = s;
-                }
+                apply_effect(&target->info, s);
             }
+        } else if (s->cast_type == CT_EFFECT) {
+            apply_effect(&target->info, s);
         }
     } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left[SE_STUN] > 0) {
@@ -1346,13 +1350,16 @@ void play_effects() {
         if (player->dead == false) {
             info->x = updates[i].position.x;
             info->y = updates[i].position.y;
-            // TODO: Handle multiple effects
-            //  if (info->effect != SE_NONE) {
-            //      if (info->spell_effect->cast_type == CT_EFFECT || info->spell_effect->cast_type == CT_CAST_EFFECT) {
-            //          execute_spell(player, info->spell_effect, V(info->x, info->y), player);
-            //          set_spell_animation(info->spell_effect->effect_animation, V(info->x, info->y));
-            //      }
-            //  }
+            for (int j = 0; j < SE_COUNT; j++) {
+                if (info->effect[j]) {
+                    const spell *s = info->spell_effect[j];
+                    if (s->cast_type == CT_EFFECT || s->cast_type == CT_CAST_EFFECT) {
+                        execute_spell(player, s, V(info->x, info->y), player);
+                        // TODO: Play all effect animations
+                        // set_spell_animation(s->effect_animation, V(info->x, info->y));
+                    }
+                }
+            }
         }
     }
 }
@@ -1619,34 +1626,6 @@ bool join_game(const char *ip, int port, const char *username) {
     return true;
 }
 
-bool pkt_full() {
-    return pkt_queue.size == MAX_PACKET_QUEUE_SIZE;
-}
-
-bool pkt_empty() {
-    return pkt_queue.size == 0;
-}
-
-bool pkt_push(net_packet packet) {
-    if (pkt_full()) {
-        return false;
-    }
-    pkt_queue.rear = (pkt_queue.rear + 1) % MAX_PACKET_QUEUE_SIZE;
-    pkt_queue.packets[pkt_queue.rear] = packet;
-    pkt_queue.size++;
-    return true;
-}
-
-bool pkt_pop(net_packet *out) {
-    if (pkt_empty()) {
-        return false;
-    }
-    *out = pkt_queue.packets[pkt_queue.front];
-    pkt_queue.front = (pkt_queue.front + 1) % MAX_PACKET_QUEUE_SIZE;
-    pkt_queue.size--;
-    return true;
-}
-
 // TODO: It should also send queued packets from the client
 void *network_thread(void *arg) {
     (void)arg;
@@ -1655,6 +1634,7 @@ void *network_thread(void *arg) {
         if (connected) {
             net_packet p = {0};
             if (packet_read(&p, server_fd) < 0) {
+                LOGL(LL_ERROR, "Error reading packet");
                 exit(1);
             }
             // Special case. We want to set the recieve time right now and not wait until we are handling the packet.
@@ -1662,7 +1642,7 @@ void *network_thread(void *arg) {
                 net_packet_ping *ping = (net_packet_ping *)p.content;
                 ping->recieve_time = GetTime() * 1000;
             }
-            pkt_push(p);
+            queue_push(&pkt_queue, &p);
         }
     }
     return NULL;
@@ -1790,7 +1770,7 @@ void update_scene_main_menu() {
         selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
     } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
         if (selected_input == 0) {
-            selected_input = MAIN_MENU_INPUT_COUNT;
+            selected_input = MAIN_MENU_INPUT_COUNT - 1;
         } else {
             selected_input--;
         }
@@ -2132,7 +2112,7 @@ void render_scene_in_game() {
             Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
             Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
-                set_tooltip((Rectangle){mp.x, mp.y, 350, 150}, player->info.name,
+                set_tooltip(get_mouse(), player->info.name,
                             TextFormat("AD=%d\nAP=%d\nSpeed=%d", player->info.stats[STAT_AD].value,
                                        player->info.stats[STAT_AP].value, player->info.stats[STAT_SPEED].value));
             }
@@ -2233,6 +2213,9 @@ int main(int argc, char **argv) {
     init_scene_lobby();
     init_scene_in_game();
 
+    init_queue(&pkt_queue, sizeof(net_packet));
+    init_queue(&map_queue, sizeof(map_node));
+
     if (ip != NULL) {
         join_game(ip, port, username);
     }
@@ -2263,7 +2246,7 @@ int main(int argc, char **argv) {
         }
 
         net_packet p = {0};
-        if (pkt_pop(&p)) {
+        if (queue_pop(&pkt_queue, &p)) {
             handle_packet(&p);
         }
 

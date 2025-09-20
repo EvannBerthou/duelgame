@@ -1,9 +1,5 @@
-- Server side cooldown on spells
-- Check server side that moves are valid
-- Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
 - Better battle logging (in-game recap ?)
 - 3 player game are bugged because you can still play when you are dead
-- Anti-cheat
 - Spritesheet metadata (sprite width, etc)
     - Atlas ?
 - Reorganise assets folder
@@ -16,3 +12,9 @@
 - Weird animations at the end of the round when 1 burn + 2 target
 - Implement remaining spells
 - Particule system
+- Infos are kinda ugly
+
+- Anti-cheat
+    - Check server side that moves are valid
+    - Server side cooldown on spells
+    - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else

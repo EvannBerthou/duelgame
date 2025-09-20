@@ -3,11 +3,23 @@
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 int strtoint(const char* str, int* out);
 
 #define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)
+
+#define MAX_QUEUE_SIZE 256
+
+typedef struct {
+    void* content;
+    int elem_size;
+
+    int front;
+    int rear;
+    int size;
+} queue;
 
 typedef enum {
     LL_INFO,
@@ -76,9 +88,9 @@ typedef enum {
 } stat_type;
 
 typedef enum {
-    CT_CAST, // Apply the spell only on cast turn
-    CT_EFFECT, // Apply the spell only as an effect
-    CT_CAST_EFFECT, // Apply the spell both on cast turn and as an effect
+    CT_CAST,         // Apply the spell only on cast turn
+    CT_EFFECT,       // Apply the spell only as an effect
+    CT_CAST_EFFECT,  // Apply the spell both on cast turn and as an effect
 } cast_type;
 
 typedef struct {
@@ -176,5 +188,16 @@ int get_log_count();
 void clear_logs();
 
 int get_spell_damage(player_info* info, const spell* s);
+void apply_effect(player_info* p, const spell* s);
+
+// Queue
+
+
+void init_queue(queue* q, size_t elem_size);
+bool queue_full(queue* q);
+bool queue_empty(queue* q);
+bool queue_push(queue* q, void* data);
+bool queue_pop(queue* q, void* out);
+void reset_queue(queue *q);
 
 #endif

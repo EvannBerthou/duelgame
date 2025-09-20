@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #define MAX_LOG_HISTORY 8192
@@ -189,7 +190,7 @@ const spell all_spells[] = {
     },
     {
         .name = "Sacrify",
-        .description = "Explodes the player but deals lot of damage around. Can be blocked",
+        .description = "Explodes the player but deals lot of damage around.\nCan be blocked",
         .cast_animation = SA_SACRIFY,
         .type = ST_AROUND,
         .damage_value = 200,
@@ -228,7 +229,7 @@ const spell all_spells[] = {
         .cooldown = 5,
     },
     {.name = "Revert",
-     .description = "Sends back the last recieved damage from the current turn to the original caster.\nDoes nothing "
+     .description = "Sends back the last recieved damage from the current turn\nto the original caster.\nDoes nothing "
                     "if casted first.",
      .cast_animation = SA_REVERT,
      .type = ST_TARGET,
@@ -343,9 +344,70 @@ int get_spell_damage(player_info *info, const spell *s) {
         return 0;
     }
 
+    // Atleast 1 damage until 1 hp
     if (s->effect == SE_POISON) {
-        return round(info->stats[STAT_HEALTH].value * (s->damage_value / 100.f));
+        if (info->stats[STAT_HEALTH].value == 1) {
+            return 0;
+        }
+        return fmax(1, round(info->stats[STAT_HEALTH].value * (s->damage_value / 100.f)));
     }
 
     return s->damage_value + info->stats[STAT_AP].value / 4;
+}
+
+void apply_effect(player_info *p, const spell *s) {
+    if (s->effect == SE_CLEANSE) {
+        for (int i = 0; i < SE_COUNT; i++) {
+            p->effect[i] = false;
+            p->effect_round_left[i] = 0;
+            p->spell_effect[i] = NULL;
+        }
+    } else {
+        LOG("Applying effect %d to %s", s->effect, p->name);
+        p->effect[s->effect] = true;
+        p->effect_round_left[s->effect] = s->effect_duration;
+        p->spell_effect[s->effect] = s;
+    }
+}
+
+
+void init_queue(queue* q, size_t elem_size) {
+    q->content = malloc(elem_size * MAX_QUEUE_SIZE);
+    q->elem_size = elem_size;
+    reset_queue(q);
+}
+
+bool queue_full(queue* q) {
+    return q->size == MAX_QUEUE_SIZE;
+}
+
+bool queue_empty(queue* q) {
+    return q->size == 0;
+}
+
+bool queue_push(queue* q, void* data) {
+    if (queue_full(q)) {
+        return false;
+    }
+
+    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
+    memcpy(q->content + q->rear * q->elem_size, data, q->elem_size);
+    q->size++;
+    return true;
+}
+
+bool queue_pop(queue* q, void* out) {
+    if (queue_empty(q)) {
+        return false;
+    }
+    memcpy(out, q->content + q->front * q->elem_size, q->elem_size);
+    q->front = (q->front + 1) % MAX_QUEUE_SIZE;
+    q->size--;
+    return true;
+}
+
+void reset_queue(queue *q) {
+    q->size = 0;
+    q->front = 0;
+    q->rear = -1;
 }

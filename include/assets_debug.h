@@ -24,6 +24,7 @@ const char* asset_map[ASSET_COUNT] = {
     [SLASH_ATTACK] = "assets/sprites/attacks/slash.png",
     [HEAL_ATTACK] = "assets/sprites/attacks/heal.png",
     [ICONS] = "assets/sprites/icons/icons.png",
+    [EFFECTS] = "assets/sprites/icons/effects.png",
     [UI_BUTTON_CLICKED] = "assets/sounds/10_UI_Menu_SFX/013_Confirm_03.wav",
     [UI_TAB_SWITCH] = "assets/sounds/10_UI_Menu_SFX/029_Decline_09.wav",
     [MOVE_SOUND] = "assets/sounds/16_human_walk_stone_2.wav",

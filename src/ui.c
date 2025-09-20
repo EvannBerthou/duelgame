@@ -291,15 +291,15 @@ Rectangle render_box(int x, int y, int w, int h) {
 
 #define TOOLTIP_TITLE_FONT_SIZE 32
 
-static Rectangle tooltip_rec = {0};
+static Vector2 tooltip_pos = {0};
 static char tooltip_title[128] = {0};
 static char tooltip_description[256] = {0};
 static bool tooltip_enabled = false;
 
-void set_tooltip(Rectangle rec, const char *title, const char *description) {
-    tooltip_rec = rec;
+void set_tooltip(Vector2 pos, const char *title, const char *description) {
+    tooltip_pos = pos;
     strncpy(tooltip_title, title == NULL ? "(null)" : title, 128);
-    strncpy(tooltip_description, description == NULL ? "(null)": description, 256);
+    strncpy(tooltip_description, description == NULL ? "(null)" : description, 256);
     tooltip_enabled = true;
 }
 
@@ -307,26 +307,38 @@ void clear_tooltip() {
     tooltip_enabled = false;
 }
 
-//TODO: tooltip should fit the longest line
 void render_tooltip() {
     if (is_console_open() || tooltip_enabled == false) {
         return;
     }
 
     int borderSize = 32;
-    tooltip_rec.x += borderSize / 2.f;
-    tooltip_rec.y += borderSize / 2.f;
 
-    if (tooltip_rec.y + tooltip_rec.height >= HEIGHT) {
-        tooltip_rec.y -= tooltip_rec.height;
-        tooltip_rec.y -= borderSize;
+    int line_count = 0;
+    const char **lines = TextSplit(tooltip_description, '\n', &line_count);
+
+    int tooltip_height = TOOLTIP_TITLE_FONT_SIZE + 24 * line_count + borderSize;
+    int tooltip_width = 0;
+
+    for (int i = 0; i < line_count; i++) {
+        tooltip_width = fmax(tooltip_width, MeasureText(lines[i], 24) + borderSize);
     }
 
-    if (tooltip_rec.x + tooltip_rec.width >= WIDTH) {
-        tooltip_rec.x -= tooltip_rec.width;
-        tooltip_rec.x -= borderSize;
+
+    tooltip_pos.x += borderSize / 2.f;
+    tooltip_pos.y += borderSize / 2.f;
+
+    if (tooltip_pos.y + tooltip_height >= HEIGHT) {
+        tooltip_pos.y -= tooltip_height;
+        tooltip_pos.y -= borderSize;
     }
 
+    if (tooltip_pos.x + tooltip_width >= WIDTH) {
+        tooltip_pos.x -= tooltip_width;
+        tooltip_pos.x -= borderSize;
+    }
+
+    Rectangle tooltip_rec = {tooltip_pos.x, tooltip_pos.y, tooltip_width, tooltip_height};
     DrawRectangleRec(tooltip_rec, UI_NORD);
 
     NPatchInfo patch = {.source = {0, 0, spell_box_select.width, spell_box_select.height},
@@ -343,24 +355,9 @@ void render_tooltip() {
     int text_center = get_width_center(tooltip_rec, tooltip_title, TOOLTIP_TITLE_FONT_SIZE);
     DrawText(tooltip_title, text_center, inner.y, TOOLTIP_TITLE_FONT_SIZE, WHITE);
 
-    char line[1024] = {0};
-    int ptr = 0;
-    int line_index = 1;
-    int desc_ptr = 0;
-    while (tooltip_description[desc_ptr] != '\0') {
-        if (tooltip_description[desc_ptr] == '\n') {
-            line[ptr] = '\0';
-            DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
-            ptr = 0;
-            line_index++;
-        } else {
-            line[ptr] = tooltip_description[desc_ptr];
-            ptr++;
-        }
-        desc_ptr++;
+    for (int i = 0; i < line_count; i++) {
+        DrawText(lines[i], inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * (i + 1), 24, LIGHTGRAY);
     }
-    line[ptr] = '\0';
-    DrawText(line, inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * line_index, 24, LIGHTGRAY);
 }
 
 // Card

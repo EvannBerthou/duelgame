@@ -99,9 +99,7 @@ void write_packet(net_packet* p, int fd) {
         b += n;
     }
 
-    if (n == 0) {
-        LOG("Client %d disconnected", fd);
-    } else if (n < 0) {
+    if (n < 0) {
         LOGL(LL_ERROR, "Error sending packet of type %d %s", p->type,
              strerror(errno));
     }
@@ -117,7 +115,10 @@ void write_packet(net_packet* p, int fd) {
 int packet_read(net_packet* p, int fd) {
     uint8_t packet_len;
     int n = recv_data(fd, &packet_len, sizeof(packet_len));
-    if (n < 0) {
+    if (n == 0) {
+        LOG("Client %d disconnected (read)", fd);
+        return -1;
+    } else if (n < 0) {
         LOGL(LL_ERROR, "Error recieving packet header %s", strerror(errno));
         return -1;
     }
@@ -131,10 +132,8 @@ int packet_read(net_packet* p, int fd) {
         packet_size_left -= n;
         b += n;
     }
-    if (n == 0) {
-        LOG("Client %d disconnected", fd);
-        return -1;
-    } else if (n < 0) {
+
+    if (n < 0) {
         LOGL(LL_ERROR, "Error recieving packet of type %d %s", p->type,
              strerror(errno));
         return -1;

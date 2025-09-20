@@ -18,6 +18,7 @@ typedef enum {
     SLASH_ATTACK,
     HEAL_ATTACK,
     ICONS,
+    EFFECTS,
     UI_BUTTON_CLICKED,
     UI_TAB_SWITCH,
     MOVE_SOUND,

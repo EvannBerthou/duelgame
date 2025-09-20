@@ -152,22 +152,8 @@ void damage_player(player_info *from, player_info *to, const spell *s) {
     int damage = get_spell_damage(from, s);
     to->stats[STAT_HEALTH].value = fmin(fmax(to->stats[STAT_HEALTH].value - damage, 0), to->stats[STAT_HEALTH].max);
     if (s->effect != SE_NONE) {
-        if (s->effect == SE_CLEANSE) {
-            for (int i = 0; i < SE_COUNT; i++) {
-                to->effect[i] = false;
-                to->effect_round_left[i] = 0;
-                to->spell_effect[i] = NULL;
-            }
-        } else {
-            LOG("Applying effect %d to %s", s->effect, to->name);
-            to->effect[s->effect] = true;
-            to->effect_round_left[s->effect] = s->effect_duration;
-            to->spell_effect[s->effect] = s;
-        }
+        apply_effect(to, s);
     }
-
-    net_packet_player_update u = pkt_from_info(to);
-    broadcast(PKT_PLAYER_UPDATE, &u);
 }
 
 void reset_player(player_info *player) {
@@ -182,6 +168,7 @@ void reset_player(player_info *player) {
         player->effect_round_left[i] = 0;
         player->spell_effect[i] = NULL;
     }
+
     net_packet_player_update u = pkt_from_info(player);
     u.immediate = true;
     broadcast(PKT_PLAYER_UPDATE, &u);
@@ -193,9 +180,8 @@ player_info *get_player_from_fd(int fd) {
             return &players[i];
         }
     }
-    LOG("Unkown player");
+    LOG("Unknown player with fd=%d", fd);
     exit(1);
-    return NULL;
 }
 
 // Game logic
@@ -256,7 +242,11 @@ void play_round(player_info *player) {
                         if (s->stat_value != 0) {
                             update_stats(other, s);
                         }
+                    } else if (s->cast_type == CT_EFFECT) {
+                        apply_effect(other, s);
                     }
+                    net_packet_player_update u = pkt_from_info(other);
+                    broadcast(PKT_PLAYER_UPDATE, &u);
                 }
             }
         } else {
