@@ -51,12 +51,18 @@ typedef enum {
     SE_COUNT,
 
     SE_CLEANSE = 100,
+    SE_DODGE,
+    SE_FOCUS,
+    SE_BLOCK,
+    SE_BANISH,
+    SE_REVERT,
 } spell_effect;
 
 typedef enum { SI_UNKNOWN, SI_MOVE, SI_ATTACK, SI_WAND, SI_COUNT } spell_icon;
 
 typedef enum {
     SA_NONE,
+    SA_DODGE_READY,
     SA_SLASH,
     SA_FOCUS,
     SA_STUN,
@@ -136,7 +142,7 @@ void free_map(map_layer* m);
 typedef enum {
     RS_PLAYING,
     RS_WAITING,
-    RS_PLAYING_ROUND,
+    RS_PLAYING_TURN,
     RS_WAITING_ANIMATIONS,
     RS_PLAYING_EFFECTS,
     RS_COUNT,
@@ -180,6 +186,10 @@ typedef struct {
     uint8_t effect[SE_COUNT];
     uint8_t effect_round_left[SE_COUNT];
     const spell* spell_effect[SE_COUNT];
+
+    // Special effects that trigger on future actions. Ex: Dodge, Focus
+    uint8_t turn_effect;
+    uint8_t turn_effect_duration_left;
 } player_info;
 
 const char* get_log(int idx);

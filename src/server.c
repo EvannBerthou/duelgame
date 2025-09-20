@@ -168,6 +168,8 @@ void reset_player(player_info *player) {
         player->effect_round_left[i] = 0;
         player->spell_effect[i] = NULL;
     }
+    player->turn_effect = SE_NONE;
+    player->turn_effect_duration_left = 0;
 
     net_packet_player_update u = pkt_from_info(player);
     u.immediate = true;
@@ -184,9 +186,19 @@ player_info *get_player_from_fd(int fd) {
     exit(1);
 }
 
+bool player_on_cell(int x, int y) {
+    FOREACH_PLAYER(i, player) {
+        // The player tries to move on the same cell as another player so we cancel it
+        if (player->x == x && player->y == y) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Game logic
 
-void play_round(player_info *player) {
+void play_turn(player_info *player) {
     if (player->action == PA_STUNNED) {
         LOG("Player %d can't play this round", player->id);
         net_packet_player_update u = pkt_from_info(player);
@@ -223,30 +235,44 @@ void play_round(player_info *player) {
             pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
         broadcast(PKT_PLAYER_ACTION, &action);
         if (s->type == ST_MOVE) {
-            FOREACH_PLAYER(i, other) {
-                // The player tries to move on the same cell as another player so we cancel it
-                if (other->x == player->ax && other->y == player->ay && other->id != player->id) {
+            if (s->effect == SE_DODGE) {
+                player->turn_effect = SE_DODGE;
+                player->turn_effect_duration_left = 0;
+                LOG("Player %d is ready to dodge", player->id);
+            } else {
+                if (player_on_cell(player->ax, player->ay)) {
                     player->state = RS_PLAYING;
                     return;
                 }
+                player->x = player->ax;
+                player->y = player->ay;
             }
-            player->x = player->ax;
-            player->y = player->ay;
-            net_packet_player_update u = pkt_from_info(player);
-            broadcast(PKT_PLAYER_UPDATE, &u);
         } else if (s->type == ST_TARGET) {
             FOREACH_PLAYER(i, other) {
                 if (other->x == player->ax && other->y == player->ay) {
-                    if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
-                        damage_player(player, other, s);
-                        if (s->stat_value != 0) {
-                            update_stats(other, s);
+                    if (other->turn_effect == SE_DODGE) {
+                        if (player_on_cell(other->ax, other->ay)) {
+                            player->state = RS_PLAYING;
+                            return;
                         }
-                    } else if (s->cast_type == CT_EFFECT) {
-                        apply_effect(other, s);
+                        LOG("Player %d dodged!", player->id);
+                        other->x = other->ax;
+                        other->y = other->ay;
+                    } else if (other->turn_effect == SE_BLOCK) {
+                        LOG("Player %s blocked the attack and %s is stunned", other->name, player->name);
+                        player->effect[SE_STUN] = true;
+                        player->effect_round_left[SE_STUN] = 2;
+                        player->spell_effect[SE_STUN] = &all_spells[6]; //TODO: Should not be hardcoded
+                    } else {
+                        if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
+                            damage_player(player, other, s);
+                            if (s->stat_value != 0) {
+                                update_stats(other, s);
+                            }
+                        } else if (s->cast_type == CT_EFFECT) {
+                            apply_effect(other, s);
+                        }
                     }
-                    net_packet_player_update u = pkt_from_info(other);
-                    broadcast(PKT_PLAYER_UPDATE, &u);
                 }
             }
         } else {
@@ -435,7 +461,7 @@ void handle_message(int fd) {
         if (all_played) {
             sort_actions();
             FOREACH_PLAYER(i, player) {
-                play_round(&players[player_round_order[i]]);
+                play_turn(&players[player_round_order[i]]);
             }
             FOREACH_PLAYER(i, player) {
                 for (int j = 0; j < SE_COUNT; j++) {
@@ -457,6 +483,14 @@ void handle_message(int fd) {
                 }
                 net_packet_player_update u = pkt_from_info(&players[i]);
                 broadcast(PKT_PLAYER_UPDATE, &u);
+            }
+
+            FOREACH_PLAYER(i, player) {
+                if (player->turn_effect_duration_left == 0) {
+                    player->turn_effect = SE_NONE;
+                } else {
+                    player->turn_effect_duration_left--;
+                }
             }
 
             int alive_count = 0;

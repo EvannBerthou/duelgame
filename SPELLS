@@ -43,10 +43,7 @@ Stats ideas
 
 To implements :
 
-Dodge
-Focus
 Sacrify => Implement ST_AROUND
-Block
 Banish
 Revert
 Knockback => Need to compute the direction

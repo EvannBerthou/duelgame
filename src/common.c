@@ -114,6 +114,7 @@ const spell all_spells[] = {
                     "should have been taken.",
      .icon = SI_MOVE,
      .type = ST_MOVE,
+     .effect = SE_DODGE,
      .range = 3,
      .speed = 200,
      .cooldown = 2},
@@ -134,6 +135,8 @@ const spell all_spells[] = {
         .cast_animation = SA_FOCUS,
         .icon = SI_ATTACK,
         .type = ST_TARGET,
+        .effect = SE_FOCUS,
+        .cast_type = CT_CAST,
         .range = 0,
         .speed = 100,
         .cooldown = 2,
@@ -200,12 +203,13 @@ const spell all_spells[] = {
     // Defensive
     {
         .name = "Block",
-        .description = "If casted first, will block the next attack\nIf the ennemy is hit hits the player, the ennemy "
+        .description = "If casted first, will block the next attack\nIf the ennemy is hit hits the player,\nthe ennemy "
                        "will be stunned.",
         .cast_animation = SA_BLOCK,
         .type = ST_TARGET,
+        .effect = SE_BLOCK,
         .range = 0,
-        .speed = 50,
+        .speed = 120,
         .cooldown = 2,
     },
     {
@@ -352,6 +356,10 @@ int get_spell_damage(player_info *info, const spell *s) {
         return fmax(1, round(info->stats[STAT_HEALTH].value * (s->damage_value / 100.f)));
     }
 
+    if (info->turn_effect == SE_FOCUS) {
+        return 12;
+    }
+
     return s->damage_value + info->stats[STAT_AP].value / 4;
 }
 
@@ -362,6 +370,12 @@ void apply_effect(player_info *p, const spell *s) {
             p->effect_round_left[i] = 0;
             p->spell_effect[i] = NULL;
         }
+    } else if (s->effect == SE_FOCUS) {
+        p->turn_effect = SE_FOCUS;
+        p->turn_effect_duration_left = 1;
+    } else if (s->effect == SE_BLOCK) {
+        p->turn_effect = SE_BLOCK;
+        p->turn_effect_duration_left = 0;
     } else {
         LOG("Applying effect %d to %s", s->effect, p->name);
         p->effect[s->effect] = true;
@@ -370,22 +384,21 @@ void apply_effect(player_info *p, const spell *s) {
     }
 }
 
-
-void init_queue(queue* q, size_t elem_size) {
+void init_queue(queue *q, size_t elem_size) {
     q->content = malloc(elem_size * MAX_QUEUE_SIZE);
     q->elem_size = elem_size;
     reset_queue(q);
 }
 
-bool queue_full(queue* q) {
+bool queue_full(queue *q) {
     return q->size == MAX_QUEUE_SIZE;
 }
 
-bool queue_empty(queue* q) {
+bool queue_empty(queue *q) {
     return q->size == 0;
 }
 
-bool queue_push(queue* q, void* data) {
+bool queue_push(queue *q, void *data) {
     if (queue_full(q)) {
         return false;
     }
@@ -396,7 +409,7 @@ bool queue_push(queue* q, void* data) {
     return true;
 }
 
-bool queue_pop(queue* q, void* out) {
+bool queue_pop(queue *q, void *out) {
     if (queue_empty(q)) {
         return false;
     }

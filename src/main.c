@@ -232,7 +232,6 @@ typedef enum {
     PAS_NONE,
     PAS_MOVING,
     PAS_DAMAGE,
-    PAS_STUNNED,
     PAS_BURNING,
     PAS_BUMPING,
     PAS_DYING,
@@ -998,11 +997,13 @@ void render_player(player *p) {
                 // PlaySound(death_sound);
             }
         }
-    } else if (p->animation_state == PAS_STUNNED) {
+    } else if (p->info.effect[SE_STUN]) {
         c = GRAY;
         player_sprite = get_sprite(player_textures, PLAYER_ANIMATION_COUNT, 0);
     } else if (p->animation_state == PAS_BURNING) {
         c = ORANGE;
+    } else if (p->info.turn_effect == SE_FOCUS) {
+        c = BLUE;
     } else if (p->animation_state == PAS_BUMPING) {
         double progress = get_progress(p->action_animation);
         if (progress < 0.5f) {  // Moving forward
@@ -1074,7 +1075,7 @@ void render_player_actions(player *p) {
             // TODO: Should not be here ?
             if (button_clicked(b) && players[current_player].info.cooldowns[i] == 0) {
                 info->action = PA_SPELL;
-                p->selected_spell = i;
+                set_selected_spell(p, i);
             }
         }
     }
@@ -1110,6 +1111,15 @@ void render_player_move(player_move *move) {
         Vector2 pos = grid2screen(move->position);
         render_preview_move(pos);
     }
+}
+
+player *get_player_at(Vector2 pos) {
+    FOREACH_PLAYER(i, player) {
+        if (v2eq(V(player->info.x, player->info.y), pos)) {
+            return player;
+        }
+    }
+    return NULL;
 }
 
 player *get_player(int ith) {
@@ -1258,6 +1268,7 @@ void queue_spell_animation(spell_animation anim, Vector2 target, player *caster,
     request.spell = s;
     switch (anim) {
         case SA_NONE:
+        case SA_DODGE_READY:
             return;
         case SA_SLASH:
             request.animation_time = 0.3f / 3.f;
@@ -1329,28 +1340,46 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
     // TODO: We should do pathfinding instead of sliding across the map
     // and scale animation time with distance
     if (s->type == ST_MOVE) {
-        p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-        p->moving_target = cell;
-        p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
-        if (v2eq(cell, V(p->info.x, p->info.y)) == false) {
-            PlaySound(move_sound);
+        if (s->effect == SE_DODGE) {
+            p->info.turn_effect = SE_DODGE;
+            p->info.turn_effect_duration_left = 1;
+            p->moving_target = cell;
+        } else {
+            p->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+            p->moving_target = cell;
+            p->animation_state = target == NULL ? PAS_MOVING : PAS_BUMPING;
+            if (v2eq(cell, V(p->info.x, p->info.y)) == false) {
+                PlaySound(move_sound);
+            }
         }
     } else if (s->type == ST_TARGET) {
         if (target != NULL) {
-            int damage = get_spell_damage(&p->info, s);
-            if (damage != 0) {
-                target->info.stats[STAT_HEALTH].value = fmax(target->info.stats[STAT_HEALTH].value - damage, 0);
-                LOG("Player %s now has %d HP", target->info.name, target->info.stats[STAT_HEALTH].value);
+            if (target->info.turn_effect == SE_DODGE) {
                 target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
-                target->animation_state = PAS_DAMAGE;
-            }
-            if (s->stat_value != 0) {
-                if (s->stat_max) {
-                    target->info.stats[s->stat].max = fmin(target->info.stats[s->stat].max + s->stat_value, 200);
-                    target->info.stats[s->stat].value = fmin(target->info.stats[s->stat].value + s->stat_value, 200);
-                } else {
-                    target->info.stats[s->stat].value =
-                        fmin(target->info.stats[s->stat].value + s->damage_value, target->info.stats[s->stat].max);
+                player *new_target = get_player_at(target->moving_target);
+                target->animation_state = new_target == NULL ? PAS_MOVING : PAS_BUMPING;
+                PlaySound(move_sound);
+            } else if (target->info.turn_effect == SE_BLOCK) {
+                p->info.effect[SE_STUN] = true;
+                p->info.effect_round_left[SE_STUN] = 2;
+                p->info.spell_effect[SE_STUN] = &all_spells[6]; //TODO: Should not be hardcoded
+            } else {
+                int damage = get_spell_damage(&p->info, s);
+                if (damage != 0) {
+                    target->info.stats[STAT_HEALTH].value = fmax(target->info.stats[STAT_HEALTH].value - damage, 0);
+                    LOG("Player %s now has %d HP", target->info.name, target->info.stats[STAT_HEALTH].value);
+                    target->action_animation = new_animation(AT_ONESHOT, 0.3f, 1);
+                    target->animation_state = PAS_DAMAGE;
+                }
+                if (s->stat_value != 0) {
+                    if (s->stat_max) {
+                        target->info.stats[s->stat].max = fmin(target->info.stats[s->stat].max + s->stat_value, 200);
+                        target->info.stats[s->stat].value =
+                            fmin(target->info.stats[s->stat].value + s->stat_value, 200);
+                    } else {
+                        target->info.stats[s->stat].value =
+                            fmin(target->info.stats[s->stat].value + s->damage_value, target->info.stats[s->stat].max);
+                    }
                 }
             }
         }
@@ -1385,7 +1414,6 @@ void play_turn() {
     } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left[SE_STUN] > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-            p->animation_state = PAS_STUNNED;
         }
     }
     p->info.state = RS_PLAYING;
@@ -1420,6 +1448,11 @@ void end_turn() {
             if (player->info.cooldowns[j] > 0) {
                 player->info.cooldowns[j]--;
             }
+        }
+        if (player->info.turn_effect_duration_left == 0) {
+            player->info.turn_effect = SE_NONE;
+        } else {
+            player->info.turn_effect_duration_left--;
         }
     }
     action_step = 0;
@@ -1611,13 +1644,13 @@ void handle_packet(net_packet *p) {
         action->spell = a->spell;
         action_count++;
     } else if (p->type == PKT_TURN_END) {
-        state = RS_PLAYING_ROUND;
+        state = RS_PLAYING_TURN;
     } else if (p->type == PKT_ROUND_START) {
         gs = GS_STARTED;
     } else if (p->type == PKT_ROUND_END) {
         net_packet_round_end *e = (net_packet_round_end *)p->content;
         LOG("Round ended");
-        state = RS_PLAYING_ROUND;
+        state = RS_PLAYING_TURN;
         winner_id = e->winner_id;
         gs = GS_ROUND_ENDING;
         FOREACH_PLAYER(i, player) {
@@ -1989,7 +2022,7 @@ void render_scene_lobby() {
             idx++;
         }
 
-        // Map
+        // TODO: Server settings
         if (server_config_card.selected_tab == 0) {
             DrawTextCenter(server_config_card.rec, "Dust 2", 64, WHITE);
         } else if (server_config_card.selected_tab == 1) {
@@ -2067,7 +2100,7 @@ void update_scene_in_game() {
                 players[current_player].round_move = move;
                 players[current_player].info.state = RS_WAITING;
             }
-        } else if (state == RS_PLAYING_ROUND) {
+        } else if (state == RS_PLAYING_TURN) {
             play_turn();
             next_state = RS_WAITING_ANIMATIONS;
         } else if (state == RS_WAITING_ANIMATIONS) {
@@ -2092,7 +2125,7 @@ void update_scene_in_game() {
             if (wait_for_animations() && queue_empty(&spell_animation_queue)) {
                 if (action_step < action_count - 1) {
                     action_step++;
-                    next_state = RS_PLAYING_ROUND;
+                    next_state = RS_PLAYING_TURN;
                 } else {
                     play_effects(get_player(effect_player_turn));
                     next_state = RS_PLAYING_EFFECTS;
@@ -2126,6 +2159,7 @@ void update_scene_in_game() {
                     if (effect_player_turn < player_count()) {
                         play_effects(get_player(effect_player_turn));
                     } else {
+                        //TODO: Should be a new state in which we handle player death too
                         end_turn();
                         next_state = RS_PLAYING;
                         effect_player_turn = 0;
@@ -2159,22 +2193,23 @@ void render_scene_in_game() {
             render_player(player);
         }
 
-        if (current_spell_animation != NO_ANIMATION) {
-            Vector2 position = grid2screen(current_animation.target_cell);
-            DrawSpriteFromSheet(current_animation.animation_sprite, current_spell_animation, position, 1);
-        }
-
         render_outter_map();
 
         if (state == RS_PLAYING) {
             render_player_actions(&players[current_player]);
         } else if (state == RS_WAITING) {
             render_player_move(&players[current_player].round_move);
-        } else if (state == RS_PLAYING_ROUND || state == RS_WAITING_ANIMATIONS) {
+        } else if (state == RS_PLAYING_TURN || state == RS_WAITING_ANIMATIONS) {
             if (players[current_player].info.state == RS_WAITING) {
                 render_player_move(&players[current_player].round_move);
             }
         }
+
+        if (current_spell_animation != NO_ANIMATION) {
+            Vector2 position = grid2screen(current_animation.target_cell);
+            DrawSpriteFromSheet(current_animation.animation_sprite, current_spell_animation, position, 1);
+        }
+
         render_infos();
         state = next_state;
         FOREACH_PLAYER(i, player) {

@@ -3,20 +3,18 @@
 - Spritesheet metadata (sprite width, etc)
     - Atlas ?
 - Reorganise assets folder
-- Remake states (GS, state, etc)
 - Ligthing
 - Background animations
 - In game UI should move when game is resized (avoid having big gap at the top and bottom of the game)
 - Reduce draw calls
 - Save and load builds
-- Weird animations at the end of the round when 1 burn + 2 target
 - Implement remaining spells
 - Particule system
 - Infos are kinda ugly
+- Moving should be an animation just like spell casting
+    - Animations should include a path instead of just a cell
 
 - Anti-cheat
     - Check server side that moves are valid
     - Server side cooldown on spells
     - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
-- Moving should be an animation just like spell casting
-    - Animations should include a path instead of just a cell
