@@ -255,8 +255,24 @@ player players[MAX_PLAYER_COUNT] = {0};
 int current_player = -1;
 int master_player = 0;
 uint8_t my_spells[MAX_SPELL_COUNT] = {0, 1, 2, 3};
+
+typedef struct {
+    double animation_time;
+    int frame_count;
+    Texture2D animation_sprite;
+    Vector2 target_cell;
+    Sound sound;
+
+    player *caster;
+    const spell *spell;
+    player *target;
+
+    bool active;
+} animation_request;
+
+queue spell_animation_queue = {0};
+animation_request current_animation = {0};
 anim_id current_spell_animation = NO_ANIMATION;
-Vector2 spell_animation_cell = {0};
 
 // Main menu
 const char *error = NULL;
@@ -276,6 +292,8 @@ typedef struct {
 player_turn_action actions[MAX_PLAYER_ROUND_ACTION_COUNT] = {0};
 int action_count = 0;
 int action_step = 0;
+
+int effect_player_turn = 0;
 
 typedef struct {
     int player;
@@ -630,6 +648,14 @@ bool wait_for_animations() {
     return true;
 }
 
+void play_animation_request() {
+    queue_pop(&spell_animation_queue, &current_animation);
+    current_spell_animation =
+        new_animation(AT_ONESHOT, current_animation.animation_time, current_animation.frame_count);
+    PlaySound(current_animation.sound);
+    current_animation.active = true;
+}
+
 // Assets
 
 void load_assets() {
@@ -966,10 +992,10 @@ void render_player(player *p) {
         c = RED;
         if (anim_finished(p->action_animation)) {
             if (i->stats[STAT_HEALTH].value <= 0) {
-                p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-                p->animation_state = PAS_DYING;
-                current_spell_animation = NO_ANIMATION;
-                PlaySound(death_sound);
+                // p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+                // p->animation_state = PAS_DYING;
+                // current_spell_animation = NO_ANIMATION;
+                // PlaySound(death_sound);
             }
         }
     } else if (p->animation_state == PAS_STUNNED) {
@@ -1084,6 +1110,14 @@ void render_player_move(player_move *move) {
         Vector2 pos = grid2screen(move->position);
         render_preview_move(pos);
     }
+}
+
+player *get_player(int ith) {
+    FOREACH_PLAYER(i, player) {
+        if (i == ith)
+            return player;
+    }
+    return NULL;
 }
 
 // UI
@@ -1210,8 +1244,7 @@ void reset_game() {
 }
 
 // TODO: Add more animations
-// TODO: Use animation queue
-void set_spell_animation(spell_animation anim, Vector2 target) {
+void queue_spell_animation(spell_animation anim, Vector2 target, player *caster, const spell *s) {
     player *player_on_cell = NULL;
     FOREACH_PLAYER(i, player) {
         if (v2eq(target, V(player->info.x, player->info.y))) {
@@ -1219,37 +1252,52 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
             break;
         }
     }
+    animation_request request = {0};
+    request.caster = caster;
+    request.target = player_on_cell;
+    request.spell = s;
     switch (anim) {
         case SA_NONE:
-            break;
+            return;
         case SA_SLASH:
-            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
-            animation_sprite = slash_attack;
-            spell_animation_cell = target;
-            PlaySound(attack_sound);
+            request.animation_time = 0.3f / 3.f;
+            request.frame_count = SLASH_ANIMATION_COUNT;
+            request.animation_sprite = slash_attack;
+            request.target_cell = target;
+            request.sound = attack_sound;
             break;
         case SA_STUN:
-            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
-            animation_sprite = slash_attack;
-            spell_animation_cell = target;
-            PlaySound(stun_sound);
+            request.animation_time = 0.3f / 3.f;
+            request.frame_count = SLASH_ANIMATION_COUNT;
+            request.animation_sprite = slash_attack;
+            request.target_cell = target;
+            request.sound = stun_sound;
             break;
         case SA_FIREBALL:
-            current_spell_animation = new_animation(AT_ONESHOT, 0.3f / 3.f, SLASH_ANIMATION_COUNT);
-            animation_sprite = slash_attack;
-            spell_animation_cell = target;
-            PlaySound(burn_sound);
+            request.animation_time = 0.3f / 3.f;
+            request.frame_count = SLASH_ANIMATION_COUNT;
+            request.animation_sprite = slash_attack;
+            request.target_cell = target;
+            request.sound = burn_sound;
             break;
         case SA_BURN:
-            player_on_cell->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-            player_on_cell->animation_state = PAS_BURNING;
-            PlaySound(burn_sound);
+            // TODO: How should this case be handled
+            //  player_on_cell->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+            //  player_on_cell->animation_state = PAS_BURNING;
+            //  PlaySound(burn_sound);
+            // request.animation_time = 0.3f / 3.f;
+            request.animation_time = 3.f;
+            request.frame_count = SLASH_ANIMATION_COUNT;
+            request.animation_sprite = slash_attack;
+            request.target_cell = target;
+            request.sound = burn_sound;
             break;
         case SA_HEAL:
-            current_spell_animation = new_animation(AT_ONESHOT, 0.4f / 4.f, HEAL_ANIMATION_COUNT);
-            animation_sprite = heal_attack;
-            spell_animation_cell = target;
-            PlaySound(heal_sound);
+            request.animation_time = 0.4f / 4.f;
+            request.frame_count = HEAL_ANIMATION_COUNT;
+            request.animation_sprite = heal_attack;
+            request.target_cell = target;
+            request.sound = heal_sound;
             break;
         case SA_FOCUS:
         case SA_POISON_CAST:
@@ -1265,12 +1313,16 @@ void set_spell_animation(spell_animation anim, Vector2 target) {
         case SA_FORTIFY:
         case SA_SLOWDOWN:
         case SA_SPEEDUP:
-            current_spell_animation = new_animation(AT_ONESHOT, 3.f / 3.f, SLASH_ANIMATION_COUNT);
-            animation_sprite = slash_attack;
-            spell_animation_cell = target;
-            PlaySound(attack_sound);
+            // request.animation_time = 0.3f / 3.f;
+            request.animation_time = 3.f;
+            request.frame_count = SLASH_ANIMATION_COUNT;
+            request.animation_sprite = slash_attack;
+            request.target_cell = target;
+            request.sound = attack_sound;
             break;
     }
+
+    queue_push(&spell_animation_queue, &request);
 }
 
 void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
@@ -1307,9 +1359,10 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
     }
 }
 
-void play_round() {
+// TODO: Should only queue animations but MOVE are a special case for now
+void play_turn() {
     player_turn_action *a = &actions[action_step];
-    LOG("Playing round %d/%d for %d", action_step, action_count, a->player);
+    LOG("Playing turn %d/%d for %d", action_step, action_count, a->player);
     player *p = &players[a->player];
     if (p->dead) {
         return;
@@ -1317,23 +1370,17 @@ void play_round() {
 
     if (a->action == PA_SPELL) {
         const spell *s = &all_spells[a->spell];
-        LOG("Casting %s", s->name);
-
-        player *target = NULL;
-        FOREACH_PLAYER(i, player) {
-            if (v2eq(a->target, (Vector2){player->info.x, player->info.y})) {
-                target = player;
-                break;
+        if (s->type != ST_TARGET) {
+            player *target = NULL;
+            FOREACH_PLAYER(i, player) {
+                if (v2eq(a->target, (Vector2){player->info.x, player->info.y})) {
+                    target = player;
+                    break;
+                }
             }
-        }
-        if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
             execute_spell(p, s, a->target, target);
-            set_spell_animation(s->cast_animation, a->target);
-            if (s->effect != SE_NONE && target != NULL) {
-                apply_effect(&target->info, s);
-            }
-        } else if (s->cast_type == CT_EFFECT) {
-            apply_effect(&target->info, s);
+        } else {
+            queue_spell_animation(s->cast_animation, a->target, p, s);
         }
     } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left[SE_STUN] > 0) {
@@ -1344,27 +1391,21 @@ void play_round() {
     p->info.state = RS_PLAYING;
 }
 
-void play_effects() {
-    FOREACH_PLAYER(i, player) {
-        player_info *info = &player->info;
-        if (player->dead == false) {
-            info->x = updates[i].position.x;
-            info->y = updates[i].position.y;
-            for (int j = 0; j < SE_COUNT; j++) {
-                if (info->effect[j]) {
-                    const spell *s = info->spell_effect[j];
-                    if (s->cast_type == CT_EFFECT || s->cast_type == CT_CAST_EFFECT) {
-                        execute_spell(player, s, V(info->x, info->y), player);
-                        // TODO: Play all effect animations
-                        // set_spell_animation(s->effect_animation, V(info->x, info->y));
-                    }
+void play_effects(player *player) {
+    player_info *info = &player->info;
+    if (player->dead == false) {
+        for (int i = 0; i < SE_COUNT; i++) {
+            if (info->effect[i]) {
+                const spell *s = info->spell_effect[i];
+                if (s->cast_type == CT_EFFECT || s->cast_type == CT_CAST_EFFECT) {
+                    queue_spell_animation(s->effect_animation, V(info->x, info->y), player, s);
                 }
             }
         }
     }
 }
 
-void end_round() {
+void end_turn() {
     FOREACH_PLAYER(i, player) {
         for (int j = 0; j < STAT_COUNT; j++) {
             player->info.stats[j] = updates[i].stats[j];
@@ -1383,13 +1424,14 @@ void end_round() {
     }
     action_step = 0;
     action_count = 0;
+    current_animation.active = false;
     compute_spell_range(&players[current_player]);
     if (gs == GS_ROUND_ENDING || gs == GS_GAME_ENDING) {
         if (winner_id == current_player) {
             PlaySound(win_round_sound);
         } else {
             PlaySound(lose_round_sound);
-        };
+        }
         if (gs == GS_GAME_ENDING) {
             active_scene = SCENE_GAME_ENDED;
         } else {
@@ -2026,38 +2068,69 @@ void update_scene_in_game() {
                 players[current_player].info.state = RS_WAITING;
             }
         } else if (state == RS_PLAYING_ROUND) {
-            play_round();
+            play_turn();
             next_state = RS_WAITING_ANIMATIONS;
         } else if (state == RS_WAITING_ANIMATIONS) {
-            if (wait_for_animations()) {
+            if (current_spell_animation != NO_ANIMATION && anim_finished(current_spell_animation)) {
+                current_spell_animation = NO_ANIMATION;
+                const spell *s = current_animation.spell;
+                LOG("%s is casting %s", current_animation.caster->info.name, s->name);
+                if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
+                    execute_spell(current_animation.caster, s, current_animation.target_cell, current_animation.target);
+                    if (s->effect != SE_NONE && current_animation.target != NULL) {
+                        apply_effect(&current_animation.target->info, s);
+                    }
+                } else if (s->cast_type == CT_EFFECT && current_animation.target != NULL) {
+                    apply_effect(&current_animation.target->info, s);
+                }
+            }
+
+            if (current_spell_animation == NO_ANIMATION && !queue_empty(&spell_animation_queue)) {
+                play_animation_request();
+            }
+
+            if (wait_for_animations() && queue_empty(&spell_animation_queue)) {
                 if (action_step < action_count - 1) {
                     action_step++;
                     next_state = RS_PLAYING_ROUND;
                 } else {
-                    play_effects();
+                    play_effects(get_player(effect_player_turn));
                     next_state = RS_PLAYING_EFFECTS;
                 }
             }
         } else if (state == RS_PLAYING_EFFECTS) {
-            // Checks if player died from effects (ex: burn)
-            FOREACH_PLAYER(i, player) {
-                if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
-                    player->dead = true;
+            if (current_spell_animation != NO_ANIMATION && anim_finished(current_spell_animation)) {
+                current_spell_animation = NO_ANIMATION;
+                player *player = &players[effect_player_turn];
+                if (player->dead == false) {
+                    const spell *s = current_animation.spell;
+                    execute_spell(player, s, V(player->info.x, player->info.y), player);
                 }
             }
-            if (wait_for_animations()) {
-                FOREACH_PLAYER(i, player) {
-                    if (player->info.stats[STAT_HEALTH].value <= 0 && player->dead == false) {
-                        player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-                        player->animation_state = PAS_DYING;
-                        PlaySound(death_sound);
-                    }
-                }
+            if (current_spell_animation == NO_ANIMATION && !queue_empty(&spell_animation_queue)) {
+                play_animation_request();
             }
 
-            if (wait_for_animations()) {
-                end_round();
-                next_state = RS_PLAYING;
+            if (wait_for_animations() && queue_empty(&spell_animation_queue)) {
+                current_spell_animation = NO_ANIMATION;
+
+                player *player = &players[effect_player_turn];
+                if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
+                    player->dead = true;
+                } else if (player->info.stats[STAT_HEALTH].value <= 0 && player->dead == false) {
+                    player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
+                    player->animation_state = PAS_DYING;
+                    PlaySound(death_sound);
+                } else {
+                    effect_player_turn++;
+                    if (effect_player_turn < player_count()) {
+                        play_effects(get_player(effect_player_turn));
+                    } else {
+                        end_turn();
+                        next_state = RS_PLAYING;
+                        effect_player_turn = 0;
+                    }
+                }
             }
         }
 
@@ -2087,11 +2160,8 @@ void render_scene_in_game() {
         }
 
         if (current_spell_animation != NO_ANIMATION) {
-            Vector2 position = grid2screen(spell_animation_cell);
-            DrawSpriteFromSheet(animation_sprite, current_spell_animation, position, 1);
-            if (anim_finished(current_spell_animation)) {
-                current_spell_animation = NO_ANIMATION;
-            }
+            Vector2 position = grid2screen(current_animation.target_cell);
+            DrawSpriteFromSheet(current_animation.animation_sprite, current_spell_animation, position, 1);
         }
 
         render_outter_map();
@@ -2215,6 +2285,7 @@ int main(int argc, char **argv) {
 
     init_queue(&pkt_queue, sizeof(net_packet));
     init_queue(&map_queue, sizeof(map_node));
+    init_queue(&spell_animation_queue, sizeof(animation_request));
 
     if (ip != NULL) {
         join_game(ip, port, username);

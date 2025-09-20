@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdio.h>
 #include "common.h"
 
 #define NET_SIZE(...)

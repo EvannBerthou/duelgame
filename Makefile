@@ -24,7 +24,7 @@ run: build/server build/main_game
 	killall server || true
 	killall main_game || true
 	./build/server &
-	./build/main_game &
+	./build/main_game > /dev/null &
 	./build/main_game
 
 packer:

@@ -18,3 +18,5 @@
     - Check server side that moves are valid
     - Server side cooldown on spells
     - Clients should not include their ID in packet sent because it allows anyone to send any action as someone else
+- Moving should be an animation just like spell casting
+    - Animations should include a path instead of just a cell
