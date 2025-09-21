@@ -88,45 +88,120 @@ int player_count() {
 }
 
 // Map
+int MAP[MAP_HEIGHT * MAP_WIDTH] = {0};
+int PROPS[MAP_HEIGHT * MAP_WIDTH] = {0};
+int spawn_positions[MAX_PLAYER_COUNT][2] = {0};
 
-// TODO: Map should not be hardcoded
-const int MAP[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
-    {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0}, {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0},
-    {0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
+typedef enum { MLS_NONE, MLS_HEADER, MLS_SPAWN, MLS_MAP, MLS_PROPS } map_loading_stage;
 
-const int PROPS[MAP_HEIGHT][MAP_WIDTH] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
+map_loading_stage loading_stage = MLS_NONE;
+int spawn_point_index = 0;
+char *token_ptr = NULL;
 
-int spawn_positions[][2] = {
-    {0, 0},
-    {1, 0},
-    {2, 0},
-    {3, 0},
-};
+//TODO: Add some checks on ssccanf (there sould only be uint8_t inside @SPAWN, @MAP and @PROPS)
+bool handle_map_line(char *line) {
+    if (strcmp(line, "@HEADER") == 0) {
+        loading_stage = MLS_HEADER;
+    } else if (strcmp(line, "@SPAWN") == 0) {
+        loading_stage = MLS_SPAWN;
+    } else if (strcmp(line, "@SPAWN") == 0) {
+        loading_stage = MLS_SPAWN;
+    } else if (strcmp(line, "@MAP") == 0) {
+        loading_stage = MLS_MAP;
+    } else if (strcmp(line, "@PROPS") == 0) {
+        loading_stage = MLS_PROPS;
+    } else if (strcmp(line, "@END") == 0) {
+        loading_stage = MLS_NONE;
+    } else {
+        if (loading_stage == MLS_HEADER) {
+            printf("Header: '%s'\n", line);
+        } else if (loading_stage == MLS_SPAWN) {
+            assert(spawn_point_index < MAX_PLAYER_COUNT);
+            sscanf(line, "%d %d", &spawn_positions[spawn_point_index][0], &spawn_positions[spawn_point_index][1]);
+            spawn_point_index++;
+        } else if (loading_stage == MLS_MAP) {
+            int idx = 0;
+            while (*line != '\0') {
+                if (*line != ' ') {
+                    sscanf(line, "%d", &MAP[idx++]);
+                }
+                line++;
+            }
+            assert(idx == MAP_WIDTH * MAP_HEIGHT);
+        } else if (loading_stage == MLS_PROPS) {
+            int idx = 0;
+            while (*line != '\0') {
+                if (*line != ' ') {
+                    sscanf(line, "%d", &PROPS[idx++]);
+                }
+                line++;
+            }
+            assert(idx == MAP_WIDTH * MAP_HEIGHT);
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool load_map(const char *filepath) {
+    LOG("Loading map '%s'", filepath);
+    FILE *f = fopen(filepath, "r");
+    if (f == NULL) {
+        fclose(f);
+        return false;
+    }
+
+    spawn_point_index = 0;
+    for (int i = 0; i < MAP_HEIGHT * MAP_WIDTH; i++) {
+        MAP[i] = 0;
+        PROPS[i] = 0;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    rewind(f);
+
+    char *string = malloc(file_size + 1);
+    if (string == NULL) {
+        fclose(f);
+        return false;
+    }
+    fread(string, file_size, 1, f);
+    fclose(f);
+
+    char *line = string;
+    do {
+        char *next = strchrnul(line, '\n');
+        if (*next == '\0') {
+            break;
+        }
+        *next = '\0';
+        if (handle_map_line(line) == false) {
+            free(string);
+            return false;
+        }
+        line = next + 1;
+    } while (true);
+
+    // TODO: Once map is loaded we should do some checks on validty such as avoid duplicate spawn points or spawn points
+    // inside walls
+
+    free(string);
+    return true;
+}
 
 void send_map(int fd) {
     uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
-    for (int i = 0; i < MAP_HEIGHT; i++) {
-        for (int j = 0; j < MAP_WIDTH; j++) {
-            map[i * MAP_WIDTH + j] = MAP[i][j];
-        }
+    uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
+    for (int i = 0; i < MAP_HEIGHT * MAP_WIDTH; i++) {
+        map[i] = MAP[i];
+        props[i] = PROPS[i];
     }
+
     net_packet_map m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
     send_sock(PKT_MAP, &m, fd);
 
-    uint8_t props[MAP_WIDTH * MAP_HEIGHT] = {0};
-    for (int i = 0; i < MAP_HEIGHT; i++) {
-        for (int j = 0; j < MAP_WIDTH; j++) {
-            props[i * MAP_WIDTH + j] = PROPS[i][j];
-        }
-    }
     net_packet_map p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
     send_sock(PKT_MAP, &p, fd);
 }
@@ -262,7 +337,7 @@ void play_turn(player_info *player) {
                         LOG("Player %s blocked the attack and %s is stunned", other->name, player->name);
                         player->effect[SE_STUN] = true;
                         player->effect_round_left[SE_STUN] = 2;
-                        player->spell_effect[SE_STUN] = &all_spells[6]; //TODO: Should not be hardcoded
+                        player->spell_effect[SE_STUN] = &all_spells[6];  // TODO: Should not be hardcoded
                     } else {
                         if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
                             damage_player(player, other, s);
@@ -614,6 +689,12 @@ void handle_message(int fd) {
 // Main
 
 int main(int argc, char **argv) {
+    const char *default_map = "maps/default.map";
+    if (load_map(default_map) == false) {
+        LOGL(LL_ERROR, "Error loading map '%s'", default_map);
+        return 1;
+    }
+
     int port = 3000;
     POPARG(argc, argv);  // program name
     while (argc > 0) {

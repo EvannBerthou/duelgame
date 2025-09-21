@@ -14,6 +14,7 @@
 - Infos are kinda ugly
 - Moving should be an animation just like spell casting
     - Animations should include a path instead of just a cell
+- Map editor
 
 - Anti-cheat
     - Check server side that moves are valid
