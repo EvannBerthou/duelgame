@@ -1,4 +1,5 @@
 #include "common.h"
+#include <assert.h>
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
@@ -81,6 +82,26 @@ int strtoint(const char *str, int *out) {
 
     *out = (int)val;
     return 1;
+}
+
+char *inttostr(int i) {
+    static char out[4] = {0};
+    memset(out, 0, 4);
+    if (i == 0) {
+        out[0] = '0';
+    }
+    int idx = 0;
+    while (i > 0) {
+        out[idx] = i % 10 + '0';
+        i /= 10;
+        idx++;
+    }
+    for (int j = 0, k = idx - 1; j < k; j++, k--) {
+        char temp = out[j];
+        out[j] = out[k];
+        out[k] = temp;
+    }
+    return out;
 }
 
 const spell all_spells[] = {
@@ -423,4 +444,148 @@ void reset_queue(queue *q) {
     q->size = 0;
     q->front = 0;
     q->rear = -1;
+}
+
+typedef enum { MLS_NONE, MLS_HEADER, MLS_SPAWN, MLS_MAP, MLS_PROPS } map_loading_stage;
+
+map_loading_stage loading_stage = MLS_NONE;
+int spawn_point_index = 0;
+
+// TODO: Add some checks on ssccanf (there sould only be uint8_t inside @SPAWN, @MAP and @PROPS)
+bool handle_map_line(char *line, map_data *map) {
+    if (strcmp(line, "@HEADER") == 0) {
+        loading_stage = MLS_HEADER;
+    } else if (strcmp(line, "@SPAWN") == 0) {
+        loading_stage = MLS_SPAWN;
+    } else if (strcmp(line, "@SPAWN") == 0) {
+        loading_stage = MLS_SPAWN;
+    } else if (strcmp(line, "@MAP") == 0) {
+        loading_stage = MLS_MAP;
+    } else if (strcmp(line, "@PROPS") == 0) {
+        loading_stage = MLS_PROPS;
+    } else if (strcmp(line, "@END") == 0) {
+        loading_stage = MLS_NONE;
+    } else {
+        if (loading_stage == MLS_HEADER) {
+            printf("Header: '%s'\n", line);
+        } else if (loading_stage == MLS_SPAWN) {
+            assert(spawn_point_index < MAX_PLAYER_COUNT);
+            sscanf(line, "%hhu %hhu", &map->spawn_positions[spawn_point_index][0],
+                   &map->spawn_positions[spawn_point_index][1]);
+            spawn_point_index++;
+        } else if (loading_stage == MLS_MAP) {
+            int idx = 0;
+            while (*line != '\0') {
+                if (*line != ' ') {
+                    sscanf(line, "%hhu", &map->map[idx++]);
+                }
+                line++;
+            }
+            assert(idx == MAP_WIDTH * MAP_HEIGHT);
+        } else if (loading_stage == MLS_PROPS) {
+            int idx = 0;
+            while (*line != '\0') {
+                if (*line != ' ') {
+                    sscanf(line, "%hhu", &map->props[idx++]);
+                }
+                line++;
+            }
+            assert(idx == MAP_WIDTH * MAP_HEIGHT);
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool load_map(const char *filepath, map_data *map) {
+    LOG("Loading map '%s'", filepath);
+    FILE *f = fopen(filepath, "r");
+    if (f == NULL) {
+        fclose(f);
+        return false;
+    }
+
+    spawn_point_index = 0;
+    for (int i = 0; i < MAP_HEIGHT * MAP_WIDTH; i++) {
+        map->map[i] = 0;
+        map->props[i] = 0;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    rewind(f);
+
+    char *string = malloc(file_size + 1);
+    if (string == NULL) {
+        fclose(f);
+        return false;
+    }
+    fread(string, file_size, 1, f);
+    fclose(f);
+
+    char *line = string;
+    do {
+        char *next = strchrnul(line, '\n');
+        if (*next == '\0') {
+            break;
+        }
+        *next = '\0';
+        if (handle_map_line(line, map) == false) {
+            free(string);
+            return false;
+        }
+        line = next + 1;
+    } while (true);
+
+    // TODO: Once map is loaded we should do some checks on validty such as avoid duplicate spawn points or spawn points
+    // inside walls
+
+    free(string);
+    return true;
+}
+
+void write_string(FILE *f, const char *str) {
+    size_t len = strlen(str);
+    fwrite(str, len, 1, f);
+}
+
+bool save_map(const char *filepath, map_data *data) {
+    FILE *f = fopen(filepath, "w");
+    if (f == NULL) {
+        fclose(f);
+        return false;
+    }
+
+    write_string(f, "@HEADER\n");
+    write_string(f, "name: Default Map\n");
+    write_string(f, "@END\n");
+
+    write_string(f, "@SPAWN\n");
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        write_string(f, inttostr(data->spawn_positions[i][0]));
+        write_string(f, " ");
+        write_string(f, inttostr(data->spawn_positions[i][1]));
+        write_string(f, "\n");
+    }
+    write_string(f, "@END\n");
+
+    write_string(f, "@MAP\n");
+    for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; i++) {
+        write_string(f, inttostr(data->map[i]));
+        write_string(f, " ");
+    }
+    write_string(f, "\n");
+    write_string(f, "@END\n");
+
+    write_string(f, "@PROPS\n");
+    for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; i++) {
+        write_string(f, inttostr(data->props[i]));
+        write_string(f, " ");
+    }
+    write_string(f, "\n");
+    write_string(f, "@END\n");
+
+    fclose(f);
+    return true;
 }

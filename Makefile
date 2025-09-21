@@ -46,7 +46,6 @@ clean:
 	-rm ./assets.pak
 	-rm ./include/assets_packed.h
 
-.PHONY: all packer clean
 
 windows: packer include/net_protocol.h
 	x86_64-w64-mingw32-gcc -Wall -Wextra src/main.c src/common.c src/ui.c src/command.c -o build/main_game_windows \
@@ -55,3 +54,9 @@ windows: packer include/net_protocol.h
 		$(PACKER_MODE) \
 		-static \
 		-I./include -L ./lib/windows -lraylib -lm -ggdb -lpthread -lwinmm -lgdi32 -lws2_32
+
+editor: build/main_game
+	./build/main_game --editor maps/default.map
+
+
+.PHONY: all packer clean editor

@@ -117,6 +117,7 @@ typedef enum {
     SCENE_LOBBY,
     SCENE_IN_GAME,
     SCENE_GAME_ENDED,
+    SCENE_EDITOR,
 } game_scene;
 
 game_scene active_scene = SCENE_MAIN_MENU;
@@ -371,6 +372,10 @@ Vector2 raindrop_target[RAINDROP_COUNT] = {0};
 Vector2 raindrop_position[RAINDROP_COUNT] = {0};
 Sound raindrop_sounds[RAINDROP_COUNT] = {0};
 
+// Editor
+map_data editor_map = {0};
+const char *editor_map_filepath = NULL;
+
 // Utils
 
 Vector2 get_mouse() {
@@ -577,6 +582,12 @@ void reset_animation(anim_id id) {
     anim_pool[id].current_time = 0;
     anim_pool[id].current_frame = 0;
     anim_pool[id].finished = false;
+}
+
+void clear_animations() {
+    for (int i = 0; i < MAX_ANIMATION_POOL; i++) {
+        anim_pool[i].active = false;
+    }
 }
 
 int get_frame(anim_id id) {
@@ -2328,7 +2339,9 @@ void render_scene_in_game() {
     DrawText(time_string, WIDTH - width - 8, 8, 48, WHITE);
 }
 
-void update_scene_round_ended() {
+//   End game
+
+void update_scene_game_ended() {
     if (IsKeyPressed(KEY_R) && is_console_closed()) {
         if (current_player == master_player) {
             send_sock(PKT_GAME_RESET, NULL, server_fd);
@@ -2336,7 +2349,7 @@ void update_scene_round_ended() {
     }
 }
 
-void render_scene_round_ended() {
+void render_scene_game_ended() {
     if (winner_id == 255) {
         DrawText("Game draw", 0, 0, 64, WHITE);
     } else {
@@ -2346,6 +2359,93 @@ void render_scene_round_ended() {
     if (current_player == 0) {
         DrawText("Press R to reset the game!", 0, 72, 64, WHITE);
     }
+}
+
+//    Editor
+void init_scene_editor() {
+    init_map(&game_map, MAP_WIDTH, MAP_HEIGHT, editor_map.map);
+    init_map(&variants, MAP_WIDTH, MAP_HEIGHT, NULL);
+    base_x_offset = (WIDTH - (CELL_SIZE * game_map.width)) / 2;
+    base_y_offset = (HEIGHT - (CELL_SIZE * game_map.height)) / 2;
+
+    init_map(&props, MAP_WIDTH, MAP_HEIGHT, editor_map.props);
+    set_props_animations();
+}
+
+void update_scene_editor() {
+    Vector2 over_cell = screen2grid(get_mouse());
+    if (get_map(&game_map, over_cell.x, over_cell.y) != -1) {
+        if (IsMouseButtonPressed(0)) {
+            set_map(&game_map, over_cell.x, over_cell.y, 0);
+            editor_map.map[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 0;
+        }
+        if (IsMouseButtonPressed(1)) {
+            set_map(&game_map, over_cell.x, over_cell.y, 1);
+            editor_map.map[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 1;
+        }
+
+        if (IsKeyPressed(KEY_R)) {
+            set_map(&props, over_cell.x, over_cell.y, 0);
+            clear_animations();
+            set_props_animations();
+        }
+
+        if (IsKeyPressed(KEY_T)) {
+            set_map(&props, over_cell.x, over_cell.y, 1);
+            clear_animations();
+            set_props_animations();
+            editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 1;
+        }
+
+        if (IsKeyPressed(KEY_Y)) {
+            set_map(&props, over_cell.x, over_cell.y, 2);
+            clear_animations();
+            set_props_animations();
+            editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 2;
+        }
+
+        if (IsKeyPressed(KEY_Z)) {
+            editor_map.spawn_positions[0][0] = over_cell.x;
+            editor_map.spawn_positions[0][1] = over_cell.y;
+        }
+        if (IsKeyPressed(KEY_X)) {
+            editor_map.spawn_positions[1][0] = over_cell.x;
+            editor_map.spawn_positions[1][1] = over_cell.y;
+        }
+        if (IsKeyPressed(KEY_C)) {
+            editor_map.spawn_positions[2][0] = over_cell.x;
+            editor_map.spawn_positions[2][1] = over_cell.y;
+        }
+        if (IsKeyPressed(KEY_V)) {
+            editor_map.spawn_positions[3][0] = over_cell.x;
+            editor_map.spawn_positions[3][1] = over_cell.y;
+        }
+    }
+
+    if (IsKeyPressed(KEY_S)) {
+        LOG("Saving map...");
+        if (save_map(editor_map_filepath, &editor_map) == false) {
+            LOGL(LL_ERROR, "Error while saving map from the editor");
+        } else {
+            LOG("Map saved!");
+        }
+    }
+}
+
+void render_scene_editor() {
+    render_map();
+
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        Vector2 spawn_point = {editor_map.spawn_positions[i][0], editor_map.spawn_positions[i][1]};
+        Vector2 screen_space = grid2screen(spawn_point);
+        screen_space.x += CELL_SIZE / 2.f;
+        screen_space.y += CELL_SIZE / 2.f;
+        DrawCircleLinesV(screen_space, CELL_SIZE / 4.f, GREEN);
+        DrawText(TextFormat("%d", i), screen_space.x - 4, screen_space.y - 8, 24, WHITE);
+    }
+
+    DrawText(editor_map_filepath, 0, 36, 32, WHITE);
+    DrawText("Press S to save", 0, 68, 32, WHITE);
 }
 
 // Main
@@ -2379,6 +2479,12 @@ int main(int argc, char **argv) {
         } else if (strcmp(arg, "--build") == 0) {
             const char *value = POPARG(argc, argv);
             input_set_text(&build_filepath, value);
+        } else if (strcmp(arg, "--editor") == 0) {
+            const char *map = POPARG(argc, argv);
+            editor_map_filepath = map;
+            active_scene = SCENE_EDITOR;
+            load_map(map, &editor_map);
+            init_scene_editor();
         } else {
             LOG("Unknown arg : '%s'", arg);
             exit(1);
@@ -2450,7 +2556,9 @@ int main(int argc, char **argv) {
         } else if (active_scene == SCENE_IN_GAME) {
             update_scene_in_game();
         } else if (active_scene == SCENE_GAME_ENDED) {
-            update_scene_round_ended();
+            update_scene_game_ended();
+        } else if (active_scene == SCENE_EDITOR) {
+            update_scene_editor();
         }
 
         BeginTextureMode(target);
@@ -2464,7 +2572,9 @@ int main(int argc, char **argv) {
             } else if (active_scene == SCENE_IN_GAME) {
                 render_scene_in_game();
             } else if (active_scene == SCENE_GAME_ENDED) {
-                render_scene_round_ended();
+                render_scene_game_ended();
+            } else if (active_scene == SCENE_EDITOR) {
+                render_scene_editor();
             }
 
             render_console();
