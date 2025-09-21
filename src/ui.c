@@ -101,7 +101,12 @@ void input_render(input_buf *b, int active) {
                         .layout = NPATCH_NINE_PATCH};
     DrawTextureNPatch(simple_border, patch, b->rec, (Vector2){0, 0}, 0.0f, WHITE);
 
-    const char *text = TextFormat("%s: %s", b->prefix, input_to_text(b));
+    const char *text = NULL;
+    if (b->prefix) {
+        text = TextFormat("%s: %s", b->prefix, input_to_text(b));
+    } else {
+        text = TextFormat("%s", input_to_text(b));
+    }
     int font_size = b->rec.height * 0.5f;
     int inner_x = b->rec.x + simple_border_size;
     int inner_y = b->rec.y + (b->rec.height - font_size) / 2.f;
@@ -323,7 +328,6 @@ void render_tooltip() {
     for (int i = 0; i < line_count; i++) {
         tooltip_width = fmax(tooltip_width, MeasureText(lines[i], 24) + borderSize);
     }
-
 
     tooltip_pos.x += borderSize / 2.f;
     tooltip_pos.y += borderSize / 2.f;

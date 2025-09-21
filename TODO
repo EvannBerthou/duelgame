@@ -8,6 +8,7 @@
 - In game UI should move when game is resized (avoid having big gap at the top and bottom of the game)
 - Reduce draw calls
 - Save and load builds
+    - Exists but extra janky
 - Implement remaining spells
 - Particule system
 - Infos are kinda ugly

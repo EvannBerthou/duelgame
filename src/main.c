@@ -177,7 +177,12 @@ input_buf password_buf = {.prefix = "Password", .max_length = 32};
 input_buf username_buf = {.prefix = "Username", .max_length = 8};
 button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
 
-input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf};
+// Build loading/saving
+input_buf build_filepath = {.max_length = 10};
+button build_load_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Load", 32);
+button build_save_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Save", 32);
+
+input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf, &build_filepath};
 
 //   Lobby
 card player_list_card = CARD(50, 150, card_width, 550, UI_NORD, "Player list");
@@ -926,6 +931,58 @@ bool is_over_cell(int x, int y) {
     return CheckCollisionPointRec(get_mouse(), cell_rect);
 }
 
+// Build
+// Janky but works
+bool save_build(const char *filepath) {
+    uint8_t buf[sizeof(uint8_t) * 2 + MAX_SPELL_COUNT + STAT_COUNT + 9 + 1] = {0};
+    buf[0] = MAX_SPELL_COUNT;
+    buf[1] = STAT_COUNT;
+    int current_spell = 0;
+    for (int i = 0; i < spell_count; i++) {
+        if (spell_selection[i]) {
+            buf[2 + current_spell] = i;
+            current_spell++;
+        }
+    }
+    assert(current_spell == MAX_SPELL_COUNT);
+    for (int i = 0; i < STAT_COUNT; i++) {
+        buf[3 + MAX_SPELL_COUNT + i] = (uint8_t)(stat_sliders[i]->slider.value & 0xFF);
+    }
+    memcpy(buf + 4 + MAX_SPELL_COUNT + STAT_COUNT, username_buf.buf, fmin(username_buf.ptr, 8));
+
+    return SaveFileData(filepath, buf, sizeof(buf));
+}
+
+bool load_build(const char *filepath) {
+    int size = 0;
+    unsigned char *buf = LoadFileData(filepath, &size);
+    if (buf == NULL) {
+        return false;
+    }
+    if (buf[0] != MAX_SPELL_COUNT) {
+        return false;
+    }
+    if (buf[1] != STAT_COUNT) {
+        return false;
+    }
+    for (int i = 0; i < spell_count; i++) {
+        spell_selection[i] = false;
+        spell_select_buttons[i].color = WHITE;
+    }
+    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+        spell_selection[buf[2 + i]] = true;
+        spell_select_buttons[buf[2 + i]].color = DARKGRAY;
+    }
+    for (int i = 0; i < STAT_COUNT; i++) {
+        stat_sliders[i]->slider.value = (int8_t)(buf[3 + MAX_SPELL_COUNT + i]);
+    }
+    memcpy(username_buf.buf, buf + 4 + MAX_SPELL_COUNT + STAT_COUNT, 8);
+    username_buf.ptr = strlen(username_buf.buf);
+
+    UnloadFileData(buf);
+    return true;
+}
+
 // Player
 int player_cast_spell(player *p, Vector2 origin) {
     const spell *s = get_selected_spell();
@@ -989,14 +1046,6 @@ void render_player(player *p) {
         }
     } else if (p->animation_state == PAS_DAMAGE) {
         c = RED;
-        if (anim_finished(p->action_animation)) {
-            if (i->stats[STAT_HEALTH].value <= 0) {
-                // p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
-                // p->animation_state = PAS_DYING;
-                // current_spell_animation = NO_ANIMATION;
-                // PlaySound(death_sound);
-            }
-        }
     } else if (p->info.effect[SE_STUN]) {
         c = GRAY;
         player_sprite = get_sprite(player_textures, PLAYER_ANIMATION_COUNT, 0);
@@ -1023,9 +1072,6 @@ void render_player(player *p) {
         }
     } else if (p->animation_state == PAS_DYING) {
         c = GREEN;
-        if (anim_finished(p->action_animation)) {
-            p->dead = true;
-        }
     }
 
     if (p->animation_state != PAS_NONE && anim_finished(p->action_animation)) {
@@ -1362,7 +1408,7 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
             } else if (target->info.turn_effect == SE_BLOCK) {
                 p->info.effect[SE_STUN] = true;
                 p->info.effect_round_left[SE_STUN] = 2;
-                p->info.spell_effect[SE_STUN] = &all_spells[6]; //TODO: Should not be hardcoded
+                p->info.spell_effect[SE_STUN] = &all_spells[6];  // TODO: Should not be hardcoded
             } else {
                 int damage = get_spell_damage(&p->info, s);
                 if (damage != 0) {
@@ -1434,6 +1480,7 @@ void play_effects(player *player) {
 }
 
 void end_turn() {
+    next_state = RS_PLAYING;
     FOREACH_PLAYER(i, player) {
         for (int j = 0; j < STAT_COUNT; j++) {
             player->info.stats[j] = updates[i].stats[j];
@@ -1773,6 +1820,19 @@ void init_scene_main_menu(const char *username) {
                              (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 30, 10);
         speed_slider.slider.min = -30;
     }
+
+    int quart = (player_info_card.rec.width - 50) / 4;
+    build_filepath.rec =
+        (Rectangle){player_info_card.rec.x + 25, confirm_button.rec.y, quart * 2, confirm_button.rec.height};
+    if (build_filepath.ptr == 0) {
+        input_set_text(&build_filepath, "build01");
+    }
+    build_load_button.rec = (Rectangle){build_filepath.rec.x + build_filepath.rec.width, build_filepath.rec.y, quart,
+                                        build_filepath.rec.height};
+    build_save_button.rec = (Rectangle){build_load_button.rec.x + build_load_button.rec.width, build_filepath.rec.y,
+                                        quart, build_filepath.rec.height};
+
+    load_build(TextFormat("%s.build", input_to_text(&build_filepath)));
 }
 
 const char *try_join() {
@@ -1825,7 +1885,7 @@ int get_total_stats() {
     stat_total += health_slider.slider.value;
     stat_total += physic_power_slider.slider.value;
     stat_total += magic_power_slider.slider.value;
-    stat_total += fabs(speed_slider.slider.value);
+    stat_total += fabs((float)speed_slider.slider.value);
     return stat_total;
 }
 
@@ -1908,6 +1968,23 @@ void update_scene_main_menu() {
             }
         }
     }
+
+    if (button_clicked(&build_load_button)) {
+        const char *filepath = TextFormat("%s.build", input_to_text(&build_filepath));
+        if (FileExists(filepath)) {
+            if (load_build(filepath) == false) {
+                set_error("Could not load build");
+            }
+        } else {
+            set_error("Could not find build file");
+        }
+    }
+
+    if (button_clicked(&build_save_button)) {
+        if (save_build(TextFormat("%s.build", input_to_text(&build_filepath))) == false) {
+            set_error("Could not save build");
+        }
+    }
 }
 
 void render_scene_main_menu() {
@@ -1963,6 +2040,9 @@ void render_scene_main_menu() {
         DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
                  player_info_card.rec.y + 75, 32, WHITE);
     }
+
+    button_render(&build_load_button);
+    button_render(&build_save_button);
 }
 
 //   Lobby
@@ -2146,31 +2226,34 @@ void update_scene_in_game() {
 
             if (wait_for_animations() && queue_empty(&spell_animation_queue)) {
                 current_spell_animation = NO_ANIMATION;
-
-                player *player = &players[effect_player_turn];
-                if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
-                    player->dead = true;
-                } else if (player->info.stats[STAT_HEALTH].value <= 0 && player->dead == false) {
+                effect_player_turn++;
+                if (effect_player_turn < player_count()) {
+                    play_effects(get_player(effect_player_turn));
+                } else {
+                    effect_player_turn = 0;
+                    next_state = RS_ENDING_ROUND;
+                }
+            }
+        } else if (state == RS_ENDING_ROUND) {
+            FOREACH_PLAYER(i, player) {
+                if (player->animation_state == PAS_NONE && player->info.stats[STAT_HEALTH].value == 0 &&
+                    player->dead == false) {
                     player->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
                     player->animation_state = PAS_DYING;
                     PlaySound(death_sound);
-                } else {
-                    effect_player_turn++;
-                    if (effect_player_turn < player_count()) {
-                        play_effects(get_player(effect_player_turn));
-                    } else {
-                        //TODO: Should be a new state in which we handle player death too
-                        end_turn();
-                        next_state = RS_PLAYING;
-                        effect_player_turn = 0;
-                    }
                 }
+                if (player->animation_state == PAS_DYING && anim_finished(player->action_animation)) {
+                    player->dead = true;
+                }
+            }
+
+            if (wait_for_animations()) {
+                end_turn();
             }
         }
 
         for (int i = 0; i < RAINDROP_COUNT; i++) {
             raindrop_timers[i] -= GetFrameTime();
-            // We are now in timing
             if (raindrop_position[i].y == 0 && raindrop_timers[i] < 0) {
                 raindrop_target[i] = (Vector2){rand() % game_map.width * CELL_SIZE + base_x_offset,
                                                ((rand() % (game_map.height - 4)) + 4) * CELL_SIZE + base_y_offset};
@@ -2293,6 +2376,9 @@ int main(int argc, char **argv) {
             }
         } else if (strcmp(arg, "--username") == 0) {
             username = POPARG(argc, argv);
+        } else if (strcmp(arg, "--build") == 0) {
+            const char *value = POPARG(argc, argv);
+            input_set_text(&build_filepath, value);
         } else {
             LOG("Unknown arg : '%s'", arg);
             exit(1);

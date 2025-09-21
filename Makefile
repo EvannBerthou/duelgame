@@ -24,8 +24,8 @@ run: build/server build/main_game
 	killall server || true
 	killall main_game || true
 	./build/server &
-	./build/main_game > /dev/null &
-	./build/main_game
+	./build/main_game --build build01 > /dev/null &
+	./build/main_game --build build02
 
 packer:
 	gcc src/packer.c -o build/packer -I./include -L./lib/linux -lraylib -lm

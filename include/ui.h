@@ -93,7 +93,7 @@ typedef struct {
     Color color;
     float max;
     float min;
-    float value;
+    int value;
 } slider;
 
 bool slider_decrement(slider *s);

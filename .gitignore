@@ -8,3 +8,4 @@ compile_commands.json
 assets.pak
 include/net_protocol.h
 include/assets_packed.h
+*.build

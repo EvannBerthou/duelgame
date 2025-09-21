@@ -89,7 +89,6 @@ typedef enum {
     STAT_AP,
     STAT_AD,
     STAT_SPEED,
-    STAT_CRIT,
     STAT_COUNT
 } stat_type;
 
@@ -145,6 +144,7 @@ typedef enum {
     RS_PLAYING_TURN,
     RS_WAITING_ANIMATIONS,
     RS_PLAYING_EFFECTS,
+    RS_ENDING_ROUND,
     RS_COUNT,
 } round_state;
 
