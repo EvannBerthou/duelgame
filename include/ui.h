@@ -151,4 +151,24 @@ void card_render(card *c);
 bool icon_hover(Rectangle rec);
 void icon_render(Rectangle icon, Rectangle rec);
 
+// Picker
+
+typedef struct {
+    Rectangle rec;
+    const char **options;
+    int option_count;
+    int option_size;
+    int selected_option;
+    int option_frame;
+    int option_offset;
+    bool opened;
+} picker;
+
+void picker_add_option(picker *p, const char *option);
+int picker_option_clicked(picker *p);
+bool picker_clicked(picker *p);
+void picker_update_scroll(picker *p);
+void picker_render(picker *p);
+void clear_picker(picker *p);
+
 #endif

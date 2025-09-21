@@ -499,10 +499,12 @@ bool handle_map_line(char *line, map_data *map) {
 }
 
 bool load_map(const char *filepath, map_data *map) {
-    LOG("Loading map '%s'", filepath);
-    FILE *f = fopen(filepath, "r");
+    char fullpath[256] = {0};
+    strcat(fullpath, "maps/");
+    strncat(fullpath, filepath, 256 - strlen("maps/"));
+    LOG("Loading map '%s'", fullpath);
+    FILE *f = fopen(fullpath, "r");
     if (f == NULL) {
-        fclose(f);
         return false;
     }
 

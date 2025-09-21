@@ -4,7 +4,8 @@
 
 #define NET_SIZE(...)
 
-// Hacky to allow redefinition of net_player_stat. Builder will parse it so it knows about the structure but the compiler will not see it.
+// Hacky to allow redefinition of net_player_stat. Builder will parse it so it
+// knows about the structure but the compiler will not see it.
 // TODO: remove this
 #if 0
 typedef struct {
@@ -34,6 +35,16 @@ typedef struct {
     uint8_t new_master;
 } net_packet_disconnect;
 
+//TODO: Better way to handle strings in net_protocol_builder
+typedef struct {
+    uint8_t map_count;
+    uint8_t* map_names NET_SIZE("s->map_count * 32");
+} net_packet_server_map_list;
+
+typedef struct {
+    uint8_t map_index;
+} net_packet_update_selected_map;
+
 typedef struct {
     uint8_t width;
     uint8_t height;
@@ -42,11 +53,16 @@ typedef struct {
 } net_packet_map;
 
 typedef struct {
+    char map_name[32];
+} net_packet_request_game_start;
+
+typedef struct {
 } net_packet_game_start;
 
 typedef struct {
     uint8_t id;
-    net_player_stat stats[STAT_COUNT] NET_SIZE("sizeof(net_player_stat) * STAT_COUNT");
+    net_player_stat stats[STAT_COUNT] NET_SIZE(
+        "sizeof(net_player_stat) * STAT_COUNT");
     uint8_t x;
     uint8_t y;
     uint8_t effect[SE_COUNT] NET_SIZE("SE_COUNT");
@@ -116,6 +132,6 @@ typedef struct {
 } net_packet_admin_update_player_info;
 
 typedef struct {
-    uint8_t level; //Log Level
+    uint8_t level;  // Log Level
     char message[128];
 } net_packet_server_message;

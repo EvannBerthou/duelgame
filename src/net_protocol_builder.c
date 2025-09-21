@@ -309,7 +309,7 @@ int main(void) {
     printf("#ifdef NET_PROTOCOL_IMPLEMENTATION\n");
 
     // Size
-    printf("uint8_t get_packet_length(net_packet_type_enum type, void *p) {\n");
+    printf("uint64_t get_packet_length(net_packet_type_enum type, void *p) {\n");
     printf("    switch (type) {\n");
     for (int i = 0; i < structs_count; i++) {
         net_struct *s = &structs[i];

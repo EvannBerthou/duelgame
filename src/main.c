@@ -195,6 +195,9 @@ card player_build_card = CARD(50, 150, WIDTH - 100, 550, UI_NORD, "Player build"
 button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, "X", 46);
 int selected_player_build = -1;
 
+picker map_picker = {0};
+const char *selected_map = NULL;
+
 //    In game
 slider health_bars[MAX_PLAYER_COUNT] = {0};
 button toolbar_spells_buttons[MAX_SPELL_COUNT] = {0};
@@ -1604,6 +1607,7 @@ void handle_packet(net_packet *p) {
         players[join->id].info.connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
+        active_scene = SCENE_LOBBY;
         LOG("My ID is %d", c->id);
         current_player = c->id;
         master_player = c->master;
@@ -1617,6 +1621,9 @@ void handle_packet(net_packet *p) {
         net_packet_player_build b =
             pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap, speed);
         send_sock(PKT_PLAYER_BUILD, &b, server_fd);
+    } else if (p->type == PKT_UPDATE_SELECTED_MAP) {
+        net_packet_update_selected_map *u = (net_packet_update_selected_map *)p->content;
+        selected_map = map_picker.options[u->map_index];
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
         LOG("Player %d disconnected", d->id);
@@ -1624,6 +1631,14 @@ void handle_packet(net_packet *p) {
         master_player = d->new_master;
         active_scene = SCENE_LOBBY;
         gs = GS_WAITING;
+    } else if (p->type == PKT_SERVER_MAP_LIST) {
+        net_packet_server_map_list *list = (net_packet_server_map_list *)p->content;
+        clear_picker(&map_picker);
+        for (int i = 0; i < list->map_count; i++) {
+            char str[33] = {0};
+            memcpy(str, list->map_names + 32 * i, 32);
+            picker_add_option(&map_picker, str);
+        }
     } else if (p->type == PKT_PLAYER_BUILD) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
@@ -1660,6 +1675,7 @@ void handle_packet(net_packet *p) {
             LOG("Unknown map layer");
             exit(1);
         }
+        LOG("Map loaded");
     } else if (p->type == PKT_GAME_START) {
         LOG("Starting Game !!");
         active_scene = SCENE_IN_GAME;
@@ -1755,7 +1771,6 @@ bool join_game(const char *ip, int port, const char *username) {
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
 
-    active_scene = SCENE_LOBBY;
     return true;
 }
 
@@ -2063,6 +2078,11 @@ void init_scene_lobby() {
         int y = player_list_card.rec.y + 75 + 46 * i;
         player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
     }
+
+    map_picker.rec = (Rectangle){server_config_card.rec.x + 25, server_config_card.rec.y + 75,
+                                 server_config_card.rec.width - 50, 50};
+    map_picker.option_frame = 5;
+    picker_add_option(&map_picker, "Loading...");
 }
 
 void update_scene_lobby() {
@@ -2070,11 +2090,26 @@ void update_scene_lobby() {
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
-            send_sock(PKT_GAME_START, NULL, server_fd);
+            net_packet_request_game_start s = pkt_request_game_start(map_picker.options[map_picker.selected_option]);
+            send_sock(PKT_REQUEST_GAME_START, &s, server_fd);
         }
 
         card_update_tabs(&player_list_card);
         card_update_tabs(&server_config_card);
+
+        if (server_config_card.selected_tab == 0) {
+            if (master_player == current_player) {
+                picker_update_scroll(&map_picker);
+                if (picker_clicked(&map_picker)) {
+                    map_picker.opened = !map_picker.opened;
+                }
+                int clicked_option = picker_option_clicked(&map_picker);
+                if (clicked_option != -1) {
+                    net_packet_update_selected_map selection = pkt_update_selected_map(clicked_option);
+                    send_sock(PKT_UPDATE_SELECTED_MAP, &selection, server_fd);
+                }
+            }
+        }
 
         FOREACH_PLAYER(i, player) {
             if (button_clicked(&player_build_buttons[i])) {
@@ -2115,7 +2150,11 @@ void render_scene_lobby() {
 
         // TODO: Server settings
         if (server_config_card.selected_tab == 0) {
-            DrawTextCenter(server_config_card.rec, "Dust 2", 64, WHITE);
+            if (master_player == current_player) {
+                picker_render(&map_picker);
+            } else {
+                DrawText(TextFormat("Map: %s", selected_map), map_picker.rec.x, map_picker.rec.y, 32, WHITE);
+            }
         } else if (server_config_card.selected_tab == 1) {
             DrawTextCenter(server_config_card.rec, "Round count", 64, WHITE);
         }

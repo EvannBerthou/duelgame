@@ -3,7 +3,9 @@
 #include <math.h>
 #include <raylib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
+#include "common.h"
 
 extern bool is_console_open();
 extern bool is_console_closed();
@@ -429,4 +431,109 @@ bool icon_hover(Rectangle rec) {
 extern Texture2D icons_sheet;
 void icon_render(Rectangle icon, Rectangle rec) {
     DrawTexturePro(icons_sheet, icon, rec, (Vector2){0}, 0, WHITE);
+}
+
+// Picker
+
+void picker_add_option(picker *p, const char *option) {
+    if (p->option_count == p->option_size) {
+        p->option_size = p->option_size == 0 ? 16 : p->option_size * 2;
+        p->options = realloc(p->options, sizeof(const char *) * p->option_size);
+    }
+    p->options[p->option_count] = strdup(option);
+    p->option_count++;
+}
+
+bool picker_clicked(picker *p) {
+    if (IsMouseButtonPressed(0) == false || is_console_open()) {
+        return false;
+    }
+
+    return CheckCollisionPointRec(get_mouse(), p->rec);
+}
+
+int picker_option_clicked(picker *p) {
+    if (p->opened == false) {
+        return -1;
+    }
+    if (IsMouseButtonPressed(0) == false || is_console_open()) {
+        return -1;
+    }
+
+    for (int i = p->option_offset; i < p->option_offset + p->option_frame; i++) {
+        int y = p->rec.y + p->rec.height + 40 * (i - p->option_offset);
+        Rectangle option_rec = {p->rec.x, y, p->rec.width, 40};
+        if (CheckCollisionPointRec(get_mouse(), option_rec)) {
+            p->selected_option = i;
+            p->opened = false;
+            return i;
+        }
+    }
+    // We clicked outside of the picker so we close it
+    if (!CheckCollisionPointRec(get_mouse(), p->rec)) {
+        p->opened = false;
+    }
+    return -1;
+}
+
+void picker_update_scroll(picker *p) {
+    float mouse_wheel = GetMouseWheelMove();
+    if (mouse_wheel == 1) {
+        p->option_offset = fmax(p->option_offset - 1, 0);
+    } else if (mouse_wheel == -1) {
+        p->option_offset = fmin(p->option_offset + 1, p->option_count - p->option_frame);
+    }
+}
+
+void picker_render(picker *p) {
+    Color picker_color = UI_BEIGE;
+    if (CheckCollisionPointRec(get_mouse(), p->rec)) {
+        picker_color = ColorTint(picker_color, LIGHTGRAY);
+    }
+    DrawRectangleRec(p->rec, picker_color);
+    NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
+                        .left = simple_border_size,
+                        .top = simple_border_size,
+                        .right = simple_border_size,
+                        .bottom = simple_border_size,
+                        .layout = NPATCH_NINE_PATCH};
+    DrawTextureNPatch(simple_border, patch, p->rec, (Vector2){0, 0}, 0.0f, WHITE);
+    int inner_x = p->rec.x + simple_border_size;
+    int inner_y = p->rec.y + (p->rec.height - 32) / 2.f;
+    if (p->options) {
+        DrawText(p->options[p->selected_option], inner_x, inner_y, 32, BLACK);
+    }
+
+    if (p->opened) {
+        for (int i = p->option_offset; i < p->option_offset + p->option_frame; i++) {
+            int y = p->rec.y + p->rec.height + 40 * (i - p->option_offset);
+            Rectangle option_rec = {p->rec.x, y, p->rec.width, 40};
+            inner_x = option_rec.x + simple_border_size;
+            inner_y = option_rec.y + (option_rec.height - 32) / 2.f;
+            Color c = UI_BEIGE;
+            if (i == p->selected_option) {
+                c = ColorTint(c, DARKGRAY);
+            }
+            if (CheckCollisionPointRec(get_mouse(), option_rec)) {
+                c = ColorTint(c, LIGHTGRAY);
+            }
+            DrawRectangleRec(option_rec, c);
+            DrawText(p->options[i], inner_x, inner_y, 32, BLACK);
+        }
+        Rectangle frame_rec = {p->rec.x, p->rec.y + p->rec.height, p->rec.width, 40 * p->option_frame};
+        NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
+                            .left = simple_border_size,
+                            .top = simple_border_size,
+                            .right = simple_border_size,
+                            .bottom = simple_border_size,
+                            .layout = NPATCH_NINE_PATCH};
+        DrawTextureNPatch(simple_border, patch, frame_rec, (Vector2){0, 0}, 0.0f, WHITE);
+    }
+}
+
+void clear_picker(picker *p) {
+    for (int i = 0; i < p->option_count; i++) {
+        free((void *)p->options[i]);
+    }
+    p->option_count = 0;
 }

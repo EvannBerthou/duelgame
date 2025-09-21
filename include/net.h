@@ -3,6 +3,8 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <netinet/in.h>
 #include <stdint.h>
 #include <string.h>
 #ifndef WINDOWS_BUILD
@@ -17,7 +19,7 @@
 typedef uint8_t net_packet_type;
 
 typedef struct {
-    uint8_t len;
+    uint64_t len;
     net_packet_type type;
     void* content;
 } net_packet;
@@ -60,14 +62,15 @@ uint8_t unpacku8(uint8_t** buf) {
 
 uint64_t unpacku64(uint8_t** buf) {
     uint8_t* b = *buf;
-    return ((unsigned long long int)b[0] << 56) |
-           ((unsigned long long int)b[1] << 48) |
-           ((unsigned long long int)b[2] << 40) |
-           ((unsigned long long int)b[3] << 32) |
-           ((unsigned long long int)b[4] << 24) |
-           ((unsigned long long int)b[5] << 16) |
-           ((unsigned long long int)b[6] << 8) | b[7];
-    (*buf) += 8;
+    uint64_t res = ((unsigned long long int)b[0] << 56) |
+                   ((unsigned long long int)b[1] << 48) |
+                   ((unsigned long long int)b[2] << 40) |
+                   ((unsigned long long int)b[3] << 32) |
+                   ((unsigned long long int)b[4] << 24) |
+                   ((unsigned long long int)b[5] << 16) |
+                   ((unsigned long long int)b[6] << 8) | b[7];
+    (*buf) += sizeof(uint64_t);
+    return res;
 }
 
 void unpacksv(uint8_t** buf, char* dest, uint8_t len) {
@@ -84,14 +87,14 @@ void unpacksv(uint8_t** buf, char* dest, uint8_t len) {
 #endif
 
 void write_packet(net_packet* p, int fd) {
-    static char buf[256] = {0};
+    static char buf[4096] = {0};
     char* b = buf;
-    b = packu8(b, p->len);
+    b = packu64(b, p->len);
     b = packu8(b, p->type);
     b = packstruct(b, p->content, p->type);
 
     b = buf;
-    int packet_size_left = p->len;
+    uint64_t packet_size_left = p->len;
     int n = 0;
     while ((n = send_data(fd, b, packet_size_left)) > 0) {
         packet_size_left -= n;
@@ -112,8 +115,8 @@ void write_packet(net_packet* p, int fd) {
 
 // TODO: We should check the size and avoid reading too much
 int packet_read(net_packet* p, int fd) {
-    uint8_t packet_len;
-    int n = recv_data(fd, &packet_len, sizeof(packet_len));
+    uint8_t packet_len_buf[8] = {0};
+    int n = recv_data(fd, &packet_len_buf, sizeof(packet_len_buf));
     if (n == 0) {
         LOG("Client %d disconnected (read)", fd);
         return -1;
@@ -121,11 +124,12 @@ int packet_read(net_packet* p, int fd) {
         LOGL(LL_ERROR, "Error recieving packet header %s", strerror(errno));
         return -1;
     }
-    p->len = packet_len;
+    uint8_t* len_buf = packet_len_buf;
+    p->len = unpacku64(&len_buf);
 
-    uint8_t buf[256] = {0};
+    uint8_t buf[4096] = {0};
     uint8_t* b = buf;
-    int packet_size_left = packet_len - 1;
+    int packet_size_left = p->len - sizeof(p->len);
     n = 0;
     while ((n = recv_data(fd, b, packet_size_left)) > 0) {
         packet_size_left -= n;
@@ -150,7 +154,8 @@ void send_sock(net_packet_type_enum type, void* p, int fd) {
         return;
     }
     net_packet packet = {0};
-    packet.len = 2 + get_packet_length(type, p);
+    packet.len =
+        sizeof(packet.len) + sizeof(packet.type) + get_packet_length(type, p);
     packet.type = type;
     packet.content = p;
     write_packet(&packet, fd);

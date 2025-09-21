@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <limits.h>
 #include <math.h>
 #include <netdb.h>
@@ -87,6 +88,9 @@ int player_count() {
 
 // Map
 map_data current_map = {0};
+uint8_t *map_names_network = NULL;
+int map_count = 0;
+int selected_map_idx = 0;
 
 void send_map(int fd) {
     uint8_t map[MAP_WIDTH * MAP_HEIGHT] = {0};
@@ -292,6 +296,7 @@ void start_game() {
     // TODO: Check that every player is really ready (build is set, etc.)
     FOREACH_PLAYER(i, player) {
         reset_player(player);
+        send_map(clients[i]);
     }
     broadcast(PKT_GAME_START, NULL);
     round_start_time = time(NULL);
@@ -371,8 +376,24 @@ void handle_message(int fd) {
         net_packet_connected c = pkt_connected(new_player, master_player);
         send_sock(PKT_CONNECTED, &c, fd);
 
-        send_map(fd);
-    } else if (p.type == PKT_GAME_START) {
+        net_packet_server_map_list map_list = pkt_server_map_list(map_count, map_names_network);
+        send_sock(PKT_SERVER_MAP_LIST, &map_list, fd);
+
+        net_packet_update_selected_map selection = pkt_update_selected_map(selected_map_idx);
+        broadcast(PKT_UPDATE_SELECTED_MAP, &selection);
+    } else if (p.type == PKT_UPDATE_SELECTED_MAP) {
+        uint8_t new_index = ((net_packet_update_selected_map *)p.content)->map_index;
+        if (new_index < map_count) {
+            selected_map_idx = new_index;
+            broadcast(PKT_UPDATE_SELECTED_MAP, p.content);
+        }
+    } else if (p.type == PKT_REQUEST_GAME_START) {
+        net_packet_request_game_start *s = (net_packet_request_game_start *)p.content;
+        LOG("Loading %s", s->map_name);
+        if (load_map(s->map_name, &current_map) == false) {
+            LOGL(LL_ERROR, "Error loading map '%s'", s->map_name);
+            return;
+        }
         for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
             round_scores[i] = 0;
         }
@@ -585,13 +606,44 @@ void handle_message(int fd) {
 
 // Main
 
-int main(int argc, char **argv) {
-    const char *default_map = "maps/default.map";
-    if (load_map(default_map, &current_map) == false) {
-        LOGL(LL_ERROR, "Error loading map '%s'", default_map);
-        return 1;
+int sort_string(const void *a, const void *b) {
+    return strcmp(*(const char **)a, *(const char **)b);
+}
+
+void load_maps() {
+    DIR *d;
+    struct dirent *dir;
+
+    if ((d = opendir("maps"))) {
+        while ((dir = readdir(d)) != NULL) {
+            if (dir->d_type == DT_REG) {
+                map_count++;
+            }
+        }
+        closedir(d);
     }
 
+    int i = 0;
+    char **names = malloc(sizeof(char *) * map_count);
+    if ((d = opendir("maps"))) {
+        while ((dir = readdir(d)) != NULL) {
+            if (dir->d_type == DT_REG) {
+                names[i] = strdup(dir->d_name);
+                i++;
+            }
+        }
+        closedir(d);
+    }
+
+    qsort(names, map_count, sizeof(names[0]), sort_string);
+
+    map_names_network = calloc(map_count, 32);
+    for (i = 0; i < map_count; i++) {
+        memcpy(map_names_network + i * 32, names[i], fmin(32, strlen(names[i])));
+    }
+}
+
+int main(int argc, char **argv) {
     int port = 3000;
     POPARG(argc, argv);  // program name
     while (argc > 0) {
@@ -633,6 +685,8 @@ int main(int argc, char **argv) {
 
     struct sockaddr client = {0};
     socklen_t len = sizeof(client);
+
+    load_maps();
 
     while (1) {
         read_fds = master_set;
