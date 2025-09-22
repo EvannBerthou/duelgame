@@ -187,7 +187,7 @@ input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf, &build_
 
 //   Lobby
 card player_list_card = CARD(50, 150, card_width, 550, UI_NORD, "Player list");
-card server_config_card = CARD(665, 150, card_width, 550, UI_NORD, "Map", "Configuration");
+card server_config_card = CARD(665, 150, card_width, 550, UI_NORD, "Configuration");
 button start_game_button = BUTTON_COLOR(75, 600, card_width - 50, 75, UI_GREEN, "Start Game", 36);
 
 button player_build_buttons[MAX_PLAYER_COUNT] = {0};
@@ -196,7 +196,11 @@ button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, 
 int selected_player_build = -1;
 
 picker map_picker = {0};
+buttoned_slider round_count_slider = {0};
+
+// Configuration sync
 const char *selected_map = NULL;
+int round_count = 0;
 
 //    In game
 slider health_bars[MAX_PLAYER_COUNT] = {0};
@@ -458,12 +462,13 @@ void update_console() {
 
     if (IsKeyPressed(KEY_ENTER)) {
         if (console_input_cursor > 0) {
-            LOG("%.*s", console_input_cursor, console_input);
-            command_result result = handle_command(console_input);
+            char *input = (char *)TextFormat("%.*s", console_input_cursor, console_input);
+            LOG(input);
+            command_result result = handle_command(input);
             if (result.valid == false) {
                 if (result.content == NULL) {
                     LOGL(LL_ERROR, "Unknown command `%.*s`", console_input_cursor, console_input);
-                } else {
+                } else if (result.content != NULL) {
                     LOGL(LL_ERROR, "%s", result.content);
                 }
             } else {
@@ -813,6 +818,9 @@ void render_map() {
         for (int x = 0; x < game_map.width; x++) {
             Vector2 pos = {base_x_offset + x * CELL_SIZE, base_y_offset + y * CELL_SIZE};
             int prop_type = get_map(&props, x, y);
+            if (prop_type == 0) {
+                continue;
+            }
             if (prop_type >= MPT_COUNT) {
                 LOGL(LL_ERROR, "Unknown prop type with id=%d", prop_type);
                 continue;
@@ -1621,9 +1629,10 @@ void handle_packet(net_packet *p) {
         net_packet_player_build b =
             pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap, speed);
         send_sock(PKT_PLAYER_BUILD, &b, server_fd);
-    } else if (p->type == PKT_UPDATE_SELECTED_MAP) {
-        net_packet_update_selected_map *u = (net_packet_update_selected_map *)p->content;
+    } else if (p->type == PKT_UPDATE_SERVER_CONFIGURATION) {
+        net_packet_update_server_configuration *u = (net_packet_update_server_configuration *)p->content;
         selected_map = map_picker.options[u->map_index];
+        round_count = u->round_count;
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
         LOG("Player %d disconnected", d->id);
@@ -2079,10 +2088,16 @@ void init_scene_lobby() {
         player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
     }
 
-    map_picker.rec = (Rectangle){server_config_card.rec.x + 25, server_config_card.rec.y + 75,
-                                 server_config_card.rec.width - 50, 50};
+    map_picker.rec = (Rectangle){server_config_card.rec.x + 125, server_config_card.rec.y + 75,
+                                 server_config_card.rec.width - 150, 50};
     map_picker.option_frame = 5;
     picker_add_option(&map_picker, "Loading...");
+
+    Rectangle round_counter_rec = {map_picker.rec.x, map_picker.rec.y + map_picker.rec.height + 25,
+                                   map_picker.rec.width, map_picker.rec.height};
+    buttoned_slider_init(&round_count_slider, round_counter_rec, 15, 1);
+    round_count_slider.slider.min = 3;
+    round_count_slider.slider.value = 3;
 }
 
 void update_scene_lobby() {
@@ -2090,7 +2105,8 @@ void update_scene_lobby() {
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
-            net_packet_request_game_start s = pkt_request_game_start(map_picker.selected_option);
+            net_packet_request_game_start s =
+                pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value);
             send_sock(PKT_REQUEST_GAME_START, &s, server_fd);
         }
 
@@ -2105,8 +2121,25 @@ void update_scene_lobby() {
                 }
                 int clicked_option = picker_option_clicked(&map_picker);
                 if (clicked_option != -1) {
-                    net_packet_update_selected_map selection = pkt_update_selected_map(clicked_option);
-                    send_sock(PKT_UPDATE_SELECTED_MAP, &selection, server_fd);
+                    net_packet_update_server_configuration selection =
+                        pkt_update_server_configuration(clicked_option, round_count_slider.slider.value);
+                    send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
+                }
+
+                round_count_slider.minus.disabled = round_count_slider.slider.value == round_count_slider.slider.min;
+                if (button_clicked(&round_count_slider.minus)) {
+                    buttoned_slider_decrement(&round_count_slider);
+                    net_packet_update_server_configuration selection =
+                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value);
+                    send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
+                }
+
+                round_count_slider.plus.disabled = round_count_slider.slider.value == round_count_slider.slider.max;
+                if (button_clicked(&round_count_slider.plus)) {
+                    buttoned_slider_increment(&round_count_slider);
+                    net_packet_update_server_configuration selection =
+                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value);
+                    send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
                 }
             }
         }
@@ -2148,15 +2181,20 @@ void render_scene_lobby() {
             idx++;
         }
 
-        // TODO: Server settings
         if (server_config_card.selected_tab == 0) {
             if (master_player == current_player) {
+                DrawText("Round", server_config_card.rec.x + 25, round_count_slider.rec.y + 8, 32, WHITE);
+                buttoned_slider_render(&round_count_slider);
+
+                DrawText("Map", server_config_card.rec.x + 25, map_picker.rec.y + 8, 32, WHITE);
                 picker_render(&map_picker);
             } else {
-                DrawText(TextFormat("Map: %s", selected_map), map_picker.rec.x, map_picker.rec.y, 32, WHITE);
+                // TODO Include round count sync
+                DrawText(TextFormat("Map: %s", selected_map), server_config_card.rec.x + 25, map_picker.rec.y, 32,
+                         WHITE);
+                DrawText(TextFormat("Round: %d", round_count), server_config_card.rec.x + 25, round_count_slider.rec.y,
+                         32, WHITE);
             }
-        } else if (server_config_card.selected_tab == 1) {
-            DrawTextCenter(server_config_card.rec, "Round count", 64, WHITE);
         }
     }
 
@@ -2485,6 +2523,17 @@ void render_scene_editor() {
     DrawText("Press S to save", 0, 68, 32, WHITE);
 }
 
+bool load_editor(const char *filename) {
+    if (load_map(filename, &editor_map) == false) {
+        LOGL(LL_ERROR, "Could not load map %s", filename);
+        return false;
+    }
+    editor_map_filepath = filename;
+    active_scene = SCENE_EDITOR;
+    init_scene_editor();
+    return true;
+}
+
 // Main
 
 int main(int argc, char **argv) {
@@ -2518,13 +2567,9 @@ int main(int argc, char **argv) {
             input_set_text(&build_filepath, value);
         } else if (strcmp(arg, "--editor") == 0) {
             const char *map = POPARG(argc, argv);
-            editor_map_filepath = map;
-            active_scene = SCENE_EDITOR;
-            if (load_map(map, &editor_map) == false) {
-                LOGL(LL_ERROR, "Could not load map %s", map);
+            if (load_editor(map) == false) {
                 exit(1);
             }
-            init_scene_editor();
         } else {
             LOG("Unknown arg : '%s'", arg);
             exit(1);

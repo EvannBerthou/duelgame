@@ -42,6 +42,7 @@ game_state gs = GS_WAITING;
 int player_round_order[MAX_PLAYER_COUNT] = {0};
 uint8_t round_scores[MAX_PLAYER_COUNT] = {0};
 time_t round_start_time = 0;
+uint8_t max_round_count = 3;
 
 // Admin stuff
 const char ADMIN_PASSWORD[8] = {'p', 'a', 's', 's'};
@@ -88,7 +89,7 @@ int player_count() {
 
 // Map
 map_data current_map = {0};
-const char **all_maps = NULL;
+const char *all_maps[256] = {0};
 uint8_t *map_names_network = NULL;
 int map_count = 0;
 int selected_map_idx = 0;
@@ -316,6 +317,10 @@ void handle_player_disconnect(int fd) {
             new_master = player->id;
         }
     }
+    // Everyone left the game
+    if (new_master == -1) {
+        new_master = 0;
+    }
     net_packet_disconnect p = pkt_disconnect(player->id, new_master);
     broadcast(PKT_DISCONNECT, &p);
     master_player = new_master;
@@ -380,17 +385,26 @@ void handle_message(int fd) {
         net_packet_server_map_list map_list = pkt_server_map_list(map_count, map_names_network);
         send_sock(PKT_SERVER_MAP_LIST, &map_list, fd);
 
-        net_packet_update_selected_map selection = pkt_update_selected_map(selected_map_idx);
-        broadcast(PKT_UPDATE_SELECTED_MAP, &selection);
-    } else if (p.type == PKT_UPDATE_SELECTED_MAP) {
-        uint8_t new_index = ((net_packet_update_selected_map *)p.content)->map_index;
-        if (new_index < map_count) {
-            selected_map_idx = new_index;
-            broadcast(PKT_UPDATE_SELECTED_MAP, p.content);
+        net_packet_update_server_configuration selection =
+            pkt_update_server_configuration(selected_map_idx, max_round_count);
+        broadcast(PKT_UPDATE_SERVER_CONFIGURATION, &selection);
+    } else if (p.type == PKT_UPDATE_SERVER_CONFIGURATION) {
+        net_packet_update_server_configuration *config = (net_packet_update_server_configuration *)p.content;
+        if (config->map_index >= map_count) {
+            return;
         }
+        if (config->round_count < 3 || config->round_count > 15) {
+            return;
+        }
+        selected_map_idx = config->map_index;
+        max_round_count = config->round_count;
+        broadcast(PKT_UPDATE_SERVER_CONFIGURATION, p.content);
     } else if (p.type == PKT_REQUEST_GAME_START) {
         net_packet_request_game_start *s = (net_packet_request_game_start *)p.content;
         if (s->map_id >= map_count) {
+            return;
+        }
+        if (s->round_count < 3 || s->round_count > 15) {
             return;
         }
 
@@ -403,6 +417,7 @@ void handle_message(int fd) {
             round_scores[i] = 0;
         }
         round_start_time = time(NULL);
+        max_round_count = s->round_count;
         start_game();
     } else if (p.type == PKT_PLAYER_BUILD) {
         // TODO: Handle error
@@ -517,7 +532,7 @@ void handle_message(int fd) {
                 broadcast(PKT_ROUND_END, &end);
 
                 FOREACH_PLAYER(i, player) {
-                    if (round_scores[i] == 3) {
+                    if (round_scores[i] == max_round_count) {
                         net_packet_game_end game_end = pkt_game_end(player->id, round_scores);
                         broadcast(PKT_GAME_END, &game_end);
                     }
@@ -626,47 +641,48 @@ const char *extract_map_name(const char *filepath) {
     return res;
 }
 
+bool ends_with(const char *s, const char *suffix) {
+    s = strrchr(s, '.');
+    if (s == NULL) {
+        return false;
+    }
+    return strcmp(s, suffix) == 0;
+}
+
 void load_maps() {
+    const char *map_names[256] = {0};
     DIR *d;
     struct dirent *dir;
 
     if ((d = opendir("maps"))) {
         while ((dir = readdir(d)) != NULL) {
-            if (dir->d_type == DT_REG) {
-                map_count++;
-            }
-        }
-        closedir(d);
-    }
-
-    int i = 0;
-    all_maps = malloc(sizeof(char *) * map_count);
-    const char **map_names = malloc(sizeof(char *) * map_count);
-    if ((d = opendir("maps"))) {
-        while ((dir = readdir(d)) != NULL) {
-            if (dir->d_type == DT_REG) {
-                all_maps[i] = strdup(dir->d_name);
-                map_names[i] = extract_map_name(dir->d_name);
-                if (all_maps[i] == NULL) {
+            if (dir->d_type == DT_REG && ends_with(dir->d_name, ".map")) {
+                char *filename = strdup(dir->d_name);
+                filename[strlen(filename) - strlen(".map")] = '\0';
+                all_maps[map_count] = filename;
+                map_names[map_count] = extract_map_name(filename);
+                if (all_maps[map_count] == NULL) {
                     LOGL(LL_ERROR, "Error while loading map %s", dir->d_name);
                     exit(-1);
                 }
-                i++;
+                map_count++;
+                if (map_count == 256) {
+                    LOGL(LL_ERROR, "Too many maps to load");
+                    break;
+                }
             }
         }
         closedir(d);
     }
 
     qsort(map_names, map_count, sizeof(all_maps[0]), sort_string);
-
     map_names_network = calloc(map_count, 32);
-    for (i = 0; i < map_count; i++) {
+    for (int i = 0; i < map_count; i++) {
         memcpy(map_names_network + i * 32, map_names[i], fmin(32, strlen(map_names[i])));
     }
     for (int i = 0; i < map_count; i++) {
         free((void *)map_names[i]);
     }
-    free(map_names);
 }
 
 int main(int argc, char **argv) {

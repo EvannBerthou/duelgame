@@ -235,5 +235,6 @@ typedef struct {
 bool load_map(const char* filepath, map_data* map);
 bool save_map(const char* filepath, map_data* map);
 void free_map_data(map_data* map);
+bool create_map(const char *filename);
 
 #endif

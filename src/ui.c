@@ -218,15 +218,18 @@ void slider_render(slider *s) {
 
     int cell_height = s->rec.height - slider_border;
 
-    float range = fabsf(s->max) + fabs(s->min);
+    float range = fabsf(s->max - s->min);
     float inner_width = s->rec.width - slider_border * 2;
     float single_cell_width = inner_width / range;
-    float offset = single_cell_width * fabs(s->min);
+    float offset = 0;
+    if (s->min < 0) {
+        offset = single_cell_width * fabs(s->min);
+    }
 
     float inner_x = s->rec.x + slider_border + offset;
     float inner_y = s->rec.y + slider_border / 2.f;
 
-    float width = s->value * single_cell_width;
+    float width = (s->value - s->min) * single_cell_width - offset;
     if (width < 0) {
         width = -width;
         inner_x -= width;

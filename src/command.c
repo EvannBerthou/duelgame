@@ -5,14 +5,16 @@
 #include "common.h"
 #include "net_protocol.h"
 
-#define GETTOKI(X)                                                                                             \
-    const char *X##str = strtok(NULL, " ");                                                                    \
-    if (X##str == NULL) {                                                                                      \
+bool load_editor(const char *filename);
+
+#define GETTOKI(X)                                                                                               \
+    const char *X##str = strtok(NULL, " ");                                                                      \
+    if (X##str == NULL) {                                                                                        \
         return (command_result){.valid = false, .has_packet = false, .content = (void *)command_usage(command)}; \
-    }                                                                                                          \
-    int X = 0;                                                                                                 \
-    strtoint(X##str, &X);                                                                                      \
-    do {                                                                                                       \
+    }                                                                                                            \
+    int X = 0;                                                                                                   \
+    strtoint(X##str, &X);                                                                                        \
+    do {                                                                                                         \
     } while (0)
 
 #define GETTOKS(X)                                                                                               \
@@ -33,6 +35,8 @@ command_type get_command_type(char *str) {
         return CT_ADMIN_UPDATE_PLAYER_INFO;
     } else if (streq(tok, "clear")) {
         return CT_CLEAR;
+    } else if (streq(tok, "editor")) {
+        return CT_LOAD_EDITOR;
     } else {
         return CT_UNKNOWN;
     }
@@ -41,6 +45,8 @@ command_type get_command_type(char *str) {
 const char *command_usage(command_type command) {
     if (command == CT_ADMIN_UPDATE_PLAYER_INFO) {
         return "update <player_id> <property_id> <value>";
+    } else if (command == CT_LOAD_EDITOR) {
+        return "editor <map_name>";
     }
     return "Unknown command";
 }
@@ -59,6 +65,13 @@ command_result handle_command(char *str) {
     } else if (command == CT_CLEAR) {
         clear_logs();
         return (command_result){.valid = true, .has_packet = false, .content = NULL};
+    } else if (command == CT_LOAD_EDITOR) {
+        GETTOKS(filename);
+        if (load_editor(filename) == false) {
+            create_map(filename);
+            load_editor(filename);
+        }
+        return (command_result){.valid = true};
     } else {
         return (command_result){.valid = false, .has_packet = false};
     }

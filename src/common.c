@@ -530,7 +530,8 @@ bool handle_map_line(char *line, map_data *map) {
 bool load_map(const char *filepath, map_data *map) {
     char fullpath[256] = {0};
     strcat(fullpath, "maps/");
-    strncat(fullpath, filepath, 256 - strlen("maps/"));
+    strncat(fullpath, filepath, 256 - strlen("maps/") - strlen(".map"));
+    strcat(fullpath, ".map");
     LOG("Loading map '%s'", fullpath);
     FILE *f = fopen(fullpath, "r");
     if (f == NULL) {
@@ -585,7 +586,8 @@ void write_string(FILE *f, const char *str) {
 bool save_map(const char *filepath, map_data *map) {
     char fullpath[256] = {0};
     strcat(fullpath, "maps/");
-    strncat(fullpath, filepath, 256 - strlen("maps/"));
+    strncat(fullpath, filepath, 256 - strlen("maps/") - strlen(".map"));
+    strcat(fullpath, ".map");
     LOG("Saving map at %s", fullpath);
     FILE *f = fopen(fullpath, "w");
     if (f == NULL) {
@@ -593,7 +595,9 @@ bool save_map(const char *filepath, map_data *map) {
     }
 
     write_string(f, "@HEADER\n");
-    write_string(f, "name: Default Map\n");
+    write_string(f, "name: ");
+    write_string(f, map->headers[MAP_HEADER_NAME].value);
+    write_string(f, "\n");
     write_string(f, "@END\n");
 
     write_string(f, "@SPAWN\n");
@@ -630,4 +634,16 @@ void free_map_data(map_data *map) {
     for (int i = 0; i < MAP_HEADER_COUNT; i++) {
         free((void *)map->headers[i].value);
     }
+}
+
+bool create_map(const char *filename) {
+    map_data map = {0};
+    map.headers[MAP_HEADER_NAME].value = strdup(filename);
+    memset(map.map, 0, sizeof(map.map));
+    memset(map.props, 0, sizeof(map.props));
+    bool result = save_map(filename, &map);
+    if (result == false) {
+        free((void *)map.headers[MAP_HEADER_NAME].value);
+    }
+    return result;
 }

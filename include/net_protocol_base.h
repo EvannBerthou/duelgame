@@ -43,7 +43,8 @@ typedef struct {
 
 typedef struct {
     uint8_t map_index;
-} net_packet_update_selected_map;
+    uint8_t round_count;
+} net_packet_update_server_configuration;
 
 typedef struct {
     uint8_t width;
@@ -54,6 +55,7 @@ typedef struct {
 
 typedef struct {
     uint8_t map_id;
+    uint8_t round_count;
 } net_packet_request_game_start;
 
 typedef struct {
