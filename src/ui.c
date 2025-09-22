@@ -460,7 +460,8 @@ int picker_option_clicked(picker *p) {
         return -1;
     }
 
-    for (int i = p->option_offset; i < p->option_offset + p->option_frame; i++) {
+    int len = fmin(p->option_count, p->option_offset + p->option_frame);
+    for (int i = p->option_offset; i < len; i++) {
         int y = p->rec.y + p->rec.height + 40 * (i - p->option_offset);
         Rectangle option_rec = {p->rec.x, y, p->rec.width, 40};
         if (CheckCollisionPointRec(get_mouse(), option_rec)) {
@@ -505,7 +506,8 @@ void picker_render(picker *p) {
     }
 
     if (p->opened) {
-        for (int i = p->option_offset; i < p->option_offset + p->option_frame; i++) {
+        int len = fmin(p->option_count, p->option_offset + p->option_frame);
+        for (int i = p->option_offset; i < len; i++) {
             int y = p->rec.y + p->rec.height + 40 * (i - p->option_offset);
             Rectangle option_rec = {p->rec.x, y, p->rec.width, 40};
             inner_x = option_rec.x + simple_border_size;
@@ -520,7 +522,7 @@ void picker_render(picker *p) {
             DrawRectangleRec(option_rec, c);
             DrawText(p->options[i], inner_x, inner_y, 32, BLACK);
         }
-        Rectangle frame_rec = {p->rec.x, p->rec.y + p->rec.height, p->rec.width, 40 * p->option_frame};
+        Rectangle frame_rec = {p->rec.x, p->rec.y + p->rec.height, p->rec.width, 40 * len};
         NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
                             .left = simple_border_size,
                             .top = simple_border_size,

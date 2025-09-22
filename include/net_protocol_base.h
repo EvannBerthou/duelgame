@@ -53,7 +53,7 @@ typedef struct {
 } net_packet_map;
 
 typedef struct {
-    char map_name[32];
+    uint8_t map_id;
 } net_packet_request_game_start;
 
 typedef struct {

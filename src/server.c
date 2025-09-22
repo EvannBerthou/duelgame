@@ -88,6 +88,7 @@ int player_count() {
 
 // Map
 map_data current_map = {0};
+const char **all_maps = NULL;
 uint8_t *map_names_network = NULL;
 int map_count = 0;
 int selected_map_idx = 0;
@@ -389,9 +390,13 @@ void handle_message(int fd) {
         }
     } else if (p.type == PKT_REQUEST_GAME_START) {
         net_packet_request_game_start *s = (net_packet_request_game_start *)p.content;
-        LOG("Loading %s", s->map_name);
-        if (load_map(s->map_name, &current_map) == false) {
-            LOGL(LL_ERROR, "Error loading map '%s'", s->map_name);
+        if (s->map_id >= map_count) {
+            return;
+        }
+
+        const char *map = all_maps[s->map_id];
+        if (load_map(map, &current_map) == false) {
+            LOGL(LL_ERROR, "Error loading map '%s'", map);
             return;
         }
         for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
@@ -610,6 +615,17 @@ int sort_string(const void *a, const void *b) {
     return strcmp(*(const char **)a, *(const char **)b);
 }
 
+// TODO: We should only parse header
+const char *extract_map_name(const char *filepath) {
+    map_data m = {0};
+    if (load_map(filepath, &m) == false) {
+        return NULL;
+    }
+    const char *res = m.headers[MAP_HEADER_NAME].value == NULL ? NULL : strdup(m.headers[MAP_HEADER_NAME].value);
+    free_map_data(&m);
+    return res;
+}
+
 void load_maps() {
     DIR *d;
     struct dirent *dir;
@@ -624,28 +640,38 @@ void load_maps() {
     }
 
     int i = 0;
-    char **names = malloc(sizeof(char *) * map_count);
+    all_maps = malloc(sizeof(char *) * map_count);
+    const char **map_names = malloc(sizeof(char *) * map_count);
     if ((d = opendir("maps"))) {
         while ((dir = readdir(d)) != NULL) {
             if (dir->d_type == DT_REG) {
-                names[i] = strdup(dir->d_name);
+                all_maps[i] = strdup(dir->d_name);
+                map_names[i] = extract_map_name(dir->d_name);
+                if (all_maps[i] == NULL) {
+                    LOGL(LL_ERROR, "Error while loading map %s", dir->d_name);
+                    exit(-1);
+                }
                 i++;
             }
         }
         closedir(d);
     }
 
-    qsort(names, map_count, sizeof(names[0]), sort_string);
+    qsort(map_names, map_count, sizeof(all_maps[0]), sort_string);
 
     map_names_network = calloc(map_count, 32);
     for (i = 0; i < map_count; i++) {
-        memcpy(map_names_network + i * 32, names[i], fmin(32, strlen(names[i])));
+        memcpy(map_names_network + i * 32, map_names[i], fmin(32, strlen(map_names[i])));
     }
+    for (int i = 0; i < map_count; i++) {
+        free((void *)map_names[i]);
+    }
+    free(map_names);
 }
 
 int main(int argc, char **argv) {
     int port = 3000;
-    POPARG(argc, argv);  // program name
+    POPARG(argc, argv);
     while (argc > 0) {
         const char *arg = POPARG(argc, argv);
         if (strcmp(arg, "--port") == 0) {

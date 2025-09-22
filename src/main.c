@@ -2090,7 +2090,7 @@ void update_scene_lobby() {
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
-            net_packet_request_game_start s = pkt_request_game_start(map_picker.options[map_picker.selected_option]);
+            net_packet_request_game_start s = pkt_request_game_start(map_picker.selected_option);
             send_sock(PKT_REQUEST_GAME_START, &s, server_fd);
         }
 
@@ -2427,6 +2427,7 @@ void update_scene_editor() {
             set_map(&props, over_cell.x, over_cell.y, 0);
             clear_animations();
             set_props_animations();
+            editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 0;
         }
 
         if (IsKeyPressed(KEY_T)) {
@@ -2462,11 +2463,8 @@ void update_scene_editor() {
     }
 
     if (IsKeyPressed(KEY_S)) {
-        LOG("Saving map...");
         if (save_map(editor_map_filepath, &editor_map) == false) {
             LOGL(LL_ERROR, "Error while saving map from the editor");
-        } else {
-            LOG("Map saved!");
         }
     }
 }
@@ -2522,7 +2520,10 @@ int main(int argc, char **argv) {
             const char *map = POPARG(argc, argv);
             editor_map_filepath = map;
             active_scene = SCENE_EDITOR;
-            load_map(map, &editor_map);
+            if (load_map(map, &editor_map) == false) {
+                LOGL(LL_ERROR, "Could not load map %s", map);
+                exit(1);
+            }
             init_scene_editor();
         } else {
             LOG("Unknown arg : '%s'", arg);

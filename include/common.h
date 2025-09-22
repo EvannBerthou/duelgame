@@ -202,26 +202,38 @@ void apply_effect(player_info* p, const spell* s);
 
 // Queue
 
-
 void init_queue(queue* q, size_t elem_size);
 bool queue_full(queue* q);
 bool queue_empty(queue* q);
 bool queue_push(queue* q, void* data);
 bool queue_pop(queue* q, void* out);
-void reset_queue(queue *q);
+void reset_queue(queue* q);
 
 // Map
 
 #define MAP_WIDTH 16
 #define MAP_HEIGHT 8
 
+typedef enum {
+    MAP_HEADER_NAME,
+    MAP_HEADER_COUNT,
+    MAP_HEADER_UNKNOWN
+} map_header_key;
+
 typedef struct {
+    map_header_key key;
+    const char* value;
+} map_header;
+
+typedef struct {
+    map_header headers[MAP_HEADER_COUNT];
     uint8_t map[MAP_HEIGHT * MAP_WIDTH];
     uint8_t props[MAP_HEIGHT * MAP_WIDTH];
     uint8_t spawn_positions[MAX_PLAYER_COUNT][2];
 } map_data;
 
-bool load_map(const char *filepath, map_data *map);
-bool save_map(const char *filepath, map_data *data);
+bool load_map(const char* filepath, map_data* map);
+bool save_map(const char* filepath, map_data* map);
+void free_map_data(map_data* map);
 
 #endif
