@@ -172,6 +172,7 @@ typedef struct {
 typedef struct {
     uint8_t id;
     bool connected;
+    bool admin;
     char name[9];
     uint8_t x, y;
     net_player_stat stats[STAT_COUNT];

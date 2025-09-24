@@ -16,8 +16,6 @@
 
 void handle_player_disconnect(int fd);
 
-#define MAX_ADMIN 4
-
 #define FOREACH_PLAYER(IT, P)                                                    \
     for (int IT = 0; IT < MAX_PLAYER_COUNT; IT++)                                \
         for (player_info *P = &players[IT]; P != NULL && P->connected; P = NULL) \
@@ -27,8 +25,9 @@ extern const spell all_spells[];
 
 // Server management
 fd_set master_set, read_fds;
-int connections[MAX_PLAYER_COUNT + MAX_ADMIN] = {0};
+int connections[MAX_PLAYER_COUNT] = {0};
 int connection_count = 0;
+const char *server_password = "";
 
 // Players
 int clients[MAX_PLAYER_COUNT] = {0};
@@ -46,8 +45,6 @@ uint8_t max_round_count = 3;
 
 // Admin stuff
 const char ADMIN_PASSWORD[8] = {'p', 'a', 's', 's'};
-int admins[MAX_ADMIN] = {0};
-int admin_count = 0;
 
 // Utils
 
@@ -65,18 +62,6 @@ void broadcast(net_packet_type_enum type, void *content) {
             send_sock(type, content, clients[i]);
         }
     }
-}
-
-bool is_admin(int fd) {
-    // Master player does not have to login
-    if (fd == clients[master_player]) {
-        return true;
-    }
-    for (int i = 0; i < admin_count; i++) {
-        if (admins[i] == fd)
-            return true;
-    }
-    return false;
 }
 
 int player_count() {
@@ -162,6 +147,14 @@ player_info *get_player_from_fd(int fd) {
     }
     LOG("Unknown player with fd=%d", fd);
     exit(1);
+}
+
+bool is_admin(int fd) {
+    // Master player does not have to login
+    if (fd == clients[master_player]) {
+        return true;
+    }
+    return get_player_from_fd(fd)->admin;
 }
 
 bool player_on_cell(int x, int y) {
@@ -337,6 +330,15 @@ void handle_message(int fd) {
     if (p.type == PKT_PING) {
         send_sock(PKT_PING, p.content, fd);
     } else if (p.type == PKT_JOIN) {
+        net_packet_join *j = (net_packet_join *)p.content;
+
+        if (server_password != NULL && strncmp(server_password, j->password, 8) != 0) {
+            LOG("Wrong password for %.8s => '%.8s'", j->username, j->password);
+            // TODO: Refuse connection
+            FD_CLR(fd, &master_set);
+            close(fd);
+            return;
+        }
         int new_player = -1;
         for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
             if (players[i].connected == false) {
@@ -348,14 +350,13 @@ void handle_message(int fd) {
         }
         assert(new_player != -1);
 
-        net_packet_join *j = (net_packet_join *)p.content;
         LOG("[%d] Joined %.*s", fd, 8, j->username);
         j->id = new_player;
 
         // We send previously connected players informations to the new player
         FOREACH_PLAYER(i, player) {
             if (clients[i] != fd) {
-                net_packet_join other_user_join = pkt_join(i, player->name);
+                net_packet_join other_user_join = pkt_join(i, player->name, "");
                 send_sock(PKT_JOIN, &other_user_join, fd);
 
                 net_packet_player_build b = pkt_player_build(
@@ -579,7 +580,7 @@ void handle_message(int fd) {
         // We send previously connected players informations to the new player
         FOREACH_PLAYER(i, player) {
             reset_player(player);
-            net_packet_join other_user_join = pkt_join(i, player->name);
+            net_packet_join other_user_join = pkt_join(i, player->name, NULL);
             broadcast(PKT_JOIN, &other_user_join);
 
             net_packet_player_build b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
@@ -599,8 +600,9 @@ void handle_message(int fd) {
         LOG("%d is trying to connect as admin with password '%s'", fd, a->password);
         net_packet_admin_connect_result result = pkt_admin_connect_result(memcmp(a->password, ADMIN_PASSWORD, 8) == 0);
         send_sock(PKT_ADMIN_CONNECT_RESULT, &result, fd);
-        admins[admin_count] = fd;
-        admin_count++;
+        if (result.success) {
+            get_player_from_fd(fd)->admin = true;
+        }
     } else if (p.type == PKT_ADMIN_UPDATE_PLAYER_INFO) {
         if (is_admin(fd)) {
             net_packet_admin_update_player_info *info = (net_packet_admin_update_player_info *)p.content;
@@ -696,6 +698,8 @@ int main(int argc, char **argv) {
                 LOG("Error parsing port to int '%s'", value);
                 exit(1);
             }
+        } else if (strcmp(arg, "--pass") == 0) {
+            server_password = POPARG(argc, argv);
         } else {
             LOG("Unknown arg : '%s'", arg);
         }

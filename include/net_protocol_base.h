@@ -23,6 +23,7 @@ typedef struct {
 typedef struct {
     uint8_t id;
     char username[8];
+    char password[8];
 } net_packet_join;
 
 typedef struct {

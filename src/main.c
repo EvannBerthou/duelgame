@@ -98,10 +98,12 @@ extern const char *wall_frames[];
 // Network
 int server_fd = 0;
 bool connected = false;
+bool accepted = false;
 uint64_t last_ping = 0;
 fd_set master_set;
 int fd_count;
 struct timeval timeout;
+pthread_t t_network;
 
 queue pkt_queue;
 
@@ -174,7 +176,7 @@ card player_info_card = CARD(665, 150, card_width, 550, UI_NORD, "Spells", "Stat
 
 input_buf ip_buf = {.prefix = "IP", .max_length = 32};
 input_buf port_buf = {.prefix = "Port", .max_length = 32};
-input_buf password_buf = {.prefix = "Password", .max_length = 32};
+input_buf password_buf = {.prefix = "Password", .max_length = 8};
 input_buf username_buf = {.prefix = "Username", .max_length = 8};
 button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
 
@@ -1598,8 +1600,7 @@ int connect_to_server(const char *ip, uint16_t port) {
 }
 
 void player_join(const char *username) {
-    net_packet_join join = {0};
-    memcpy(join.username, username, 8);
+    net_packet_join join = pkt_join(255, username, password_buf.buf);
     send_sock(PKT_JOIN, &join, server_fd);
 }
 
@@ -1761,14 +1762,40 @@ void handle_packet(net_packet *p) {
     free(p->content);
 }
 
+// TODO: It should also send queued packets from the client
+void *network_thread(void *arg) {
+    (void)arg;
+    // Read incoming packets and push it to a queue
+    while (true) {
+        if (accepted) {
+            net_packet p = {0};
+            if (packet_read(&p, server_fd) < 0) {
+                close(server_fd);
+                connected = false;
+                accepted = false;
+                active_scene = SCENE_MAIN_MENU;
+                break;
+            }
+            // Special case. We want to set the recieve time right now and not wait until we are handling the packet.
+            if (p.type == PKT_PING) {
+                net_packet_ping *ping = (net_packet_ping *)p.content;
+                ping->recieve_time = GetTime() * 1000;
+            }
+            queue_push(&pkt_queue, &p);
+        }
+    }
+    return NULL;
+}
+
 bool join_game(const char *ip, int port, const char *username) {
     if (connect_to_server(ip, port) < 0) {
         LOGL(LL_ERROR, "Could not connect to server");
         return false;
     }
-    connected = true;
+    accepted = true;
 
     LOG("Connected to server !");
+    pthread_create(&t_network, NULL, network_thread, NULL);
 
     reset_game();
     player_join(username);
@@ -1781,28 +1808,6 @@ bool join_game(const char *ip, int port, const char *username) {
     timeout.tv_usec = 0;
 
     return true;
-}
-
-// TODO: It should also send queued packets from the client
-void *network_thread(void *arg) {
-    (void)arg;
-    // Read incoming packets and push it to a queue
-    while (true) {
-        if (connected) {
-            net_packet p = {0};
-            if (packet_read(&p, server_fd) < 0) {
-                LOGL(LL_ERROR, "Error reading packet");
-                exit(1);
-            }
-            // Special case. We want to set the recieve time right now and not wait until we are handling the packet.
-            if (p.type == PKT_PING) {
-                net_packet_ping *ping = (net_packet_ping *)p.content;
-                ping->recieve_time = GetTime() * 1000;
-            }
-            queue_push(&pkt_queue, &p);
-        }
-    }
-    return NULL;
 }
 
 // Scenes
@@ -2608,14 +2613,12 @@ int main(int argc, char **argv) {
         players[i].animation = NO_ANIMATION;
     }
 
-    pthread_t t_network;
-    pthread_create(&t_network, NULL, network_thread, NULL);
     // Send ping every seconds
     float ping_counter = 1;
     while (!WindowShouldClose()) {
         step_animations();
         update_console();
-        if (server_fd != 0) {
+        if (connected) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {
                 net_packet_ping ping = {.send_time = (uint64_t)(GetTime() * 1000)};

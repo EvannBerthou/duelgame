@@ -17,9 +17,6 @@ build/main_game: src/main.c src/ui.c src/common.c src/command.c include/net_prot
 build/server: src/server.c src/common.c include/net_protocol.h
 	gcc -Wall -Wextra src/server.c src/common.c -o build/server -DLOG_PREFIX=\"SERVER\" -I./include -ggdb -lm
 
-build/admin: src/admin.c src/common.c src/command.c include/net_protocol.h
-	gcc src/admin.c src/common.c src/command.c -o build/admin -DLOG_PREFIX=\"ADMIN\" -I./include
-
 run: build/server build/main_game
 	killall server || true
 	killall main_game || true
