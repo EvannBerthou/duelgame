@@ -97,7 +97,7 @@ void send_map(int fd) {
 // Player
 
 net_packet_player_update pkt_from_info(player_info *p) {
-    return pkt_player_update(p->id, p->stats, p->x, p->y, p->effect, p->effect_round_left, false);
+    return pkt_player_update(p->id, p->stats, p->x, p->y, p->effect, p->effect_round_left, p->banned, false);
 }
 
 void update_stats(player_info *p, const spell *s) {
@@ -133,6 +133,11 @@ void reset_player(player_info *player) {
     }
     player->turn_effect = SE_NONE;
     player->turn_effect_duration_left = 0;
+    player->last_spell = NO_SPELL;
+    player->spell = NO_SPELL;
+    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+        player->banned[i] = false;
+    }
 
     net_packet_player_update u = pkt_from_info(player);
     u.immediate = true;
@@ -157,14 +162,13 @@ bool is_admin(int fd) {
     return get_player_from_fd(fd)->admin;
 }
 
-bool player_on_cell(int x, int y) {
+player_info *player_on_cell(int x, int y) {
     FOREACH_PLAYER(i, player) {
-        // The player tries to move on the same cell as another player so we cancel it
         if (player->x == x && player->y == y) {
-            return true;
+            return player;
         }
     }
-    return false;
+    return NULL;
 }
 
 // Game logic
@@ -189,13 +193,13 @@ void play_turn(player_info *player) {
         }
 
         LOG("Player %d is using spell %s this round", player->id, all_spells[player->spell].name);
-        int found = false;
+        int build_spell_index = -1;
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             if (player->spell == player->spells[i]) {
-                found = true;
+                build_spell_index = i;
             }
         }
-        if (found == false) {
+        if (build_spell_index == -1) {
             LOG("Player is trying to cast a spell which is not in his build");
             handle_player_disconnect(clients[player->id]);
             return;
@@ -204,7 +208,21 @@ void play_turn(player_info *player) {
         const spell *s = &all_spells[player->spell];
         net_packet_player_action action =
             pkt_player_action(player->id, player->action, player->ax, player->ay, player->spell);
+
+        if (player->banned[action.spell]) {
+            LOG("Player %s can't cast %s spell because it is banned.", player->name, s->name);
+            net_packet_player_update u = pkt_from_info(player);
+            broadcast(PKT_PLAYER_UPDATE, &u);
+            net_packet_player_action action = pkt_player_action(player->id, PA_STUNNED, player->x, player->y, 0);
+            broadcast(PKT_PLAYER_ACTION, &action);
+            player->state = RS_PLAYING;
+            return;
+        }
+
         broadcast(PKT_PLAYER_ACTION, &action);
+
+        player->last_spell = player->spell;
+
         if (s->type == ST_MOVE) {
             if (s->effect == SE_DODGE) {
                 player->turn_effect = SE_DODGE;
@@ -219,31 +237,37 @@ void play_turn(player_info *player) {
                 player->y = player->ay;
             }
         } else if (s->type == ST_TARGET) {
-            FOREACH_PLAYER(i, other) {
-                if (other->x == player->ax && other->y == player->ay) {
-                    if (other->turn_effect == SE_DODGE) {
-                        if (player_on_cell(other->ax, other->ay)) {
-                            player->state = RS_PLAYING;
-                            return;
-                        }
-                        LOG("Player %d dodged!", player->id);
-                        other->x = other->ax;
-                        other->y = other->ay;
-                    } else if (other->turn_effect == SE_BLOCK) {
-                        LOG("Player %s blocked the attack and %s is stunned", other->name, player->name);
-                        player->effect[SE_STUN] = true;
-                        player->effect_round_left[SE_STUN] = 2;
-                        player->spell_effect[SE_STUN] = &all_spells[6];  // TODO: Should not be hardcoded
-                    } else {
-                        if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
-                            damage_player(player, other, s);
-                            if (s->stat_value != 0) {
-                                update_stats(other, s);
-                            }
-                        } else if (s->cast_type == CT_EFFECT) {
-                            apply_effect(other, s);
-                        }
+            if (s->effect == SE_BANISH) {
+                LOG("Banning %d for %s", build_spell_index, player->name);
+                player->banned[build_spell_index] = true;
+            }
+            player_info *other = player_on_cell(player->ax, player->ay);
+            if (other == NULL) {
+                player->state = RS_PLAYING;
+                return;
+            }
+
+            if (other->turn_effect == SE_DODGE) {
+                if (player_on_cell(other->ax, other->ay)) {
+                    player->state = RS_PLAYING;
+                    return;
+                }
+                LOG("Player %d dodged!", player->id);
+                other->x = other->ax;
+                other->y = other->ay;
+            } else if (other->turn_effect == SE_BLOCK) {
+                LOG("Player %s blocked the attack and %s is stunned", other->name, player->name);
+                player->effect[SE_STUN] = true;
+                player->effect_round_left[SE_STUN] = 2;
+                player->spell_effect[SE_STUN] = &all_spells[6];  // TODO: Should not be hardcoded
+            } else {
+                if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
+                    damage_player(player, other, s);
+                    if (s->stat_value != 0) {
+                        update_stats(other, s);
                     }
+                } else if (s->cast_type == CT_EFFECT) {
+                    apply_effect(other, s);
                 }
             }
         } else {

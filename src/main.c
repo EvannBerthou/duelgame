@@ -315,6 +315,7 @@ typedef struct {
     net_player_stat stats[STAT_COUNT];
     spell_effect effect[SE_COUNT];
     int effect_round_left[SE_COUNT];
+    int banned_spells[MAX_SPELL_COUNT];
 } player_turn_update;
 
 player_turn_update updates[MAX_PLAYER_COUNT] = {0};
@@ -1050,6 +1051,18 @@ player_move player_exec_action(player *p) {
     }
 
     player_info *i = &p->info;
+
+    if (p->info.banned[p->selected_spell]) {
+        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+            if (p->info.banned[i] == false) {
+                set_selected_spell(p, i);
+                return (player_move){.action = PA_NONE};
+            }
+        }
+        // In case all spells are banned the player can do nothing
+        return (player_move){.action = PA_STUNNED, .position = (Vector2){0, 0}};
+    }
+
     const Vector2 g = screen2grid(get_mouse());
     if (get_map(&game_map, g.x, g.y) != -1 && IsMouseButtonPressed(0)) {
         if (i->action == PA_SPELL) {
@@ -1149,7 +1162,7 @@ void render_player_actions(player *p) {
         bool on_cooldown = info->cooldowns[i] > 0;
         Rectangle icon = icons[all_spells[info->spells[i]].icon];
         Color tint = WHITE;
-        if (on_cooldown) {
+        if (on_cooldown && info->banned[i] == false) {
             tint = GRAY;
             const char *text = TextFormat("%d", info->cooldowns[i]);
             toolbar_spells_buttons[i].text = text;
@@ -1161,7 +1174,7 @@ void render_player_actions(player *p) {
         b->texture_sprite = icon;
         b->color = tint;
         b->type = BT_TEXTURE;
-        b->disabled = on_cooldown;
+        b->disabled = on_cooldown || info->banned[i];
         button_render(b);
 
         if (is_console_closed()) {
@@ -1319,7 +1332,10 @@ void reset_round() {
         players[i].dead = false;
         for (int j = 0; j < MAX_SPELL_COUNT; j++) {
             players[i].info.cooldowns[j] = 0;
+            players[i].info.banned[i] = false;
         }
+        players[i].info.last_spell = NO_SPELL;
+        compute_spell_range(&players[i]);
     }
 
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
@@ -1392,8 +1408,7 @@ void queue_spell_animation(spell_animation anim, Vector2 target, player *caster,
             //  player_on_cell->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
             //  player_on_cell->animation_state = PAS_BURNING;
             //  PlaySound(burn_sound);
-            // request.animation_time = 0.3f / 3.f;
-            request.animation_time = 3.f;
+            request.animation_time = 0.3f / 3.f;
             request.frame_count = SLASH_ANIMATION_COUNT;
             request.animation_sprite = slash_attack;
             request.target_cell = target;
@@ -1420,8 +1435,7 @@ void queue_spell_animation(spell_animation anim, Vector2 target, player *caster,
         case SA_FORTIFY:
         case SA_SLOWDOWN:
         case SA_SPEEDUP:
-            // request.animation_time = 0.3f / 3.f;
-            request.animation_time = 3.f;
+            request.animation_time = 0.3f / 3.f;
             request.frame_count = SLASH_ANIMATION_COUNT;
             request.animation_sprite = slash_attack;
             request.target_cell = target;
@@ -1432,7 +1446,7 @@ void queue_spell_animation(spell_animation anim, Vector2 target, player *caster,
     queue_push(&spell_animation_queue, &request);
 }
 
-void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
+bool execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
     // TODO: We should do pathfinding instead of sliding across the map
     // and scale animation time with distance
     if (s->type == ST_MOVE) {
@@ -1455,10 +1469,12 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
                 player *new_target = get_player_at(target->moving_target);
                 target->animation_state = new_target == NULL ? PAS_MOVING : PAS_BUMPING;
                 PlaySound(move_sound);
+                return false;
             } else if (target->info.turn_effect == SE_BLOCK) {
                 p->info.effect[SE_STUN] = true;
                 p->info.effect_round_left[SE_STUN] = 2;
                 p->info.spell_effect[SE_STUN] = &all_spells[6];  // TODO: Should not be hardcoded
+                return false;
             } else {
                 int damage = get_spell_damage(&p->info, s);
                 if (damage != 0) {
@@ -1482,6 +1498,7 @@ void execute_spell(player *p, const spell *s, Vector2 cell, player *target) {
     } else {
         LOGL(LL_ERROR, "Unknown spell type %d from %s", s->type, s->name);
     }
+    return true;
 }
 
 // TODO: Should only queue animations but MOVE are a special case for now
@@ -1507,6 +1524,7 @@ void play_turn() {
         } else {
             queue_spell_animation(s->cast_animation, a->target, p, s);
         }
+        p->info.last_spell = a->spell;
     } else if (a->action == PA_STUNNED) {
         if (p->info.effect_round_left[SE_STUN] > 0) {
             p->action_animation = new_animation(AT_ONESHOT, 1.f, 1);
@@ -1545,6 +1563,7 @@ void end_turn() {
             if (player->info.cooldowns[j] > 0) {
                 player->info.cooldowns[j]--;
             }
+            player->info.banned[j] = updates[i].banned_spells[j];
         }
         if (player->info.turn_effect_duration_left == 0) {
             player->info.turn_effect = SE_NONE;
@@ -1730,9 +1749,10 @@ void handle_packet(net_packet *p) {
             }
             player->info.x = u->x;
             player->info.y = u->y;
-            for (int j = 0; j < SE_COUNT; j++) {
-                player->info.effect[j] = u->effect[j];
-                player->info.effect_round_left[j] = u->effect_round_left[j];
+            for (int i = 0; i < SE_COUNT; i++) {
+                player->info.effect[i] = u->effect[i];
+                player->info.effect_round_left[i] = u->effect_round_left[i];
+                player->info.banned[i] = u->banned_spells[i];
             }
         } else {
             updates[u->id].position = (Vector2){u->x, u->y};
@@ -1742,6 +1762,9 @@ void handle_packet(net_packet *p) {
             for (int j = 0; j < SE_COUNT; j++) {
                 updates[u->id].effect[j] = u->effect[j];
                 updates[u->id].effect_round_left[j] = u->effect_round_left[j];
+            }
+            for (int j = 0; j < MAX_SPELL_COUNT; j++) {
+                updates[u->id].banned_spells[j] = u->banned_spells[j];
             }
         }
     } else if (p->type == PKT_PLAYER_ACTION) {
@@ -2291,8 +2314,9 @@ void update_scene_in_game() {
                 const spell *s = current_animation.spell;
                 LOG("%s is casting %s", current_animation.caster->info.name, s->name);
                 if (s->cast_type == CT_CAST || s->cast_type == CT_CAST_EFFECT) {
-                    execute_spell(current_animation.caster, s, current_animation.target_cell, current_animation.target);
-                    if (s->effect != SE_NONE && current_animation.target != NULL) {
+                    bool success = execute_spell(current_animation.caster, s, current_animation.target_cell,
+                                                 current_animation.target);
+                    if (success && s->effect != SE_NONE && current_animation.target != NULL) {
                         apply_effect(&current_animation.target->info, s);
                     }
                 } else if (s->cast_type == CT_EFFECT && current_animation.target != NULL) {

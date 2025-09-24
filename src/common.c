@@ -250,6 +250,7 @@ const spell all_spells[] = {
         .name = "Banish",
         .description = "Banish the last casted spell from the target",
         .cast_animation = SA_BANISH,
+        .effect = SE_BANISH,
         .type = ST_TARGET,
         .icon = SI_WAND,
         .range = 2,
@@ -400,6 +401,13 @@ void apply_effect(player_info *p, const spell *s) {
     } else if (s->effect == SE_BLOCK) {
         p->turn_effect = SE_BLOCK;
         p->turn_effect_duration_left = 0;
+    } else if (s->effect == SE_BANISH) {
+        LOG("Banning %s from %s", all_spells[p->last_spell].name, p->name);
+        if (p->last_spell != NO_SPELL) {
+            p->banned[p->last_spell] = true;
+        } else {
+            LOG("No spells to ban for %s", p->name);
+        }
     } else {
         LOG("Applying effect %d to %s", s->effect, p->name);
         p->effect[s->effect] = true;

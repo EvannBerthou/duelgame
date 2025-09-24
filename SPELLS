@@ -44,6 +44,6 @@ Stats ideas
 To implements :
 
 Sacrify => Implement ST_AROUND
-Banish
 Revert
 Knockback => Need to compute the direction
+Crit

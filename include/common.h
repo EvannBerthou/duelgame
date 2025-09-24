@@ -169,6 +169,8 @@ typedef struct {
     uint8_t value;
 } net_player_stat;
 
+#define NO_SPELL 255
+
 typedef struct {
     uint8_t id;
     bool connected;
@@ -182,7 +184,9 @@ typedef struct {
     uint8_t ax, ay;
     uint8_t spells[MAX_SPELL_COUNT];
     uint8_t cooldowns[MAX_SPELL_COUNT];
+    uint8_t banned[MAX_SPELL_COUNT];
     uint8_t spell;
+    uint8_t last_spell;
 
     uint8_t effect[SE_COUNT];
     uint8_t effect_round_left[SE_COUNT];
@@ -236,6 +240,6 @@ typedef struct {
 bool load_map(const char* filepath, map_data* map);
 bool save_map(const char* filepath, map_data* map);
 void free_map_data(map_data* map);
-bool create_map(const char *filename);
+bool create_map(const char* filename);
 
 #endif

@@ -70,6 +70,7 @@ typedef struct {
     uint8_t y;
     uint8_t effect[SE_COUNT] NET_SIZE("SE_COUNT");
     uint8_t effect_round_left[SE_COUNT] NET_SIZE("SE_COUNT");
+    uint8_t banned_spells[MAX_SPELL_COUNT] NET_SIZE("MAX_SPELL_COUNT");
     // Should the game updates the status right as the packet is recieved (true)
     // or wait for the end of the round (false) ?
     uint8_t immediate;
