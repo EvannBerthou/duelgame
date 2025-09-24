@@ -1949,30 +1949,28 @@ int get_total_stats() {
 }
 
 void update_scene_main_menu() {
-    if (is_console_open()) {
-        return;
-    }
-
-    // First card
-    if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
-        input_erase(inputs[selected_input]);
-    } else if (IsKeyPressed(KEY_ENTER)) {
-        if (set_error(try_join()) == false) {
-            PlaySound(ui_button_clicked);
+    if (is_console_closed()) {
+        // First card
+        if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
+            input_erase(inputs[selected_input]);
+        } else if (IsKeyPressed(KEY_ENTER)) {
+            if (set_error(try_join()) == false) {
+                PlaySound(ui_button_clicked);
+            }
+        } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && !IsKeyDown(KEY_LEFT_SHIFT)) {
+            selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
+        } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
+            if (selected_input == 0) {
+                selected_input = MAIN_MENU_INPUT_COUNT - 1;
+            } else {
+                selected_input--;
+            }
         }
-    } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && !IsKeyDown(KEY_LEFT_SHIFT)) {
-        selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
-    } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
-        if (selected_input == 0) {
-            selected_input = MAIN_MENU_INPUT_COUNT - 1;
-        } else {
-            selected_input--;
-        }
-    }
 
-    int key;
-    while ((key = GetCharPressed())) {
-        input_write(inputs[selected_input], key);
+        int key;
+        while ((key = GetCharPressed())) {
+            input_write(inputs[selected_input], key);
+        }
     }
 
     for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
@@ -2014,14 +2012,12 @@ void update_scene_main_menu() {
     } else if (player_info_card.selected_tab == 1) {
         for (int i = 0; i < stat_sliders_count; i++) {
             buttoned_slider *b = stat_sliders[i];
-            b->minus.disabled = (b->slider.min < 0 && b->slider.value <= 0 && get_total_stats() + 10 > 200) ||
-                                (b->slider.min == b->slider.value);
+            b->minus.disabled = b->slider.min < 0 && b->slider.value <= 0 && get_total_stats() + 10 > 200;
             if (button_clicked(&b->minus)) {
                 buttoned_slider_decrement(b);
             }
 
-            b->plus.disabled =
-                (b->slider.value >= 0 && get_total_stats() + 10 > 200) || (b->slider.max == b->slider.value);
+            b->plus.disabled = (b->slider.value >= 0 && get_total_stats() + 10 > 200);
             if (button_clicked(&b->plus)) {
                 buttoned_slider_increment(b);
             }
@@ -2146,7 +2142,6 @@ void update_scene_lobby() {
                     send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
                 }
 
-                round_count_slider.minus.disabled = round_count_slider.slider.value == round_count_slider.slider.min;
                 if (button_clicked(&round_count_slider.minus)) {
                     buttoned_slider_decrement(&round_count_slider);
                     net_packet_update_server_configuration selection =
@@ -2154,7 +2149,6 @@ void update_scene_lobby() {
                     send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
                 }
 
-                round_count_slider.plus.disabled = round_count_slider.slider.value == round_count_slider.slider.max;
                 if (button_clicked(&round_count_slider.plus)) {
                     buttoned_slider_increment(&round_count_slider);
                     net_packet_update_server_configuration selection =

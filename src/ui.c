@@ -14,6 +14,11 @@ extern Vector2 get_mouse();
 #define WIDTH 1280
 #define HEIGHT 720
 
+#define DISABLED_TINT DARKGRAY
+#define CLICKED_TINT DARKGRAY
+#define SELECTED_TINT DARKGRAY
+#define HOVER_TINT LIGHTGRAY
+
 // Utils
 
 int get_width_center(Rectangle rec, const char *text, int font_size) {
@@ -25,6 +30,14 @@ void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c) {
     int center = get_width_center(rec, text, font_size);
     int height = rec.y + (rec.height - font_size) / 2;
     DrawText(text, center, height, font_size, c);
+}
+
+bool is_hover(Rectangle rec) {
+    return is_console_closed() && CheckCollisionPointRec(get_mouse(), rec);
+}
+
+bool is_clicked(Rectangle rec) {
+    return is_hover(rec) && IsMouseButtonPressed(0);
 }
 
 // Input
@@ -90,11 +103,15 @@ void input_trim(input_buf *b) {
 }
 
 bool input_clicked(input_buf *b) {
-    return CheckCollisionPointRec(get_mouse(), b->rec) && IsMouseButtonPressed(0) && is_console_closed();
+    return is_clicked(b->rec);
 }
 
 void input_render(input_buf *b, int active) {
-    DrawRectangleRec(b->rec, UI_BEIGE);
+    Color bg_color = UI_BEIGE;
+    if (is_hover(b->rec)) {
+        bg_color = ColorTint(bg_color, HOVER_TINT);
+    }
+    DrawRectangleRec(b->rec, bg_color);
     NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
                         .left = simple_border_size,
                         .top = simple_border_size,
@@ -113,7 +130,7 @@ void input_render(input_buf *b, int active) {
     int inner_x = b->rec.x + simple_border_size;
     int inner_y = b->rec.y + (b->rec.height - font_size) / 2.f;
     DrawText(text, inner_x, inner_y, font_size, BLACK);
-    if (active) {
+    if (active && (int)GetTime() % 2 == 0) {
         int text_width = MeasureText(text, font_size);
         DrawRectangle(inner_x + text_width + 2, inner_y, 2, font_size, BLACK);
     }
@@ -122,7 +139,7 @@ void input_render(input_buf *b, int active) {
 // Button
 
 bool button_hover(button *b) {
-    return CheckCollisionPointRec(get_mouse(), b->rec) && is_console_closed();
+    return is_hover(b->rec);
 }
 
 bool button_clicked(button *b) {
@@ -149,13 +166,13 @@ bool button_clicked(button *b) {
 void button_render(button *b) {
     Color c = b->color;
     if (b->disabled) {
-        c = ColorTint(c, DARKGRAY);
+        c = ColorTint(c, DISABLED_TINT);
     } else if (is_console_closed()) {
         if (CheckCollisionPointRec(get_mouse(), b->rec)) {
             if (IsMouseButtonDown(0)) {
-                c = ColorTint(c, DARKGRAY);
+                c = ColorTint(c, CLICKED_TINT);
             } else {
-                c = ColorTint(c, GRAY);
+                c = ColorTint(c, HOVER_TINT);
             }
         }
     }
@@ -203,7 +220,7 @@ bool slider_increment(slider *s) {
 }
 
 bool slider_hover(slider *s) {
-    return CheckCollisionPointRec(get_mouse(), s->rec) && is_console_closed();
+    return is_hover(s->rec);
 }
 
 int slider_border = 16;
@@ -278,9 +295,15 @@ void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step)
 }
 
 void buttoned_slider_render(buttoned_slider *bs) {
+    bs->minus.disabled = bs->minus.disabled || bs->slider.value == bs->slider.min;
+    bs->plus.disabled = bs->plus.disabled || bs->slider.value == bs->slider.max;
+
     button_render(&bs->minus);
     slider_render(&bs->slider);
     button_render(&bs->plus);
+    
+    bs->minus.disabled = false;
+    bs->plus.disabled = false;
 }
 
 // Tooltip
@@ -328,7 +351,7 @@ void render_tooltip() {
     const char **lines = TextSplit(tooltip_description, '\n', &line_count);
 
     int tooltip_height = TOOLTIP_TITLE_FONT_SIZE + 24 * line_count + borderSize;
-    int tooltip_width = 0;
+    int tooltip_width = MeasureText(tooltip_title, TOOLTIP_TITLE_FONT_SIZE) + borderSize * 2;
 
     for (int i = 0; i < line_count; i++) {
         tooltip_width = fmax(tooltip_width, MeasureText(lines[i], 24) + borderSize);
@@ -372,13 +395,9 @@ void render_tooltip() {
 // Card
 
 bool card_tab_clicked(card *c, int tab) {
-    if (IsMouseButtonPressed(0) == false || is_console_open()) {
-        return false;
-    }
-
     float tab_width = c->rec.width / c->tab_count;
     Rectangle tab_rec = {c->rec.x + tab_width * tab, c->rec.y, tab_width, 40};
-    return CheckCollisionPointRec(get_mouse(), tab_rec);
+    return is_clicked(tab_rec);
 }
 
 void card_update_tabs(card *c) {
@@ -407,8 +426,8 @@ void card_render(card *c) {
         Rectangle tab_rec = {c->rec.x + tab_width * i, c->rec.y, tab_width, 40};
         Color color = c->color;
         if (i != c->selected_tab) {
-            if (CheckCollisionPointRec(get_mouse(), tab_rec) && is_console_closed()) {
-                color = ColorTint(color, LIGHTGRAY);
+            if (is_hover(tab_rec)) {
+                color = ColorTint(color, HOVER_TINT);
             } else {
                 color = ColorTint(color, GRAY);
             }
@@ -428,7 +447,7 @@ void card_render(card *c) {
 // Icon
 
 bool icon_hover(Rectangle rec) {
-    return CheckCollisionPointRec(get_mouse(), rec) && is_console_closed();
+    return is_hover(rec);
 }
 
 extern Texture2D icons_sheet;
@@ -448,18 +467,11 @@ void picker_add_option(picker *p, const char *option) {
 }
 
 bool picker_clicked(picker *p) {
-    if (IsMouseButtonPressed(0) == false || is_console_open()) {
-        return false;
-    }
-
-    return CheckCollisionPointRec(get_mouse(), p->rec);
+    return is_clicked(p->rec);
 }
 
 int picker_option_clicked(picker *p) {
     if (p->opened == false) {
-        return -1;
-    }
-    if (IsMouseButtonPressed(0) == false || is_console_open()) {
         return -1;
     }
 
@@ -467,14 +479,14 @@ int picker_option_clicked(picker *p) {
     for (int i = p->option_offset; i < len; i++) {
         int y = p->rec.y + p->rec.height + 40 * (i - p->option_offset);
         Rectangle option_rec = {p->rec.x, y, p->rec.width, 40};
-        if (CheckCollisionPointRec(get_mouse(), option_rec)) {
+        if (is_clicked(option_rec)) {
             p->selected_option = i;
             p->opened = false;
             return i;
         }
     }
     // We clicked outside of the picker so we close it
-    if (!CheckCollisionPointRec(get_mouse(), p->rec)) {
+    if (!CheckCollisionPointRec(get_mouse(), p->rec) && IsMouseButtonPressed(0)) {
         p->opened = false;
     }
     return -1;
@@ -491,8 +503,8 @@ void picker_update_scroll(picker *p) {
 
 void picker_render(picker *p) {
     Color picker_color = UI_BEIGE;
-    if (CheckCollisionPointRec(get_mouse(), p->rec)) {
-        picker_color = ColorTint(picker_color, LIGHTGRAY);
+    if (is_hover(p->rec)) {
+        picker_color = ColorTint(picker_color, HOVER_TINT);
     }
     DrawRectangleRec(p->rec, picker_color);
     NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
@@ -517,10 +529,10 @@ void picker_render(picker *p) {
             inner_y = option_rec.y + (option_rec.height - 32) / 2.f;
             Color c = UI_BEIGE;
             if (i == p->selected_option) {
-                c = ColorTint(c, DARKGRAY);
+                c = ColorTint(c, SELECTED_TINT);
             }
-            if (CheckCollisionPointRec(get_mouse(), option_rec)) {
-                c = ColorTint(c, LIGHTGRAY);
+            if (is_hover(option_rec)) {
+                c = ColorTint(c, HOVER_TINT);
             }
             DrawRectangleRec(option_rec, c);
             DrawText(p->options[i], inner_x, inner_y, 32, BLACK);
