@@ -435,6 +435,32 @@ const spell *get_selected_spell() {
     return &all_spells[p->info.spells[p->selected_spell]];
 }
 
+bool set_error(const char *e) {
+    if (e == NULL) {
+        error_time_remaining = 0.0;
+        free((void *)error);
+        error = NULL;
+        return false;
+    }
+
+    if (error != NULL) {
+        free((void *)error);
+    }
+    error = strdup(e);
+    if (error != NULL) {
+        error_time_remaining = 3.f;
+        PlaySound(error_sound);
+        return true;
+    }
+    return false;
+}
+
+void set_scene(game_scene scene) {
+    set_error(NULL);
+    LOG("Switched from scene %d to %d", active_scene, scene);
+    active_scene = scene;
+}
+
 // Console
 bool is_console_open() {
     return console_open;
@@ -1537,7 +1563,7 @@ void end_turn() {
             PlaySound(lose_round_sound);
         }
         if (gs == GS_GAME_ENDING) {
-            active_scene = SCENE_GAME_ENDED;
+            set_scene(SCENE_GAME_ENDED);
         } else {
             gs = GS_ROUND_ENDED;
             reset_round();
@@ -1600,7 +1626,7 @@ int connect_to_server(const char *ip, uint16_t port) {
 }
 
 void player_join(const char *username) {
-    net_packet_join join = pkt_join(255, username, password_buf.buf);
+    net_packet_join join = pkt_join(255, username, input_to_text(&password_buf));
     send_sock(PKT_JOIN, &join, server_fd);
 }
 
@@ -1616,7 +1642,7 @@ void handle_packet(net_packet *p) {
         players[join->id].info.connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
-        active_scene = SCENE_LOBBY;
+        set_scene(SCENE_LOBBY);
         LOG("My ID is %d", c->id);
         current_player = c->id;
         master_player = c->master;
@@ -1639,7 +1665,7 @@ void handle_packet(net_packet *p) {
         LOG("Player %d disconnected", d->id);
         players[d->id].info.connected = false;
         master_player = d->new_master;
-        active_scene = SCENE_LOBBY;
+        set_scene(SCENE_LOBBY);
         gs = GS_WAITING;
     } else if (p->type == PKT_SERVER_MAP_LIST) {
         net_packet_server_map_list *list = (net_packet_server_map_list *)p->content;
@@ -1688,7 +1714,7 @@ void handle_packet(net_packet *p) {
         LOG("Map loaded");
     } else if (p->type == PKT_GAME_START) {
         LOG("Starting Game !!");
-        active_scene = SCENE_IN_GAME;
+        set_scene(SCENE_IN_GAME);
         gs = GS_STARTED;
         set_selected_spell(&players[current_player], 0);
         init_in_game_ui();
@@ -1757,6 +1783,9 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_SERVER_MESSAGE) {
         net_packet_server_message *msg = (net_packet_server_message *)p->content;
         LOGL(msg->level, "From server: %s", msg->message);
+        if (msg->level == LL_ERROR) {
+            set_error(msg->message);
+        }
     }
 
     free(p->content);
@@ -1773,7 +1802,7 @@ void *network_thread(void *arg) {
                 close(server_fd);
                 connected = false;
                 accepted = false;
-                active_scene = SCENE_MAIN_MENU;
+                set_scene(SCENE_MAIN_MENU);
                 break;
             }
             // Special case. We want to set the recieve time right now and not wait until we are handling the packet.
@@ -1910,16 +1939,6 @@ const char *try_join() {
     return NULL;
 }
 
-bool set_error(const char *e) {
-    error = e;
-    if (error != NULL) {
-        error_time_remaining = 3.f;
-        PlaySound(error_sound);
-        return true;
-    }
-    return false;
-}
-
 int get_total_stats() {
     int stat_total = 0;
     stat_total += health_slider.slider.value;
@@ -2040,10 +2059,6 @@ void render_scene_main_menu() {
         input_render(inputs[i], i == selected_input);
     }
     button_render(&confirm_button);
-    if (error != NULL && error_time_remaining > 0) {
-        int error_center = get_width_center((Rectangle){0, 0, WIDTH, 0}, error, 32);
-        DrawText(error, error_center, 96, 32, UI_RED);
-    }
 
     if (player_info_card.selected_tab == 0) {
         int button_tooltip = -1;
@@ -2534,7 +2549,7 @@ bool load_editor(const char *filename) {
         return false;
     }
     editor_map_filepath = filename;
-    active_scene = SCENE_EDITOR;
+    set_scene(SCENE_EDITOR);
     init_scene_editor();
     return true;
 }
@@ -2665,6 +2680,10 @@ int main(int argc, char **argv) {
                 render_scene_editor();
             }
 
+            if (error != NULL && error_time_remaining > 0) {
+                int error_center = get_width_center((Rectangle){0, 0, WIDTH, 0}, error, 32);
+                DrawText(error, error_center, 96, 32, UI_RED);
+            }
             render_console();
         }
         EndTextureMode();

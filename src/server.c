@@ -334,7 +334,10 @@ void handle_message(int fd) {
 
         if (server_password != NULL && strncmp(server_password, j->password, 8) != 0) {
             LOG("Wrong password for %.8s => '%.8s'", j->username, j->password);
-            // TODO: Refuse connection
+            char msg[128] = {0};
+            strncpy(msg, "Wrong password", 128);
+            net_packet_server_message msg_p = pkt_server_message(LL_ERROR, msg);
+            send_sock(PKT_SERVER_MESSAGE, &msg_p, fd);
             FD_CLR(fd, &master_set);
             close(fd);
             return;

@@ -36,7 +36,7 @@ typedef struct {
     uint8_t new_master;
 } net_packet_disconnect;
 
-//TODO: Better way to handle strings in net_protocol_builder
+// TODO: Better way to handle strings in net_protocol_builder
 typedef struct {
     uint8_t map_count;
     uint8_t* map_names NET_SIZE("s->map_count * 32");

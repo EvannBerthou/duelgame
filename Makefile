@@ -20,7 +20,7 @@ build/server: src/server.c src/common.c include/net_protocol.h
 run: build/server build/main_game
 	killall server || true
 	killall main_game || true
-	./build/server &
+	./build/server --pass pass &
 	./build/main_game --build build01 > /dev/null &
 	./build/main_game --build build02
 
