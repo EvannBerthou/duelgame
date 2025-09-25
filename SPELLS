@@ -44,6 +44,10 @@ Stats ideas
 To implements :
 
 Sacrify => Implement ST_AROUND
+Spin attack => Implement ST_AROUND
+Bow shot => Cell has to be between range_min and range (cant be used on close target)
 Revert
 Knockback => Need to compute the direction
 Crit
+
+Invocation spells ?

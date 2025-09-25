@@ -21,8 +21,27 @@ extern Vector2 get_mouse();
 
 // Utils
 
+const char *extract_raw_string(const char *s) {
+    if (s == NULL) {
+        return "";
+    }
+    static char raw[1024] = {0};
+    int ptr = 0;
+    while (*s != '\0') {
+        if (*s == '$') {
+            s += 2;
+        } else {
+            raw[ptr] = *s;
+            s++;
+            ptr++;
+        }
+    }
+    raw[ptr] = '\0';
+    return raw;
+}
+
 int get_width_center(Rectangle rec, const char *text, int font_size) {
-    int text_width = MeasureText(text, font_size);
+    int text_width = MeasureText(extract_raw_string(text), font_size);
     return rec.x + (rec.width - text_width) / 2;
 }
 
@@ -38,6 +57,36 @@ bool is_hover(Rectangle rec) {
 
 bool is_clicked(Rectangle rec) {
     return is_hover(rec) && IsMouseButtonPressed(0);
+}
+
+Color get_color(char c) {
+    switch (c) {
+        case 'r':
+            return UI_RED;
+        case 'g':
+            return UI_GREEN;
+        case 'b':
+            return UI_BLUE;
+        case 'y':
+            return YELLOW;
+        case 'd':
+            return DARKGRAY;
+        case 'n':
+            return GRAY;
+        case 'w':
+            return WHITE;
+        case 'l':
+        default:
+            return LIGHTGRAY;
+    }
+}
+
+void DrawColoredText(const char *s, int x, int y, int font_size, Color c) {
+    if (strlen(s) >= 2 && s[0] == '$') {
+        c = get_color(s[1]);
+        s += 2;
+    }
+    DrawText(s, x, y, font_size, c);
 }
 
 // Input
@@ -131,7 +180,7 @@ void input_render(input_buf *b, int active) {
     int inner_y = b->rec.y + (b->rec.height - font_size) / 2.f;
     DrawText(text, inner_x, inner_y, font_size, BLACK);
     if (active && (int)GetTime() % 2 == 0) {
-        int text_width = MeasureText(text, font_size);
+        int text_width = MeasureText(extract_raw_string(text), font_size);
         DrawRectangle(inner_x + text_width + 2, inner_y, 2, font_size, BLACK);
     }
 }
@@ -188,7 +237,7 @@ void button_render(button *b) {
         DrawTexturePro(b->texture, src, b->rec, (Vector2){0}, 0, c);
     }
 
-    int width = MeasureText(b->text, b->font_size);
+    int width = MeasureText(extract_raw_string(b->text), b->font_size);
     DrawText(b->text, b->rec.x + (b->rec.width - width) / 2, b->rec.y + (b->rec.height - b->font_size) / 2,
              b->font_size, WHITE);
 
@@ -301,7 +350,7 @@ void buttoned_slider_render(buttoned_slider *bs) {
     button_render(&bs->minus);
     slider_render(&bs->slider);
     button_render(&bs->plus);
-    
+
     bs->minus.disabled = false;
     bs->plus.disabled = false;
 }
@@ -350,11 +399,11 @@ void render_tooltip() {
     int line_count = 0;
     const char **lines = TextSplit(tooltip_description, '\n', &line_count);
 
-    int tooltip_height = TOOLTIP_TITLE_FONT_SIZE + 24 * line_count + borderSize;
-    int tooltip_width = MeasureText(tooltip_title, TOOLTIP_TITLE_FONT_SIZE) + borderSize * 2;
+    int tooltip_height = TOOLTIP_TITLE_FONT_SIZE + 24 * line_count + borderSize / 2.f;
+    int tooltip_width = MeasureText(extract_raw_string(tooltip_title), TOOLTIP_TITLE_FONT_SIZE) + borderSize * 2;
 
     for (int i = 0; i < line_count; i++) {
-        tooltip_width = fmax(tooltip_width, MeasureText(lines[i], 24) + borderSize);
+        tooltip_width = fmax(tooltip_width, MeasureText(extract_raw_string(lines[i]), 24) + borderSize);
     }
 
     tooltip_pos.x += borderSize / 2.f;
@@ -385,10 +434,10 @@ void render_tooltip() {
 
     Rectangle inner = {tooltip_rec.x + 16, tooltip_rec.y + 8, tooltip_rec.width - 16, tooltip_rec.height - 8};
     int text_center = get_width_center(tooltip_rec, tooltip_title, TOOLTIP_TITLE_FONT_SIZE);
-    DrawText(tooltip_title, text_center, inner.y, TOOLTIP_TITLE_FONT_SIZE, WHITE);
+    DrawColoredText(tooltip_title, text_center, inner.y, TOOLTIP_TITLE_FONT_SIZE, WHITE);
 
     for (int i = 0; i < line_count; i++) {
-        DrawText(lines[i], inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE * (i + 1), 24, LIGHTGRAY);
+        DrawColoredText(lines[i], inner.x, inner.y + TOOLTIP_TITLE_FONT_SIZE + 24 * i, 24, LIGHTGRAY);
     }
 }
 

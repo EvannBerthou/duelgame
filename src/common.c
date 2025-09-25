@@ -157,13 +157,34 @@ const spell all_spells[] = {
     // Attacks
     {
         .name = "Target",
-        .description = "Auto-Attack on single target",
+        .description = "Attack on single a cell",
         .cast_animation = SA_SLASH,
         .icon = SI_ATTACK,
         .type = ST_TARGET,
         .damage_value = 25,
         .range = 3,
-        .speed = 90,
+        .speed = 100,
+    },
+    {
+        .name = "Spin attack",
+        .description = "Hits all other target around player",
+        .cast_animation = SA_SLASH,
+        .icon = SI_ATTACK,
+        .type = ST_AROUND,
+        .range = 2,
+        .damage_value = 30,
+        .speed = 75,
+    },
+    {
+        .name = "Bow shot",
+        .description = "Shoots an arrow",
+        .cast_animation = SA_SLASH,
+        .icon = SI_ATTACK,
+        .type = ST_TARGET,
+        .min_range = 3,
+        .range = 5,
+        .damage_value = 20,
+        .speed = 100,
     },
     {
         .name = "Focus",
@@ -396,7 +417,7 @@ int get_spell_damage(player_info *info, const spell *s) {
     }
 
     if (info->turn_effect == SE_FOCUS) {
-        return 12;
+        return s->damage_value * 1.25;
     }
 
     return s->damage_value + info->stats[STAT_STRENGTH].value / 4;

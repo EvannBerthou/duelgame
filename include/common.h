@@ -31,7 +31,7 @@ typedef enum {
 void LOG(const char* fmt, ...);
 void LOGL(log_level level, const char* fmt, ...);
 
-#define MAX_SPELL_COUNT 8
+#define MAX_SPELL_COUNT 10
 #define MAX_PLAYER_COUNT 4
 
 typedef enum {
@@ -117,6 +117,7 @@ typedef struct {
     bool stat_max;
     int damage_value;
     int stat_value;
+    uint8_t min_range;
     uint8_t range;
     uint8_t zone_size;
     uint8_t speed;

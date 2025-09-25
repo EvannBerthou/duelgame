@@ -887,6 +887,8 @@ void compute_spell_range(player *p) {
         return;
     }
 
+    int min_range = get_selected_spell()->min_range;
+
     int dx[] = {-1, 1, 0, 0};
     int dy[] = {0, 0, -1, 1};
 
@@ -903,11 +905,19 @@ void compute_spell_range(player *p) {
             int ny = current.y + dy[i];
 
             if (get_map(&game_map, nx, ny) == 0 && get_map(&p->action_range, nx, ny) == 0) {
-                set_map(&p->action_range, nx, ny, 1);
+                if (current.dist >= min_range) {
+                    set_map(&p->action_range, nx, ny, 1);
+                } else {
+                    set_map(&p->action_range, nx, ny, 2);
+                }
                 map_node new_node = {nx, ny, current.dist + 1};
                 queue_push(&map_queue, &new_node);
             }
         }
+    }
+
+    if (min_range != 0) {
+        set_map(&p->action_range, p->info.x, p->info.y, 0);
     }
 }
 
@@ -966,43 +976,38 @@ void render_spell_tooltip(const spell *s) {
         strcat(stats_str, "Damage: ");
         switch (s->damage_type) {
             case FLAT:
-                strcat(stats_str, TextFormat("%dHP", s->damage_value));
+                strcat(stats_str, TextFormat("%dHP\n", s->damage_value));
                 break;
             case FLAT_PER_TURN:
-                strcat(stats_str, TextFormat("%dHP per turn", s->damage_value));
+                strcat(stats_str, TextFormat("%dHP per turn\n", s->damage_value));
                 break;
             case PERCENTAGE_CURRENT_HP_PER_TURN:
-                strcat(stats_str, TextFormat("%d%% current HP per turn", s->damage_value));
+                strcat(stats_str, TextFormat("%d%% current HP per turn\n", s->damage_value));
                 break;
         }
-        strcat(stats_str, " | ");
     }
 
     if (s->effect_duration != 0) {
-        strcat(stats_str, TextFormat("Duration: %d turn%s | ", s->effect_duration, s->effect_duration > 1 ? "s" : ""));
-    }
-
-    int len = strlen(stats_str);
-    if (len > 20) {
-        stats_str[len - 2] = '\n';
-        stats_str[len - 1] = '\0';
+        strcat(stats_str, TextFormat("Duration: %d turn%s\n", s->effect_duration, s->effect_duration > 1 ? "s" : ""));
     }
 
     if (s->cooldown != 0) {
         if (s->effect == SE_BANISH) {
-            strcat(stats_str, "Single use per round | ");
+            strcat(stats_str, "Single use per round\n");
         } else {
-            strcat(stats_str, TextFormat("Cooldown: %d turn%s | ", s->cooldown, s->cooldown > 1 ? "s" : ""));
+            strcat(stats_str, TextFormat("Cooldown: %d turn%s\n", s->cooldown, s->cooldown > 1 ? "s" : ""));
         }
     }
 
     if (s->range == 0) {
-        strcat(stats_str, "Self | ");
+        strcat(stats_str, "Self casting\n");
+    } else if (s->min_range != 0) {
+        strcat(stats_str, TextFormat("Range: %d-%d\n", s->min_range, s->range));
     } else {
-        strcat(stats_str, TextFormat("Range: %d | ", s->range));
+        strcat(stats_str, TextFormat("Range: %d\n", s->range));
     }
 
-    const char *description = TextFormat("%s\n%sSpeed: %d", s->description, stats_str, s->speed);
+    const char *description = TextFormat("$w%s\n$l%sSpeed: %d", s->description, stats_str, s->speed);
     set_tooltip(get_mouse(), s->name, description);
 }
 
@@ -1281,8 +1286,6 @@ player *get_player(int ith) {
 // UI
 
 void render_infos() {
-    int over_player = -1;
-
     const int player_info_width = (game_map.width * CELL_SIZE) / player_count();
     FOREACH_PLAYER(i, player) {
         player_info *info = &players[i].info;
@@ -1300,9 +1303,6 @@ void render_infos() {
         health_bars[i].value = player->info.stats[STAT_HEALTH].value;
         health_bars[i].max = player->info.stats[STAT_HEALTH].max;
         slider_render(&health_bars[i]);
-        if (slider_hover(&health_bars[i])) {
-            over_player = i;
-        }
 
         int effect_count = 0;
         const int effect_icon_size = 36;
@@ -1315,12 +1315,6 @@ void render_infos() {
             }
         }
         DrawText(TextFormat("%d", round_scores[i]), x + inner.width - 48, y + (inner.height - 48) / 2, 48, BLACK);
-    }
-
-    if (over_player != -1) {
-        player_info *i = &players[over_player].info;
-        const char *description = TextFormat("%d/%d", i->stats[STAT_HEALTH].value, i->stats[STAT_HEALTH].max);
-        set_tooltip(get_mouse(), "Health", description);
     }
 }
 
@@ -2211,10 +2205,12 @@ void update_scene_lobby() {
             }
         }
 
+        int idx = 0;
         FOREACH_PLAYER(i, player) {
-            if (button_clicked(&player_build_buttons[i])) {
-                selected_player_build = i;
+            if (button_clicked(&player_build_buttons[idx])) {
+                selected_player_build = idx;
             }
+            idx++;
         }
     } else {
         if (button_clicked(&close_build_card_button)) {
@@ -2310,7 +2306,7 @@ void init_scene_in_game() {
 }
 
 void update_scene_in_game() {
-    const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I};
+    const int keybinds[] = {KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P};
 
     if (gs == GS_STARTED || gs == GS_ROUND_ENDING || gs == GS_GAME_ENDING) {
         next_state = state;
@@ -2454,10 +2450,10 @@ void render_scene_in_game() {
             Rectangle player_rec = {screen_pos.x, screen_pos.y, CELL_SIZE, CELL_SIZE};
             Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
-                set_tooltip(get_mouse(), player->info.name,
-                            TextFormat("Health=%d/%d\nStrength=%d\nSpeed=%d", player->info.stats[STAT_HEALTH].value,
-                                       player->info.stats[STAT_HEALTH].max, player->info.stats[STAT_STRENGTH].value,
-                                       player->info.stats[STAT_SPEED].value));
+                set_tooltip(get_mouse(), TextFormat("$%c%s", i == current_player ? 'y' : 'w', player->info.name),
+                            TextFormat("$gHealth=%d/%d\n$rStrength=%d\n$bSpeed=%d",
+                                       player->info.stats[STAT_HEALTH].value, player->info.stats[STAT_HEALTH].max,
+                                       player->info.stats[STAT_STRENGTH].value, player->info.stats[STAT_SPEED].value));
             }
         }
 
