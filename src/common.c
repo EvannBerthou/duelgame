@@ -9,6 +9,18 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef WINDOWS_BUILD
+char *strchrnul(char *s, int c) {
+    while (*s) {
+        if (*s == c) {
+            break;
+        }
+        s++;
+    }
+    return s;
+}
+#endif
+
 #define MAX_LOG_HISTORY 8192
 
 char *log_history[MAX_LOG_HISTORY] = {0};
@@ -175,10 +187,11 @@ const spell all_spells[] = {
      .effect = SE_STUN,
      .effect_duration = 3},
     {.name = "Burn",
-     .description = "Apply burning effect on target. Flat damage.",
+     .description = "Apply burning effect on target.",
      .cast_animation = SA_FIREBALL,
      .effect_animation = SA_BURN,
      .cast_type = CT_CAST_EFFECT,
+     .damage_type = FLAT_PER_TURN,
      .type = ST_TARGET,
      .damage_value = 5,
      .range = 1,
@@ -188,10 +201,11 @@ const spell all_spells[] = {
      .effect_duration = 3},
     {
         .name = "Poison",
-        .description = "Apply poison effect on target.\n% remaining health scaling damage",
+        .description = "Apply poison effect on target.",
         .cast_animation = SA_POISON_CAST,
         .effect_animation = SA_POISON_TICK,
         .cast_type = CT_EFFECT,
+        .damage_type = PERCENTAGE_CURRENT_HP_PER_TURN,
         .type = ST_TARGET,
         .damage_value = 10,
         .range = 1,
@@ -255,7 +269,7 @@ const spell all_spells[] = {
         .icon = SI_WAND,
         .range = 2,
         .speed = 100,
-        .cooldown = 5,
+        .cooldown = 255,
     },
     {.name = "Revert",
      .description = "Sends back the last recieved damage from the current turn\nto the original caster.\nDoes nothing "
@@ -385,7 +399,7 @@ int get_spell_damage(player_info *info, const spell *s) {
         return 12;
     }
 
-    return s->damage_value + info->stats[STAT_AP].value / 4;
+    return s->damage_value + info->stats[STAT_STRENGTH].value / 4;
 }
 
 void apply_effect(player_info *p, const spell *s) {

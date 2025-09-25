@@ -4,10 +4,10 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <netinet/in.h>
 #include <stdint.h>
 #include <string.h>
 #ifndef WINDOWS_BUILD
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #endif

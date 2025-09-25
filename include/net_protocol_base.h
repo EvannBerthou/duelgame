@@ -82,8 +82,7 @@ typedef struct {
     uint8_t id;
     uint8_t health;
     uint8_t spells[MAX_SPELL_COUNT] NET_SIZE("MAX_SPELL_COUNT");
-    uint8_t ad;
-    uint8_t ap;
+    uint8_t strength;
     uint8_t speed;
 } net_packet_player_build;
 

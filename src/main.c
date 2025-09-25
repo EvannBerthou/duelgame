@@ -164,10 +164,9 @@ Sound raindrop_sound = {0};
 // UI
 //   Main menu
 buttoned_slider health_slider = {0};
-buttoned_slider physic_power_slider = {0};
-buttoned_slider magic_power_slider = {0};
+buttoned_slider strength_slider = {0};
 buttoned_slider speed_slider = {0};
-buttoned_slider *stat_sliders[] = {&health_slider, &physic_power_slider, &magic_power_slider, &speed_slider};
+buttoned_slider *stat_sliders[] = {&health_slider, &strength_slider, &speed_slider};
 const int stat_sliders_count = (int)(sizeof(stat_sliders) / sizeof(stat_sliders[0]));
 
 const int card_width = (WIDTH - 150) / 2;
@@ -962,8 +961,48 @@ void render_spell_actions(player *p) {
 }
 
 void render_spell_tooltip(const spell *s) {
-    const char *description =
-        TextFormat("%s\nDamage: %d | Range: %d | Speed: %d", s->description, s->damage_value, s->range, s->speed);
+    char stats_str[1024] = {0};
+    if (s->damage_value != 0) {
+        strcat(stats_str, "Damage: ");
+        switch (s->damage_type) {
+            case FLAT:
+                strcat(stats_str, TextFormat("%dHP", s->damage_value));
+                break;
+            case FLAT_PER_TURN:
+                strcat(stats_str, TextFormat("%dHP per turn", s->damage_value));
+                break;
+            case PERCENTAGE_CURRENT_HP_PER_TURN:
+                strcat(stats_str, TextFormat("%d%% current HP per turn", s->damage_value));
+                break;
+        }
+        strcat(stats_str, " | ");
+    }
+
+    if (s->effect_duration != 0) {
+        strcat(stats_str, TextFormat("Duration: %d turn%s | ", s->effect_duration, s->effect_duration > 1 ? "s" : ""));
+    }
+
+    int len = strlen(stats_str);
+    if (len > 20) {
+        stats_str[len - 2] = '\n';
+        stats_str[len - 1] = '\0';
+    }
+
+    if (s->cooldown != 0) {
+        if (s->effect == SE_BANISH) {
+            strcat(stats_str, "Single use per round | ");
+        } else {
+            strcat(stats_str, TextFormat("Cooldown: %d turn%s | ", s->cooldown, s->cooldown > 1 ? "s" : ""));
+        }
+    }
+
+    if (s->range == 0) {
+        strcat(stats_str, "Self | ");
+    } else {
+        strcat(stats_str, TextFormat("Range: %d | ", s->range));
+    }
+
+    const char *description = TextFormat("%s\n%sSpeed: %d", s->description, stats_str, s->speed);
     set_tooltip(get_mouse(), s->name, description);
 }
 
@@ -1602,8 +1641,8 @@ int connect_to_server(const char *ip, uint16_t port) {
         return -1;
     }
 
-    if ((client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-        client_fd = 0;
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        server_fd = 0;
         return -1;
     }
 
@@ -1612,9 +1651,9 @@ int connect_to_server(const char *ip, uint16_t port) {
     serv_addr.sin_port = htons(port);
     serv_addr.sin_addr.s_addr = inet_addr(ip);
 
-    if (connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        closesocket(client_fd);
-        client_fd = 0;
+    if (connect(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        closesocket(server_fd);
+        server_fd = 0;
         return -1;
     }
     return 0;
@@ -1668,13 +1707,13 @@ void handle_packet(net_packet *p) {
 
         memcpy(players[current_player].info.spells, my_spells, MAX_SPELL_COUNT);
         int base_health = 50 + health_slider.slider.value;
-        int ad = physic_power_slider.slider.value;
-        int ap = magic_power_slider.slider.value;
+        int strength = strength_slider.slider.value;
         int speed = 100 + speed_slider.slider.value;
-        LOG("Joining with %d ad and %d ap", ad, ap);
+        LOG("Joining with %d strength", strength);
         net_packet_player_build b =
-            pkt_player_build(current_player, base_health, players[current_player].info.spells, ad, ap, speed);
+            pkt_player_build(current_player, base_health, players[current_player].info.spells, strength, speed);
         send_sock(PKT_PLAYER_BUILD, &b, server_fd);
+        connected = true;
     } else if (p->type == PKT_UPDATE_SERVER_CONFIGURATION) {
         net_packet_update_server_configuration *u = (net_packet_update_server_configuration *)p->content;
         selected_map = map_picker.options[u->map_index];
@@ -1686,6 +1725,7 @@ void handle_packet(net_packet *p) {
         master_player = d->new_master;
         set_scene(SCENE_LOBBY);
         gs = GS_WAITING;
+        connected = false;
     } else if (p->type == PKT_SERVER_MAP_LIST) {
         net_packet_server_map_list *list = (net_packet_server_map_list *)p->content;
         clear_picker(&map_picker);
@@ -1698,16 +1738,13 @@ void handle_packet(net_packet *p) {
         net_packet_player_build *b = (net_packet_player_build *)p->content;
         player *player = &players[b->id];
         LOG("Setting build for %d", b->id);
-        LOG("Build for %d is %d HP %d AD %d AP", b->id, b->health, b->ad, b->ap);
+        LOG("Build for %d is %d HP %d STR", b->id, b->health, b->strength);
         player->info.stats[STAT_HEALTH].base = b->health;
         player->info.stats[STAT_HEALTH].max = b->health;
         player->info.stats[STAT_HEALTH].value = b->health;
-        player->info.stats[STAT_AD].base = b->ad;
-        player->info.stats[STAT_AD].max = b->ad;
-        player->info.stats[STAT_AD].value = b->ad;
-        player->info.stats[STAT_AP].base = b->ap;
-        player->info.stats[STAT_AP].max = b->ap;
-        player->info.stats[STAT_AP].value = b->ap;
+        player->info.stats[STAT_STRENGTH].base = b->strength;
+        player->info.stats[STAT_STRENGTH].max = b->strength;
+        player->info.stats[STAT_STRENGTH].value = b->strength;
         player->info.stats[STAT_SPEED].base = b->speed;
         player->info.stats[STAT_SPEED].max = b->speed;
         player->info.stats[STAT_SPEED].value = b->speed;
@@ -1739,8 +1776,8 @@ void handle_packet(net_packet *p) {
         init_in_game_ui();
     } else if (p->type == PKT_PLAYER_UPDATE) {
         net_packet_player_update *u = (net_packet_player_update *)p->content;
-        LOG("Player Update %d %d %d H=%d AD=%d AP=%d (%d immediate)", u->id, u->x, u->y, u->stats[STAT_HEALTH].value,
-            u->stats[STAT_AD].value, u->stats[STAT_AP].value, u->immediate);
+        LOG("Player Update %d %d %d H=%d STR=%d (%d immediate)", u->id, u->x, u->y, u->stats[STAT_HEALTH].value,
+            u->stats[STAT_STRENGTH].value, u->immediate);
         player *player = &players[u->id];
 
         if (gs == GS_WAITING || u->immediate) {
@@ -1902,10 +1939,7 @@ void init_scene_main_menu(const char *username) {
         buttoned_slider_init(&health_slider,
                              (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
         y += 60;
-        buttoned_slider_init(&physic_power_slider,
-                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
-        y += 60;
-        buttoned_slider_init(&magic_power_slider,
+        buttoned_slider_init(&strength_slider,
                              (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
         y += 60;
         buttoned_slider_init(&speed_slider,
@@ -1965,8 +1999,8 @@ const char *try_join() {
 int get_total_stats() {
     int stat_total = 0;
     stat_total += health_slider.slider.value;
-    stat_total += physic_power_slider.slider.value;
-    stat_total += magic_power_slider.slider.value;
+    stat_total += strength_slider.slider.value;
+    stat_total += strength_slider.slider.value;
     stat_total += fabs((float)speed_slider.slider.value);
     return stat_total;
 }
@@ -2099,16 +2133,12 @@ void render_scene_main_menu() {
                  32, WHITE);
         buttoned_slider_render(&health_slider);
 
-        DrawText(TextFormat("AD", (int)physic_power_slider.slider.value), player_info_card.rec.x + 8,
-                 physic_power_slider.rec.y, 32, WHITE);
-        buttoned_slider_render(&physic_power_slider);
+        DrawText(TextFormat("STR", (int)strength_slider.slider.value), player_info_card.rec.x + 8,
+                 strength_slider.rec.y, 32, WHITE);
+        buttoned_slider_render(&strength_slider);
 
-        DrawText(TextFormat("AP", (int)magic_power_slider.slider.value), player_info_card.rec.x + 8,
-                 magic_power_slider.rec.y, 32, WHITE);
-        buttoned_slider_render(&magic_power_slider);
-
-        DrawText(TextFormat("Speed", (int)magic_power_slider.slider.value), player_info_card.rec.x + 8,
-                 speed_slider.rec.y, 32, WHITE);
+        DrawText(TextFormat("Speed", (int)speed_slider.slider.value), player_info_card.rec.x + 8, speed_slider.rec.y,
+                 32, WHITE);
         buttoned_slider_render(&speed_slider);
 
         DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
@@ -2248,9 +2278,8 @@ void render_scene_lobby() {
         player_info *info = &p->info;
         int x = player_build_card.rec.x + 25;
         DrawText(TextFormat("Health = %d", info->stats[STAT_HEALTH].max), x, header.y + 64, 32, WHITE);
-        DrawText(TextFormat("AD = %d", info->stats[STAT_AD].value), x, header.y + 96, 32, WHITE);
-        DrawText(TextFormat("AP = %d", info->stats[STAT_AP].value), x, header.y + 128, 32, WHITE);
-        DrawText(TextFormat("Speed = %d", info->stats[STAT_SPEED].value), x, header.y + 160, 32, WHITE);
+        DrawText(TextFormat("Strength = %d", info->stats[STAT_STRENGTH].value), x, header.y + 96, 32, WHITE);
+        DrawText(TextFormat("Speed = %d", info->stats[STAT_SPEED].value), x, header.y + 128, 32, WHITE);
         DrawText("Spells", x, header.y + 192, 32, WHITE);
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             Rectangle icon = icons[all_spells[info->spells[i]].icon];
@@ -2266,7 +2295,6 @@ void render_scene_lobby() {
             render_spell_tooltip(&all_spells[icon_tooltip]);
         }
     }
-    DrawText(TextFormat("Ping=%lums", last_ping), 0, 24, 24, GREEN);
 }
 
 //   In game
@@ -2427,8 +2455,9 @@ void render_scene_in_game() {
             Vector2 mp = get_mouse();
             if (CheckCollisionPointRec(mp, player_rec)) {
                 set_tooltip(get_mouse(), player->info.name,
-                            TextFormat("AD=%d\nAP=%d\nSpeed=%d", player->info.stats[STAT_AD].value,
-                                       player->info.stats[STAT_AP].value, player->info.stats[STAT_SPEED].value));
+                            TextFormat("Health=%d/%d\nStrength=%d\nSpeed=%d", player->info.stats[STAT_HEALTH].value,
+                                       player->info.stats[STAT_HEALTH].max, player->info.stats[STAT_STRENGTH].value,
+                                       player->info.stats[STAT_SPEED].value));
             }
         }
 

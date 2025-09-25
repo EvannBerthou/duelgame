@@ -386,9 +386,9 @@ void handle_message(int fd) {
                 net_packet_join other_user_join = pkt_join(i, player->name, "");
                 send_sock(PKT_JOIN, &other_user_join, fd);
 
-                net_packet_player_build b = pkt_player_build(
-                    player->id, player->stats[STAT_HEALTH].base, player->spells, player->stats[STAT_AD].value,
-                    player->stats[STAT_AP].value, player->stats[STAT_SPEED].value);
+                net_packet_player_build b =
+                    pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                     player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value);
                 send_sock(PKT_PLAYER_BUILD, &b, fd);
 
                 net_packet_player_update u = pkt_from_info(player);
@@ -467,13 +467,9 @@ void handle_message(int fd) {
         player->stats[STAT_HEALTH].max = b->health;
         player->stats[STAT_HEALTH].value = b->health;
 
-        player->stats[STAT_AD].base = b->ad;
-        player->stats[STAT_AD].max = b->ad;
-        player->stats[STAT_AD].value = b->ad;
-
-        player->stats[STAT_AP].base = b->ap;
-        player->stats[STAT_AP].max = b->ap;
-        player->stats[STAT_AP].value = b->ap;
+        player->stats[STAT_STRENGTH].base = b->strength;
+        player->stats[STAT_STRENGTH].max = b->strength;
+        player->stats[STAT_STRENGTH].value = b->strength;
 
         player->stats[STAT_SPEED].base = b->speed;
         player->stats[STAT_SPEED].max = b->speed;
@@ -580,9 +576,9 @@ void handle_message(int fd) {
         if (ready_count == player_count()) {
             FOREACH_PLAYER(i, player) {
                 reset_player(player);
-                net_packet_player_build b = pkt_player_build(
-                    player->id, player->stats[STAT_HEALTH].base, player->spells, player->stats[STAT_AD].value,
-                    player->stats[STAT_AP].value, player->stats[STAT_SPEED].value);
+                net_packet_player_build b =
+                    pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                     player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value);
                 broadcast(PKT_PLAYER_BUILD, &b);
 
                 net_packet_player_update u = pkt_from_info(player);
@@ -610,9 +606,9 @@ void handle_message(int fd) {
             net_packet_join other_user_join = pkt_join(i, player->name, NULL);
             broadcast(PKT_JOIN, &other_user_join);
 
-            net_packet_player_build b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                                         player->stats[STAT_AD].value, player->stats[STAT_AP].value,
-                                                         player->stats[STAT_SPEED].value);
+            net_packet_player_build b =
+                pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                 player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value);
             broadcast(PKT_PLAYER_BUILD, &b);
 
             net_packet_player_update u = pkt_from_info(player);

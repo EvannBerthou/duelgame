@@ -67,6 +67,9 @@ command_result handle_command(char *str) {
         return (command_result){.valid = true, .has_packet = false, .content = NULL};
     } else if (command == CT_LOAD_EDITOR) {
         GETTOKS(filename);
+        if (strcmp(filename, "") == 0) {
+            return (command_result){.valid = false, .content = (void *)command_usage(command)};
+        }
         if (load_editor(filename) == false) {
             create_map(filename);
             load_editor(filename);

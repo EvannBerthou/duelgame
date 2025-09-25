@@ -86,8 +86,7 @@ typedef enum {
 
 typedef enum {
     STAT_HEALTH,
-    STAT_AP,
-    STAT_AD,
+    STAT_STRENGTH,
     STAT_SPEED,
     STAT_COUNT
 } stat_type;
@@ -98,6 +97,12 @@ typedef enum {
     CT_CAST_EFFECT,  // Apply the spell both on cast turn and as an effect
 } cast_type;
 
+typedef enum {
+    FLAT,
+    FLAT_PER_TURN,
+    PERCENTAGE_CURRENT_HP_PER_TURN,
+} damage_type;
+
 typedef struct {
     const char* name;
     const char* description;
@@ -105,6 +110,7 @@ typedef struct {
     spell_animation cast_animation;
     spell_animation effect_animation;
     cast_type cast_type;
+    damage_type damage_type;
 
     spell_type_enum type;
     stat_type stat;
