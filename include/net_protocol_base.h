@@ -13,6 +13,7 @@ typedef struct {
     uint8_t max;
     uint8_t value;
 } net_player_stat;
+
 #endif
 
 typedef struct {
@@ -21,10 +22,14 @@ typedef struct {
 } net_packet_ping;
 
 typedef struct {
-    uint8_t id;
     char username[8];
     char password[8];
 } net_packet_join;
+
+typedef struct {
+    uint8_t id;
+    char username[8];
+} net_packet_player_joined;
 
 typedef struct {
     uint8_t id;

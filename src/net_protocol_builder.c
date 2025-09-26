@@ -229,6 +229,10 @@ void parse_struct(stb_lexer *l) {
         s->field_count++;
     }
     expect_next_token(l, CLEX_id);
+    if (strcmp(l->string, "net_packet") == 0) {
+        s->field_count = 0;
+        return;
+    }
     s->name = strdup(l->string);
     expect_next_token_char(l, ';');
     structs_count++;
@@ -282,7 +286,7 @@ int main(void) {
     for (int i = 0; i < structs_count; i++) {
         net_struct *s = &structs[i];
         const char *suffix = s->name + strlen("net_packet_");
-        printf("%s pkt_%s(", s->name, suffix);
+        printf("net_packet pkt_%s(", suffix);
         for (int j = 0; j < s->field_count; j++) {
             struct_field *f = &s->fields[j];
             if (f->type == TYPE_UINT8) {
@@ -332,12 +336,12 @@ int main(void) {
     printf("    }\n");
 
     printf("}\n");
-
+    //
     // Builders
     for (int i = 0; i < structs_count; i++) {
         net_struct *s = &structs[i];
         const char *suffix = s->name + strlen("net_packet_");
-        printf("%s pkt_%s(", s->name, suffix);
+        printf("net_packet pkt_%s(", suffix);
         for (int j = 0; j < s->field_count; j++) {
             struct_field *f = &s->fields[j];
             if (f->type == TYPE_UINT8) {
@@ -358,28 +362,30 @@ int main(void) {
             }
         }
         printf(") {\n");
-        printf("    %s result = {};\n", s->name);
-        printf("    %s *s = &result;\n", s->name);
-        printf("    (void)s;\n");
+        printf("    %s s = {};\n", s->name);
         for (int j = 0; j < s->field_count; j++) {
             struct_field *f = &s->fields[j];
             if (f->type == TYPE_UINT8) {
-                printf("    s->%s = %s;\n", f->name, f->name);
+                printf("    s.%s = %s;\n", f->name, f->name);
             } else if (f->type == TYPE_UINT8_PTR) {
-                printf("    s->%s = %s;\n", f->name, f->name);
+                printf("    s.%s = %s;\n", f->name, f->name);
             } else if (f->type == TYPE_UINT8_ARRAY) {
-                printf("    memcpy(s->%s, %s, %s);\n", f->name, f->name, f->size);
+                printf("    memcpy(s.%s, %s, %s);\n", f->name, f->name, f->size);
             } else if (f->type == TYPE_CHAR_ARRAY) {
                 // TODO: Use strcpy ?
-                printf("    memcpy(s->%s, %s, %d);\n", f->name, f->name, f->array_size);
+                printf("    memcpy(s.%s, %s, %d);\n", f->name, f->name, f->array_size);
             } else if (f->type == TYPE_UINT64) {
-                printf("    s->%s = %s;\n", f->name, f->name);
+                printf("    s.%s = %s;\n", f->name, f->name);
             } else if (f->type == TYPE_CUSTOM) {
                 printf("    for (int i = 0; i < %s; i++) {\n", f->array_size_str);
-                printf("        s->%s[i] = %s[i];\n", f->name, f->name);
+                printf("        s.%s[i] = %s[i];\n", f->name, f->name);
                 printf("    }\n");
             }
         }
+        printf("    net_packet result = {0};\n");
+        printf("    result.type = PKT_%s;\n", struct_upper(s));
+        printf("    result.len = get_packet_length(PKT_%s, &s);\n", struct_upper(s));
+        printf("    memcpy(result.content, &s, result.len);\n");
         printf("    return result;\n");
         printf("}\n");
     }

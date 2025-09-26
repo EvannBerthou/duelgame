@@ -58,10 +58,12 @@ command_result handle_command(char *str) {
         GETTOKI(prop);
         GETTOKI(value);
 
-        net_packet_admin_update_player_info *update = malloc(sizeof(net_packet_admin_update_player_info));
-        *update = pkt_admin_update_player_info(id, prop, value);
-        return (command_result){
-            .valid = true, .has_packet = true, .type = PKT_ADMIN_UPDATE_PLAYER_INFO, .content = update};
+        // TODO: Fix
+        //  net_packet_admin_update_player_info *update = malloc(sizeof(net_packet_admin_update_player_info));
+        //  *update = pkt_admin_update_player_info(id, prop, value);
+        //  return (command_result){
+        //      .valid = true, .has_packet = true, .type = PKT_ADMIN_UPDATE_PLAYER_INFO, .content = update};
+        return (command_result){0};
     } else if (command == CT_CLEAR) {
         clear_logs();
         return (command_result){.valid = true, .has_packet = false, .content = NULL};

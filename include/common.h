@@ -6,6 +6,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef uint8_t net_packet_type;
+typedef struct {
+    uint64_t len;
+    uint8_t type;
+    uint8_t content[2048];
+} net_packet;
+
 int strtoint(const char* str, int* out);
 
 #define POPARG(argc, argv) (assert(argc > 0), (argc)--, *(argv)++)

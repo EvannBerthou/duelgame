@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef WINDOWS_BUILD
 #include <netinet/in.h>
@@ -15,14 +16,6 @@
 #include "common.h"
 #define NET_PROTOCOL_IMPLEMENTATION
 #include "net_protocol.h"
-
-typedef uint8_t net_packet_type;
-
-typedef struct {
-    uint64_t len;
-    net_packet_type type;
-    void* content;
-} net_packet;
 
 #define GAME_TIE 255
 
@@ -144,21 +137,22 @@ int packet_read(net_packet* p, int fd) {
 
     uint8_t* base = buf;
     p->type = unpacku8(&base);
-    p->content = unpackstruct(p->type, base);
+    // TODO: Avoid allocation
+    void* content = unpackstruct(p->type, base);
+    if (content) {
+        memcpy(p->content, content, p->len);
+    }
+    free(content);
     return 0;
 }
 
-void send_sock(net_packet_type_enum type, void* p, int fd) {
+void send_sock(net_packet* packet, int fd) {
     if (fd == 0) {
         LOGL(LL_ERROR, "Can't send packet when not connected");
         return;
     }
-    net_packet packet = {0};
-    packet.len =
-        sizeof(packet.len) + sizeof(packet.type) + get_packet_length(type, p);
-    packet.type = type;
-    packet.content = p;
-    write_packet(&packet, fd);
+    packet->len += sizeof(packet->len) + sizeof(packet->type);
+    write_packet(packet, fd);
 }
 
 #endif

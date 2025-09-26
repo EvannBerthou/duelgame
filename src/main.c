@@ -504,7 +504,7 @@ void update_console() {
                     if (result.content == NULL) {
                         LOGL(LL_ERROR, "Error creating packet");
                     } else {
-                        send_sock(result.type, result.content, server_fd);
+                        // send_sock(result.type, result.content, server_fd);
                     }
                     free(result.content);
                 }
@@ -1619,7 +1619,8 @@ void end_turn() {
         } else {
             gs = GS_ROUND_ENDED;
             reset_round();
-            send_sock(PKT_PLAYER_READY, NULL, server_fd);
+            net_packet ready = pkt_player_ready();
+            send_sock(&ready, server_fd);
         }
     }
 }
@@ -1678,16 +1679,16 @@ int connect_to_server(const char *ip, uint16_t port) {
 }
 
 void player_join(const char *username) {
-    net_packet_join join = pkt_join(255, username, input_to_text(&password_buf));
-    send_sock(PKT_JOIN, &join, server_fd);
+    net_packet join = pkt_join(username, input_to_text(&password_buf));
+    send_sock(&join, server_fd);
 }
 
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
         net_packet_ping *ping = (net_packet_ping *)p->content;
         last_ping = ping->recieve_time - ping->send_time;
-    } else if (p->type == PKT_JOIN) {
-        net_packet_join *join = (net_packet_join *)p->content;
+    } else if (p->type == PKT_PLAYER_JOINED) {
+        net_packet_player_joined *join = (net_packet_player_joined *)p->content;
         LOG("Joined: %.*s with ID=%d", 8, join->username, join->id);
         memcpy(players[join->id].info.name, join->username, 8);
         players[join->id].info.name[8] = '\0';
@@ -1704,9 +1705,9 @@ void handle_packet(net_packet *p) {
         int strength = strength_slider.slider.value;
         int speed = 100 + speed_slider.slider.value;
         LOG("Joining with %d strength", strength);
-        net_packet_player_build b =
+        net_packet b =
             pkt_player_build(current_player, base_health, players[current_player].info.spells, strength, speed);
-        send_sock(PKT_PLAYER_BUILD, &b, server_fd);
+        send_sock(&b, server_fd);
         connected = true;
     } else if (p->type == PKT_UPDATE_SERVER_CONFIGURATION) {
         net_packet_update_server_configuration *u = (net_packet_update_server_configuration *)p->content;
@@ -1841,8 +1842,6 @@ void handle_packet(net_packet *p) {
             set_error(msg->message);
         }
     }
-
-    free(p->content);
 }
 
 // TODO: It should also send queued packets from the client
@@ -2168,9 +2167,8 @@ void update_scene_lobby() {
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
-            net_packet_request_game_start s =
-                pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value);
-            send_sock(PKT_REQUEST_GAME_START, &s, server_fd);
+            net_packet s = pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value);
+            send_sock(&s, server_fd);
         }
 
         card_update_tabs(&player_list_card);
@@ -2184,23 +2182,23 @@ void update_scene_lobby() {
                 }
                 int clicked_option = picker_option_clicked(&map_picker);
                 if (clicked_option != -1) {
-                    net_packet_update_server_configuration selection =
+                    net_packet selection =
                         pkt_update_server_configuration(clicked_option, round_count_slider.slider.value);
-                    send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
+                    send_sock(&selection, server_fd);
                 }
 
                 if (button_clicked(&round_count_slider.minus)) {
                     buttoned_slider_decrement(&round_count_slider);
-                    net_packet_update_server_configuration selection =
+                    net_packet selection =
                         pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value);
-                    send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
+                    send_sock(&selection, server_fd);
                 }
 
                 if (button_clicked(&round_count_slider.plus)) {
                     buttoned_slider_increment(&round_count_slider);
-                    net_packet_update_server_configuration selection =
+                    net_packet selection =
                         pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value);
-                    send_sock(PKT_UPDATE_SERVER_CONFIGURATION, &selection, server_fd);
+                    send_sock(&selection, server_fd);
                 }
             }
         }
@@ -2323,9 +2321,9 @@ void update_scene_in_game() {
             player_move move = player_exec_action(&players[current_player]);
             if (move.action != PA_NONE) {
                 next_state = RS_WAITING;
-                net_packet_player_action a =
+                net_packet a =
                     pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
-                send_sock(PKT_PLAYER_ACTION, &a, server_fd);
+                send_sock(&a, server_fd);
                 players[current_player].round_move = move;
                 players[current_player].info.state = RS_WAITING;
             }
@@ -2484,7 +2482,8 @@ void render_scene_in_game() {
 void update_scene_game_ended() {
     if (IsKeyPressed(KEY_R) && is_console_closed()) {
         if (current_player == master_player) {
-            send_sock(PKT_GAME_RESET, NULL, server_fd);
+            net_packet reset = pkt_game_reset();
+            send_sock(&reset, server_fd);
         }
     }
 }
@@ -2679,8 +2678,8 @@ int main(int argc, char **argv) {
         if (connected) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {
-                net_packet_ping ping = {.send_time = (uint64_t)(GetTime() * 1000)};
-                send_sock(PKT_PING, &ping, server_fd);
+                net_packet ping = pkt_ping((uint64_t)(GetTime() * 1000), 0);
+                send_sock(&ping, server_fd);
                 ping_counter = 1;
             }
         }
