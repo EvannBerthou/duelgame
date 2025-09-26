@@ -91,6 +91,11 @@ typedef struct tagMSG *LPMSG;
         (x), (y) \
     }
 
+#define send_serv(PACKET_FUNC)               \
+    do {                                     \
+        send_packet(PACKET_FUNC, server_fd); \
+    } while (0)
+
 extern const spell all_spells[];
 extern const int spell_count;
 extern const char *wall_frames[];
@@ -504,7 +509,7 @@ void update_console() {
                     if (result.content == NULL) {
                         LOGL(LL_ERROR, "Error creating packet");
                     } else {
-                        // send_sock(result.type, result.content, server_fd);
+                        // send_serv(result.type, result.content, server_fd);
                     }
                     free(result.content);
                 }
@@ -1619,8 +1624,7 @@ void end_turn() {
         } else {
             gs = GS_ROUND_ENDED;
             reset_round();
-            net_packet ready = pkt_player_ready();
-            send_sock(&ready, server_fd);
+            send_serv(pkt_player_ready());
         }
     }
 }
@@ -1679,8 +1683,7 @@ int connect_to_server(const char *ip, uint16_t port) {
 }
 
 void player_join(const char *username) {
-    net_packet join = pkt_join(username, input_to_text(&password_buf));
-    send_sock(&join, server_fd);
+    send_serv(pkt_join(username, input_to_text(&password_buf)));
 }
 
 void handle_packet(net_packet *p) {
@@ -1705,9 +1708,7 @@ void handle_packet(net_packet *p) {
         int strength = strength_slider.slider.value;
         int speed = 100 + speed_slider.slider.value;
         LOG("Joining with %d strength", strength);
-        net_packet b =
-            pkt_player_build(current_player, base_health, players[current_player].info.spells, strength, speed);
-        send_sock(&b, server_fd);
+        send_serv(pkt_player_build(current_player, base_health, players[current_player].info.spells, strength, speed));
         connected = true;
     } else if (p->type == PKT_UPDATE_SERVER_CONFIGURATION) {
         net_packet_update_server_configuration *u = (net_packet_update_server_configuration *)p->content;
@@ -2167,8 +2168,7 @@ void update_scene_lobby() {
 
     if (selected_player_build == -1) {
         if (button_clicked(&start_game_button) && master_player == current_player) {
-            net_packet s = pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value);
-            send_sock(&s, server_fd);
+            send_serv(pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value));
         }
 
         card_update_tabs(&player_list_card);
@@ -2182,23 +2182,19 @@ void update_scene_lobby() {
                 }
                 int clicked_option = picker_option_clicked(&map_picker);
                 if (clicked_option != -1) {
-                    net_packet selection =
-                        pkt_update_server_configuration(clicked_option, round_count_slider.slider.value);
-                    send_sock(&selection, server_fd);
+                    send_serv(pkt_update_server_configuration(clicked_option, round_count_slider.slider.value));
                 }
 
                 if (button_clicked(&round_count_slider.minus)) {
                     buttoned_slider_decrement(&round_count_slider);
-                    net_packet selection =
-                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value);
-                    send_sock(&selection, server_fd);
+                    send_serv(
+                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value));
                 }
 
                 if (button_clicked(&round_count_slider.plus)) {
                     buttoned_slider_increment(&round_count_slider);
-                    net_packet selection =
-                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value);
-                    send_sock(&selection, server_fd);
+                    send_serv(
+                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value));
                 }
             }
         }
@@ -2321,9 +2317,7 @@ void update_scene_in_game() {
             player_move move = player_exec_action(&players[current_player]);
             if (move.action != PA_NONE) {
                 next_state = RS_WAITING;
-                net_packet a =
-                    pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell);
-                send_sock(&a, server_fd);
+                send_serv(pkt_player_action(current_player, move.action, move.position.x, move.position.y, move.spell));
                 players[current_player].round_move = move;
                 players[current_player].info.state = RS_WAITING;
             }
@@ -2482,8 +2476,7 @@ void render_scene_in_game() {
 void update_scene_game_ended() {
     if (IsKeyPressed(KEY_R) && is_console_closed()) {
         if (current_player == master_player) {
-            net_packet reset = pkt_game_reset();
-            send_sock(&reset, server_fd);
+            send_serv(pkt_game_reset());
         }
     }
 }
@@ -2678,8 +2671,7 @@ int main(int argc, char **argv) {
         if (connected) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {
-                net_packet ping = pkt_ping((uint64_t)(GetTime() * 1000), 0);
-                send_sock(&ping, server_fd);
+                send_serv(pkt_ping(GetTime() * 1000, 0));
                 ping_counter = 1;
             }
         }

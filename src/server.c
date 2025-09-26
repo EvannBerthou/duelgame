@@ -56,13 +56,19 @@ int ci(int a) {
     return a;
 }
 
-void broadcast(net_packet *packet) {
+void broadcast_packet(net_packet *packet) {
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
         if (players[i].connected) {
             send_sock(packet, clients[i]);
         }
     }
 }
+
+#define broadcast(PACKET_FUNC)                  \
+    do {                                        \
+        net_packet p##__LINE__ = (PACKET_FUNC); \
+        broadcast_packet(&p##__LINE__);         \
+    } while (0)
 
 int player_count() {
     int player_count = 0;
@@ -87,11 +93,8 @@ void send_map(int fd) {
         props[i] = current_map.props[i];
     }
 
-    net_packet m = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map);
-    send_sock(&m, fd);
-
-    net_packet p = pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props);
-    send_sock(&p, fd);
+    send_packet(pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_BACKGROUND, map), fd);
+    send_packet(pkt_map(MAP_WIDTH, MAP_HEIGHT, MLT_PROPS, props), fd);
 }
 
 // Player
@@ -107,8 +110,7 @@ void update_stats(player_info *p, const spell *s) {
     } else {
         p->stats[s->stat].value = fmin(fmax(p->stats[s->stat].value + s->stat_value, 0), p->stats[s->stat].max);
     }
-    net_packet u = pkt_from_info(p);
-    broadcast(&u);
+    broadcast(pkt_from_info(p));
 }
 
 void damage_player(player_info *from, player_info *to, const spell *s) {
@@ -141,7 +143,7 @@ void reset_player(player_info *player) {
 
     net_packet u = pkt_from_info(player);
     ((net_packet_player_update *)u.content)->immediate = true;
-    broadcast(&u);
+    broadcast_packet(&u);
 }
 
 player_info *get_player_from_fd(int fd) {
@@ -176,18 +178,14 @@ player_info *player_on_cell(int x, int y) {
 void play_turn(player_info *player) {
     if (player->action == PA_STUNNED) {
         LOG("Player %d can't play this round", player->id);
-        net_packet u = pkt_from_info(player);
-        broadcast(&u);
-        net_packet action = pkt_player_action(player->id, player->action, player->x, player->y, 0);
-        broadcast(&action);
+        broadcast(pkt_from_info(player));
+        broadcast(pkt_player_action(player->id, player->action, player->x, player->y, 0));
         player->state = RS_PLAYING;
     } else if (player->action == PA_SPELL) {
         if (player->effect[SE_STUN]) {
             LOG("Player can't do this action because he is stunned");
-            net_packet u = pkt_from_info(player);
-            broadcast(&u);
-            net_packet action = pkt_player_action(player->id, PA_STUNNED, player->x, player->y, 0);
-            broadcast(&action);
+            broadcast(pkt_from_info(player));
+            broadcast(pkt_player_action(player->id, PA_STUNNED, player->x, player->y, 0));
             player->state = RS_PLAYING;
             return;
         }
@@ -211,15 +209,13 @@ void play_turn(player_info *player) {
 
         if (player->banned[action->spell]) {
             LOG("Player %s can't cast %s spell because it is banned.", player->name, s->name);
-            net_packet u = pkt_from_info(player);
-            broadcast(&u);
-            net_packet action = pkt_player_action(player->id, PA_STUNNED, player->x, player->y, 0);
-            broadcast(&action);
+            broadcast(pkt_from_info(player));
+            broadcast(pkt_player_action(player->id, PA_STUNNED, player->x, player->y, 0));
             player->state = RS_PLAYING;
             return;
         }
 
-        broadcast(&action_packet);
+        broadcast_packet(&action_packet);
 
         player->last_spell = player->spell;
 
@@ -335,8 +331,7 @@ void execute_turn() {
                 }
             }
         }
-        net_packet u = pkt_from_info(player);
-        broadcast(&u);
+        broadcast(pkt_from_info(player));
     }
 
     FOREACH_PLAYER(player) {
@@ -353,8 +348,7 @@ void execute_turn() {
     }
 
     if (alive_count >= 2) {
-        net_packet turn_end = pkt_turn_end();
-        broadcast(&turn_end);
+        broadcast(pkt_turn_end());
         return;
     }
 
@@ -372,13 +366,11 @@ void execute_turn() {
         end_verdict = GAME_TIE;
     }
 
-    net_packet end = pkt_round_end(end_verdict, round_scores);
-    broadcast(&end);
+    broadcast(pkt_round_end(end_verdict, round_scores));
 
     FOREACH_PLAYER(player) {
         if (round_scores[player->id] == max_round_count) {
-            net_packet game_end = pkt_game_end(player->id, round_scores);
-            broadcast(&game_end);
+            broadcast(pkt_game_end(player->id, round_scores));
         }
     }
 
@@ -395,8 +387,7 @@ void start_game() {
         reset_player(player);
         send_map(clients[player->id]);
     }
-    net_packet game_start = pkt_game_start();
-    broadcast(&game_start);
+    broadcast(pkt_game_start());
     round_start_time = time(NULL);
 }
 
@@ -417,8 +408,7 @@ void handle_player_disconnect(int fd) {
     if (new_master == -1) {
         new_master = 0;
     }
-    net_packet p = pkt_disconnect(player->id, new_master);
-    broadcast(&p);
+    broadcast(pkt_disconnect(player->id, new_master));
     master_player = new_master;
     gs = GS_WAITING;
 }
@@ -463,30 +453,17 @@ void handle_message(int fd) {
 
         // We refresh player list for everyone
         FOREACH_PLAYER(player) {
-            net_packet other_user_join = pkt_player_joined(player->id, player->name);
-            broadcast(&other_user_join);
-
-            net_packet b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                            player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value);
-            broadcast(&b);
-
-            net_packet u = pkt_from_info(player);
-            broadcast(&u);
+            broadcast(pkt_player_joined(player->id, player->name));
+            broadcast(pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                       player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value));
+            broadcast(pkt_from_info(player));
         }
 
         player_info *pi = &players[new_player_id];
-
-        net_packet u = pkt_from_info(pi);
-        broadcast(&u);
-
-        net_packet c = pkt_connected(new_player_id, master_player);
-        send_sock(&c, fd);
-
-        net_packet map_list = pkt_server_map_list(map_count, map_names_network);
-        send_sock(&map_list, fd);
-
-        net_packet selection = pkt_update_server_configuration(selected_map_idx, max_round_count);
-        broadcast(&selection);
+        broadcast(pkt_from_info(pi));
+        send_packet(pkt_connected(new_player_id, master_player), fd);
+        send_packet(pkt_server_map_list(map_count, map_names_network), fd);
+        broadcast(pkt_update_server_configuration(selected_map_idx, max_round_count));
     } else if (p.type == PKT_UPDATE_SERVER_CONFIGURATION) {
         net_packet_update_server_configuration *config = (net_packet_update_server_configuration *)p.content;
         if (config->map_index >= map_count) {
@@ -497,7 +474,7 @@ void handle_message(int fd) {
         }
         selected_map_idx = config->map_index;
         max_round_count = config->round_count;
-        broadcast(&p);
+        broadcast_packet(&p);
     } else if (p.type == PKT_REQUEST_GAME_START) {
         net_packet_request_game_start *s = (net_packet_request_game_start *)p.content;
         if (s->map_id >= map_count) {
@@ -528,7 +505,7 @@ void handle_message(int fd) {
         player_info *player = get_player_from_fd(fd);
         // We force the id to avoid a player setting the build of another player
         b->id = player->id;
-        broadcast(&p);
+        broadcast_packet(&p);
 
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             player->spells[i] = b->spells[i];
@@ -546,8 +523,7 @@ void handle_message(int fd) {
         player->stats[STAT_SPEED].max = b->speed;
         player->stats[STAT_SPEED].value = b->speed;
         // We send a PKT_PLAYER_UPDATE to set the base_health for all clients
-        net_packet u = pkt_from_info(player);
-        broadcast(&u);
+        broadcast(pkt_from_info(player));
     } else if (p.type == PKT_PLAYER_ACTION) {
         net_packet_player_action *a = (net_packet_player_action *)p.content;
         LOG("Player %d played : %d at %d %d", a->id, a->action, a->x, a->y);
@@ -578,15 +554,11 @@ void handle_message(int fd) {
         if (ready_count == player_count()) {
             FOREACH_PLAYER(player) {
                 reset_player(player);
-                net_packet b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                                player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value);
-                broadcast(&b);
-
-                net_packet u = pkt_from_info(player);
-                broadcast(&u);
+                broadcast(pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                           player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value));
+                broadcast(pkt_from_info(player));
             }
-            net_packet round_start = pkt_round_start();
-            broadcast(&round_start);
+            broadcast(pkt_round_start());
         }
     } else if (p.type == PKT_GAME_RESET) {
         // Only first player (owner) can reset the game
@@ -601,26 +573,22 @@ void handle_message(int fd) {
         }
         round_start_time = time(NULL);
         gs = GS_WAITING;
-        net_packet game_reset = pkt_game_reset();
-        broadcast(&game_reset);
+        broadcast(pkt_game_reset());
         // We send previously connected players informations to the new player
         FOREACH_PLAYER(player) {
             reset_player(player);
-            net_packet other_user_join = pkt_player_joined(player->id, player->name);
-            broadcast(&other_user_join);
+            broadcast(pkt_player_joined(player->id, player->name));
 
-            net_packet b = pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
-                                            player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value);
-            broadcast(&b);
+            broadcast(pkt_player_build(player->id, player->stats[STAT_HEALTH].base, player->spells,
+                                       player->stats[STAT_STRENGTH].value, player->stats[STAT_SPEED].value));
 
             net_packet u = pkt_from_info(player);
             ((net_packet_player_update *)u.content)->immediate = true;
-            broadcast(&u);
+            broadcast_packet(&u);
 
             send_map(connections[player->id]);
         }
-        net_packet game_start = pkt_game_start();
-        broadcast(&game_start);
+        broadcast(pkt_game_start());
     } else if (p.type == PKT_ADMIN_UPDATE_PLAYER_INFO) {
         if (is_admin(fd)) {
             net_packet_admin_update_player_info *info = (net_packet_admin_update_player_info *)p.content;
@@ -631,7 +599,7 @@ void handle_message(int fd) {
                 }
                 net_packet u = pkt_from_info(&players[info->id]);
                 ((net_packet_player_update *)u.content)->immediate = true;
-                broadcast(&u);
+                broadcast_packet(&u);
             }
         } else {
             char msg[128] = {0};
@@ -785,8 +753,7 @@ int main(int argc, char **argv) {
                 } else {
                     handle_message(i);
                     time_t round_timer = time(NULL) - round_start_time;
-                    net_packet stats = pkt_game_stats(round_timer);
-                    broadcast(&stats);
+                    broadcast(pkt_game_stats(round_timer));
                 }
             }
         }

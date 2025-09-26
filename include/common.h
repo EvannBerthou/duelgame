@@ -6,11 +6,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+
+#define MAX_PACKET_SIZE 2048
+
 typedef uint8_t net_packet_type;
 typedef struct {
     uint64_t len;
     uint8_t type;
-    uint8_t content[2048];
+    uint8_t content[MAX_PACKET_SIZE];
 } net_packet;
 
 int strtoint(const char* str, int* out);

@@ -17,6 +17,12 @@
 #define NET_PROTOCOL_IMPLEMENTATION
 #include "net_protocol.h"
 
+#define send_packet(PACKET_FUNC, FD)            \
+    do {                                        \
+        net_packet p##__LINE__ = (PACKET_FUNC); \
+        send_sock(&p##__LINE__, FD);            \
+    } while (0)
+
 #define GAME_TIE 255
 
 typedef enum {
@@ -80,7 +86,11 @@ void unpacksv(uint8_t** buf, char* dest, uint8_t len) {
 #endif
 
 void write_packet(net_packet* p, int fd) {
-    static char buf[4096] = {0};
+    if (p->len > MAX_PACKET_SIZE) {
+        LOGL(LL_ERROR, "Packet is too big (%d / %d)", p->len, MAX_PACKET_SIZE);
+        return;
+    }
+    static char buf[MAX_PACKET_SIZE] = {0};
     char* b = buf;
     b = packu64(b, p->len);
     b = packu8(b, p->type);
@@ -119,8 +129,11 @@ int packet_read(net_packet* p, int fd) {
     }
     uint8_t* len_buf = packet_len_buf;
     p->len = unpacku64(&len_buf);
+    if (p->len > MAX_PACKET_SIZE) {
+        return -1;
+    }
 
-    uint8_t buf[4096] = {0};
+    uint8_t buf[MAX_PACKET_SIZE] = {0};
     uint8_t* b = buf;
     int packet_size_left = p->len - sizeof(p->len);
     n = 0;
