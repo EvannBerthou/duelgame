@@ -179,7 +179,7 @@ card server_info_card = CARD(50, 150, card_width, 550, UI_NORD, "Server");
 card player_info_card = CARD(665, 150, card_width, 550, UI_NORD, "Spells", "Stats");
 
 input_buf ip_buf = {.prefix = "IP", .max_length = 32};
-input_buf port_buf = {.prefix = "Port", .max_length = 32};
+input_buf port_buf = {.prefix = "Port", .max_length = 6};
 input_buf password_buf = {.prefix = "Password", .max_length = 8};
 input_buf username_buf = {.prefix = "Username", .max_length = 8};
 button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
@@ -2001,32 +2001,28 @@ int get_total_stats() {
 
 void update_scene_main_menu() {
     if (is_console_closed()) {
+        for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
+            if (input_clicked(inputs[i])) {
+                if (i != selected_input) {
+                    input_clear_selection(inputs[selected_input]);
+                }
+                selected_input = i;
+            }
+        }
         // First card
-        if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
-            input_erase(inputs[selected_input]);
-        } else if (IsKeyPressed(KEY_ENTER)) {
+        ui_input_result result = input_update(inputs[selected_input]);
+        if (result == UI_INPUT_ENTER) {
             if (set_error(try_join()) == false) {
                 PlaySound(ui_button_clicked);
             }
-        } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && !IsKeyDown(KEY_LEFT_SHIFT)) {
-            selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
-        } else if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
+        } else if (result == UI_INPUT_PREV) {
             if (selected_input == 0) {
                 selected_input = MAIN_MENU_INPUT_COUNT - 1;
             } else {
                 selected_input--;
             }
-        }
-
-        int key;
-        while ((key = GetCharPressed())) {
-            input_write(inputs[selected_input], key);
-        }
-    }
-
-    for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-        if (input_clicked(inputs[i])) {
-            selected_input = i;
+        } else if (result == UI_INPUT_NEXT) {
+            selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
         }
     }
 
@@ -2052,11 +2048,7 @@ void update_scene_main_menu() {
                     set_error("Spell selection limit reached");
                 } else {
                     spell_selection[i] = !spell_selection[i];
-                    if (spell_selection[i]) {
-                        spell_select_buttons[i].color = DARKGRAY;
-                    } else {
-                        spell_select_buttons[i].color = WHITE;
-                    }
+                    spell_select_buttons[i].color = spell_selection[i] ? DARKGRAY : WHITE;
                 }
             }
         }

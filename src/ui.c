@@ -91,20 +91,76 @@ void DrawColoredText(const char *s, int x, int y, int font_size, Color c) {
 
 // Input
 
-bool input_write(input_buf *b, char c) {
-    if (b->ptr == b->max_length || is_console_open()) {
-        return false;
+const char *input_selection(input_buf *b) {
+    if (b->selection_length == 0) {
+        return NULL;
     }
-    b->buf[b->ptr] = c;
-    b->ptr++;
-    return true;
+    return TextFormat("%.*s", b->selection_length, b->buf + b->selection_start);
+}
+
+void input_clear_selection(input_buf *b) {
+    b->origin = 0;
+    b->selection_start = b->ptr;
+    b->selection_length = 0;
+    b->down_position = (Vector2){0};
 }
 
 bool input_erase(input_buf *b) {
     if (b->ptr == 0 || is_console_open()) {
         return false;
     }
-    b->ptr--;
+
+    if (b->selection_start == b->ptr) {
+        if (b->selection_start == 0) {
+            return false;
+        }
+        b->ptr--;
+        b->selection_start = b->ptr;
+    } else if (b->selection_length != 0) {
+        memmove(b->buf + b->selection_start, b->buf + b->selection_start + b->selection_length, b->selection_length);
+        b->ptr -= b->selection_length;
+    } else {
+        memmove(b->buf + b->selection_start - 1, b->buf + b->selection_start, b->ptr - b->selection_start);
+        b->ptr--;
+        b->selection_start--;
+    }
+
+    b->selection_length = 0;
+    return true;
+}
+
+bool input_write(input_buf *b, char c) {
+    if (is_console_open()) {
+        return false;
+    }
+
+    if (b->selection_start == b->ptr) {
+        if (b->ptr == b->max_length) {
+            return false;
+        }
+        b->buf[b->ptr] = c;
+        b->ptr++;
+        b->selection_start = b->ptr;
+        return true;
+    }
+
+    if (b->selection_length != 0) {
+        // Replaces selection
+        memmove(b->buf + b->selection_start + 1, b->buf + b->selection_start + b->selection_length,
+                b->selection_length);
+    } else if (b->ptr != b->max_length) {
+        // Insert in the middle
+        memmove(b->buf + b->selection_start + 1, b->buf + b->selection_start, b->ptr - b->selection_start);
+    } else {
+        // No more space left to insert a new character
+        return false;
+    }
+
+    b->buf[b->selection_start] = c;
+    b->ptr -= b->selection_length - 1;
+    b->selection_length = 0;
+    b->selection_start = fmin(b->selection_start + 1, b->ptr);
+
     return true;
 }
 
@@ -116,6 +172,7 @@ void input_set_text(input_buf *b, const char *s) {
     int length = (int)strlen(s) <= b->max_length ? (int)strlen(s) : b->max_length;
     strncpy(b->buf, s, length);
     b->ptr = length;
+    input_clear_selection(b);
 }
 
 bool input_is_blank(input_buf *b) {
@@ -151,8 +208,160 @@ void input_trim(input_buf *b) {
     memcpy(b->buf, new, new_ptr);
 }
 
+static int input_last_click_time = 0;
+
+void reset_blink_timer() {
+    input_last_click_time = GetTime();
+}
+
 bool input_clicked(input_buf *b) {
-    return is_clicked(b->rec);
+    bool result = is_clicked(b->rec);
+    if (result) {
+        reset_blink_timer();
+    }
+    return result;
+}
+
+// Rounds to nearest pair for better rendering
+int get_font_size(input_buf *b) {
+    int res = b->rec.height * 0.5f;
+    return res % 2 == 1 ? res + 1 : res;
+}
+
+ui_input_result input_update(input_buf *b) {
+    if (is_hover(b->rec) && IsMouseButtonDown(0)) {
+        Vector2 mouse = get_mouse();
+        int last_width = 0;
+        int font_size = get_font_size(b);
+
+        int start_x = b->rec.x + simple_border_size;
+        if (b->prefix) {
+            start_x += MeasureText(TextFormat("%s: ", b->prefix), font_size);
+        }
+
+        int outside_text = true;
+        for (int i = 0; i <= b->ptr; i++) {
+            int current_width = start_x + MeasureText(TextFormat("%.*s", i, b->buf), font_size);
+            if (current_width >= mouse.x && last_width <= mouse.x) {
+                if (IsMouseButtonPressed(0)) {
+                    b->origin = fmax(i - 1, 0);
+                    b->selection_start = b->origin;
+                    b->selection_length = 0;
+                    b->down_position = get_mouse();
+                } else if (b->down_position.x != mouse.x) {
+                    if (i >= b->origin) {
+                        b->selection_start = fmax(b->origin, 0);
+                        b->selection_length = i - b->origin;
+                    } else if (i < b->origin) {
+                        b->selection_start = fmax(i, 0);
+                        b->selection_length = b->origin - i;
+                    }
+                }
+                outside_text = false;
+                break;
+            }
+            last_width = current_width;
+        }
+        if (outside_text && IsMouseButtonPressed(0)) {
+            b->selection_start = b->ptr;
+            b->origin = b->ptr;
+            b->selection_length = 0;
+        }
+    }
+
+    if (IsKeyPressed(KEY_ENTER)) {
+        reset_blink_timer();
+        return UI_INPUT_ENTER;
+    }
+
+    if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && !IsKeyDown(KEY_LEFT_SHIFT)) {
+        reset_blink_timer();
+        return UI_INPUT_NEXT;
+    }
+
+    if ((IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB)) && IsKeyDown(KEY_LEFT_SHIFT)) {
+        reset_blink_timer();
+        return UI_INPUT_PREV;
+    }
+
+    if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_V)) {
+        const char *clipboard_text = GetClipboardText();
+        while (*clipboard_text) {
+            input_write(b, *clipboard_text);
+            clipboard_text++;
+        }
+        return UI_INPUT_NONE;
+    }
+
+    if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_C)) {
+        const char *selection = input_selection(b);
+        if (selection != NULL) {
+            SetClipboardText(selection);
+        }
+        return UI_INPUT_NONE;
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
+        input_erase(b);
+        reset_blink_timer();
+        return UI_INPUT_NONE;
+    }
+
+    if (IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) {
+        b->selection_length = 0;
+        b->selection_start = fmax(b->selection_start - 1, 0);
+        reset_blink_timer();
+        return UI_INPUT_NONE;
+    }
+
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) {
+        b->selection_length = 0;
+        b->selection_start = fmin(b->selection_start + 1, b->ptr);
+        reset_blink_timer();
+        return UI_INPUT_NONE;
+    }
+
+    if (IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) {
+        if (b->selection_length == 0) {
+            b->selection_start = fmin(b->selection_start + 1, b->ptr);
+            input_erase(b);
+            b->selection_start = fmax(b->selection_start, 0);
+        } else {
+            input_erase(b);
+        }
+        reset_blink_timer();
+        return UI_INPUT_NONE;
+    }
+
+    int key;
+    while ((key = GetCharPressed())) {
+        input_write(b, key);
+    }
+
+    return UI_INPUT_NONE;
+}
+
+// Based on : https://github.com/raysan5/raylib/blob/070c7894c6901eb206c76534627858e5913826f5/src/rtext.c#L1205
+float GetTextWidth(const char *text, int len, float fontSize) {
+    Font font = GetFontDefault();
+    float scale = fontSize / font.baseSize;
+    float width = 0.0f;
+    int spacing = fontSize / 10;
+
+    for (int i = 0; i < len && text[i] != '\0';) {
+        int codepointByteCount = 0;
+        int codepoint = GetCodepointNext(&text[i], &codepointByteCount);
+        int index = GetGlyphIndex(font, codepoint);
+
+        if (font.glyphs[index].advanceX == 0) {
+            width += ((float)font.recs[index].width * scale + spacing);
+        } else {
+            width += ((float)font.glyphs[index].advanceX * scale + spacing);
+        }
+        i += codepointByteCount;
+    }
+
+    return width;
 }
 
 void input_render(input_buf *b, int active) {
@@ -169,19 +378,30 @@ void input_render(input_buf *b, int active) {
                         .layout = NPATCH_NINE_PATCH};
     DrawTextureNPatch(simple_border, patch, b->rec, (Vector2){0, 0}, 0.0f, WHITE);
 
-    const char *text = NULL;
-    if (b->prefix) {
-        text = TextFormat("%s: %s", b->prefix, input_to_text(b));
-    } else {
-        text = TextFormat("%s", input_to_text(b));
-    }
-    int font_size = b->rec.height * 0.5f;
+    int font_size = get_font_size(b);
     int inner_x = b->rec.x + simple_border_size;
     int inner_y = b->rec.y + (b->rec.height - font_size) / 2.f;
-    DrawText(text, inner_x, inner_y, font_size, BLACK);
-    if (active && (int)GetTime() % 2 == 0) {
-        int text_width = MeasureText(extract_raw_string(text), font_size);
-        DrawRectangle(inner_x + text_width + 2, inner_y, 2, font_size, BLACK);
+
+    int prefix_offset = 0;
+    if (b->prefix) {
+        const char *prefix = TextFormat("%s: ", b->prefix);
+        prefix_offset = MeasureText(prefix, font_size);
+        DrawText(prefix, inner_x, inner_y, font_size, BLACK);
+    }
+
+    DrawText(input_to_text(b), inner_x + prefix_offset, inner_y, font_size, BLACK);
+
+    if (b->selection_length != 0) {
+        float non_selection_offset = GetTextWidth(b->buf, b->selection_start, font_size);
+        float selection_width = GetTextWidth(b->buf + b->selection_start, b->selection_length, font_size);
+        DrawRectangle(inner_x + prefix_offset + non_selection_offset, inner_y, selection_width, font_size,
+                      ColorAlpha(HOVER_TINT, 0.4f));
+    }
+
+    int elapsed_time = GetTime() - input_last_click_time;
+    if (active && (elapsed_time % 2 == 0 || elapsed_time < 1)) {
+        int ptr_offset = GetTextWidth(b->buf, b->selection_start, font_size);
+        DrawRectangle(inner_x + prefix_offset + ptr_offset, inner_y, 3, font_size, BLACK);
     }
 }
 

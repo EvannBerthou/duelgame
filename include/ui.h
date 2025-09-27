@@ -35,8 +35,22 @@ typedef struct {
     char buf[32];
     int ptr;
     int max_length;
+
+    Vector2 down_position;
+    int origin;
+    int selection_start;
+    int selection_length;
 } input_buf;
 
+typedef enum {
+    UI_INPUT_NONE,
+    UI_INPUT_ENTER,
+    UI_INPUT_NEXT,
+    UI_INPUT_PREV,
+} ui_input_result;
+
+ui_input_result input_update(input_buf *b);
+void input_clear_selection(input_buf *b);
 bool input_write(input_buf *b, char c);
 bool input_erase(input_buf *b);
 const char *input_to_text(input_buf *b);
