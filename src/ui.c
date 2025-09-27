@@ -51,6 +51,30 @@ void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c) {
     DrawText(text, center, height, font_size, c);
 }
 
+// Based on : https://github.com/raysan5/raylib/blob/070c7894c6901eb206c76534627858e5913826f5/src/rtext.c#L1205
+float GetTextWidth(const char *text, int len, float fontSize) {
+    Font font = GetFontDefault();
+    float scale = fontSize / font.baseSize;
+    float width = 0.0f;
+    int spacing = fontSize / 10;
+
+    for (int i = 0; i < len && text[i] != '\0';) {
+        int codepointByteCount = 0;
+        int codepoint = GetCodepointNext(&text[i], &codepointByteCount);
+        int index = GetGlyphIndex(font, codepoint);
+
+        if (font.glyphs[index].advanceX == 0) {
+            width += ((float)font.recs[index].width * scale + spacing);
+        } else {
+            width += ((float)font.glyphs[index].advanceX * scale + spacing);
+        }
+        i += codepointByteCount;
+    }
+
+    return width;
+}
+
+
 bool is_hover(Rectangle rec) {
     return is_console_closed() && CheckCollisionPointRec(get_mouse(), rec);
 }
@@ -106,7 +130,7 @@ void input_clear_selection(input_buf *b) {
 }
 
 bool input_erase(input_buf *b) {
-    if (b->ptr == 0 || is_console_open()) {
+    if (b->ptr == 0) {
         return false;
     }
 
@@ -130,10 +154,6 @@ bool input_erase(input_buf *b) {
 }
 
 bool input_write(input_buf *b, char c) {
-    if (is_console_open()) {
-        return false;
-    }
-
     if (b->selection_start == b->ptr) {
         if (b->ptr == b->max_length) {
             return false;
@@ -229,6 +249,10 @@ int get_font_size(input_buf *b) {
 }
 
 ui_input_result input_update(input_buf *b) {
+    if (is_console_open()) {
+        return UI_INPUT_NONE;
+    }
+
     if (is_hover(b->rec) && IsMouseButtonDown(0)) {
         Vector2 mouse = get_mouse();
         int last_width = 0;
@@ -339,29 +363,6 @@ ui_input_result input_update(input_buf *b) {
     }
 
     return UI_INPUT_NONE;
-}
-
-// Based on : https://github.com/raysan5/raylib/blob/070c7894c6901eb206c76534627858e5913826f5/src/rtext.c#L1205
-float GetTextWidth(const char *text, int len, float fontSize) {
-    Font font = GetFontDefault();
-    float scale = fontSize / font.baseSize;
-    float width = 0.0f;
-    int spacing = fontSize / 10;
-
-    for (int i = 0; i < len && text[i] != '\0';) {
-        int codepointByteCount = 0;
-        int codepoint = GetCodepointNext(&text[i], &codepointByteCount);
-        int index = GetGlyphIndex(font, codepoint);
-
-        if (font.glyphs[index].advanceX == 0) {
-            width += ((float)font.recs[index].width * scale + spacing);
-        } else {
-            width += ((float)font.glyphs[index].advanceX * scale + spacing);
-        }
-        i += codepointByteCount;
-    }
-
-    return width;
 }
 
 void input_render(input_buf *b, int active) {

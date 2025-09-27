@@ -1,6 +1,5 @@
 #include "command.h"
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 #include "common.h"
 #include "net_protocol.h"

@@ -115,8 +115,9 @@ queue pkt_queue;
 // Console
 bool console_open = false;
 int log_base = 0;
-char console_input[CONSOLE_INPUT_MAX_LENGTH] = {0};
-int console_input_cursor = 0;
+// char console_input[CONSOLE_INPUT_MAX_LENGTH] = {0};
+// int console_input_cursor = 0;
+input_buf console_buf = {.max_length = 256};
 
 // Scenes
 typedef enum {
@@ -475,11 +476,15 @@ bool is_console_closed() {
     return !console_open;
 }
 
-// TODO: Handle more cursor movement
 void update_console() {
     if (IsKeyPressed(KEY_F2)) {
         console_open = !console_open;
     }
+
+    if (console_open == false) {
+        return;
+    }
+
     if (console_open && (IsKeyPressed(KEY_UP) || IsKeyPressedRepeat(KEY_UP))) {
         if (log_base + LOG_LINE_COUNT < get_log_count()) {
             log_base++;
@@ -489,43 +494,31 @@ void update_console() {
         log_base = fmax(log_base - 1, 0);
     }
 
-    if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
-        console_input_cursor = fmax(console_input_cursor - 1, 0);
-    }
-
-    if (IsKeyPressed(KEY_ENTER)) {
-        if (console_input_cursor > 0) {
-            char *input = (char *)TextFormat("%.*s", console_input_cursor, console_input);
-            LOG(input);
-            command_result result = handle_command(input);
-            if (result.valid == false) {
+    // TODO: Hacky way of faking closed console to handle input
+    console_open = false;
+    ui_input_result result = input_update(&console_buf);
+    console_open = true;
+    if (result == UI_INPUT_ENTER) {
+        char *input = (char *)input_to_text(&console_buf);
+        LOG(input);
+        command_result result = handle_command(input);
+        if (result.valid == false) {
+            if (result.content == NULL) {
+                LOGL(LL_ERROR, "Unknown command `%s`", input);
+            } else if (result.content != NULL) {
+                LOGL(LL_ERROR, "%s", result.content);
+            }
+        } else {
+            if (result.has_packet) {
                 if (result.content == NULL) {
-                    LOGL(LL_ERROR, "Unknown command `%.*s`", console_input_cursor, console_input);
-                } else if (result.content != NULL) {
-                    LOGL(LL_ERROR, "%s", result.content);
+                    LOGL(LL_ERROR, "Error creating packet");
+                } else {
+                    //send_serv(result.type, result.content, server_fd);
                 }
-            } else {
-                if (result.has_packet) {
-                    if (result.content == NULL) {
-                        LOGL(LL_ERROR, "Error creating packet");
-                    } else {
-                        // send_serv(result.type, result.content, server_fd);
-                    }
-                    free(result.content);
-                }
-            }
-            console_input_cursor = 0;
-        }
-    }
-
-    if (is_console_open()) {
-        char c;
-        while ((c = GetCharPressed())) {
-            if (console_input_cursor < CONSOLE_INPUT_MAX_LENGTH) {
-                console_input[console_input_cursor] = c;
-                console_input_cursor++;
+                free(result.content);
             }
         }
+        input_set_text(&console_buf, "");
     }
 }
 
@@ -562,9 +555,10 @@ void render_console() {
     }
 
     // Input
-    const char *console_input_text = TextFormat("%.*s", console_input_cursor, console_input);
+    const char *console_input_text = input_to_text(&console_buf);
     DrawText(console_input_text, 0, GetScreenHeight() - 32, 32, WHITE);
-    DrawRectangle(MeasureText(console_input_text, 32) + 3, GetScreenHeight() - 32, 4, 32, WHITE);
+    int width_to_cursor = GetTextWidth(console_input_text, console_buf.selection_start, 32);
+    DrawRectangle(width_to_cursor, GetScreenHeight() - 32, 4, 32, WHITE);
 
     // Counter
     int start_idx = fmax(get_log_count() - log_base - LOG_LINE_COUNT + 1, 0);

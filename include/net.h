@@ -116,7 +116,6 @@ void write_packet(net_packet* p, int fd) {
 #define recv_data(fd, buf, len) read(fd, buf, len)
 #endif
 
-// TODO: We should check the size and avoid reading too much
 int packet_read(net_packet* p, int fd) {
     uint8_t packet_len_buf[8] = {0};
     int n = recv_data(fd, &packet_len_buf, sizeof(packet_len_buf));

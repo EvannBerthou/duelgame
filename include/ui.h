@@ -24,6 +24,7 @@ extern Sound ui_tab_switch;
 
 // Utils
 
+float GetTextWidth(const char *text, int len, float fontSize);
 int get_width_center(Rectangle rec, const char *text, int font_size);
 void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c);
 
@@ -32,7 +33,7 @@ void DrawTextCenter(Rectangle rec, const char *text, int font_size, Color c);
 typedef struct {
     Rectangle rec;
     const char *prefix;
-    char buf[32];
+    char buf[256];
     int ptr;
     int max_length;
 
