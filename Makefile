@@ -53,7 +53,10 @@ windows: packer include/net_protocol.h
 		-I./include -L ./lib/windows -lraylib -lm -ggdb -lpthread -lwinmm -lgdi32 -lws2_32
 
 editor: build/main_game
-	./build/main_game --editor maps/default.map
+	./build/main_game --editor maps/default.mapa
+
+test: build/main_game
+	./build/main_game --experiment
 
 
-.PHONY: all packer clean editor
+.PHONY: all packer clean editor test

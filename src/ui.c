@@ -74,7 +74,6 @@ float GetTextWidth(const char *text, int len, float fontSize) {
     return width;
 }
 
-
 bool is_hover(Rectangle rec) {
     return is_console_closed() && CheckCollisionPointRec(get_mouse(), rec);
 }
@@ -365,6 +364,7 @@ ui_input_result input_update(input_buf *b) {
     return UI_INPUT_NONE;
 }
 
+// TODO: Some broken stuff with the rendering going outside of the given rec
 void input_render(input_buf *b, int active) {
     Color bg_color = UI_BEIGE;
     if (is_hover(b->rec)) {
@@ -823,4 +823,155 @@ void clear_picker(picker *p) {
         free((void *)p->options[i]);
     }
     p->option_count = 0;
+}
+
+// Layout
+
+static int layout_compute_node_rec(layout *l, int node_index, int free_progress) {
+    Rectangle *rec = (Rectangle *)l->nodes[node_index].data;
+
+    if (l->type == LT_HORIZONTAL) {
+        int node_width = (l->layout_rec.width - l->spacing) / l->node_count;
+        rec->y = l->layout_rec.y;
+        rec->width = node_width;
+
+        if (l->request_height != LAYOUT_FREE) {
+            rec->x = l->layout_rec.x + (node_width + l->spacing) * node_index;
+            rec->height = l->layout_rec.height;
+        } else {
+            rec->x = l->layout_rec.x + free_progress;
+            if (rec->x >= l->layout_rec.width) {
+                LOGL(LL_DEBUG, "UI element is at x=%d but layout width is %d", rec->x, l->layout_rec.width);
+            }
+            free_progress += rec->width + l->spacing;
+        }
+    } else if (l->type == LT_VERTICAL) {
+        int node_height = (l->layout_rec.height - l->spacing) / l->node_count;
+        rec->x = l->layout_rec.x;
+        rec->width = l->layout_rec.width;
+
+        if (l->request_height != LAYOUT_FREE) {
+            rec->y = l->layout_rec.y + (node_height + l->spacing) * node_index;
+            rec->height = node_height;
+        } else {
+            rec->y = l->layout_rec.y + free_progress;
+            if (rec->y >= l->layout_rec.height) {
+                LOGL(LL_DEBUG, "UI element is at y=%d but layout height is %d", rec->y, l->layout_rec.height);
+            }
+
+            free_progress += rec->height + l->spacing;
+        }
+    }
+    l->nodes[node_index].rec = *rec;
+    return free_progress;
+}
+
+void layout_refresh(layout *l) {
+    if (l->parent != NULL) {
+        l->layout_rec.x = l->parent->rec.x;
+        l->layout_rec.y = l->parent->rec.y;
+        l->layout_rec.width = l->parent->rec.width;
+        l->layout_rec.height = l->parent->rec.height;
+    } else {
+        l->layout_rec.x = 0;
+        l->layout_rec.y = 0;
+        l->layout_rec.width = WIDTH;
+        l->layout_rec.height = 0;
+    }
+
+    int max_height = 0;
+    if (l->request_height == LAYOUT_CONTENT_FIT) {
+        for (int i = 0; i < l->node_count; i++) {
+            Rectangle *rec = (Rectangle *)l->nodes[i].data;
+            max_height = fmax(rec->height, max_height);
+        }
+        l->layout_rec.height = max_height;
+    }
+
+    if (l->request_height == LAYOUT_FIT_CONTAINER || l->request_height == LAYOUT_FREE) {
+        l->layout_rec.height = l->parent == NULL ? HEIGHT : l->parent->rec.height;
+        max_height = l->layout_rec.height;
+    }
+
+    if (l->request_width == LAYOUT_FIT_CONTAINER) {
+        l->layout_rec.width = l->parent == NULL ? WIDTH : l->parent->rec.width;
+    }
+
+    l->layout_rec.x += l->padding[3];
+    l->layout_rec.width -= l->padding[3] + l->padding[1];
+
+    l->layout_rec.y += l->padding[0];
+    l->layout_rec.height -= l->padding[0] + l->padding[2];
+
+    int free_progress = 0;
+    for (int i = 0; i < l->node_count; i++) {
+        free_progress = layout_compute_node_rec(l, i, free_progress);
+    }
+
+    for (int i = 0; i < l->children_count; i++) {
+        layout_refresh(l->children[i]);
+    }
+}
+
+void layout_push(layout *l, ui_type type, void *data) {
+    l->nodes[l->node_count].node_type = type;
+    l->nodes[l->node_count].data = data;
+    l->node_count++;
+    layout_refresh(l);
+}
+
+void layout_render(layout *l) {
+    for (int i = 0; i < l->node_count; i++) {
+        void *data = l->nodes[i].data;
+        switch (l->nodes[i].node_type) {
+            case UI_INPUT:
+                input_render(data, 0);
+                break;
+            case UI_BUTTON:
+                button_render(data);
+                break;
+            case UI_SLIDER:
+                slider_render(data);
+                break;
+            case UI_BUTON_SLIDER:
+                buttoned_slider_render(data);
+                break;
+            case UI_CARD:
+                card_render(data);
+                break;
+            case UI_ICON:
+                LOGL(LL_ERROR, "UI_ICON render call not implemetend in layout");
+                // icon_render(data);
+                break;
+            case UI_PICKER:
+                picker_render(data);
+                break;
+            case UI_EMPTY:
+                DrawRectangleRec(*(Rectangle *)(data), YELLOW);
+                break;
+        }
+    }
+    DrawRectangleLinesEx(l->layout_rec, 1, GREEN);
+    DrawRectangleLinesEx(l->layout_rec, 1, RED);
+
+    for (int i = 0; i < l->children_count; i++) {
+        layout_render(l->children[i]);
+    }
+}
+
+layout *layout_push_layout(layout *parent, int node_index, layout base) {
+    if (parent->children_count == 8) {
+        LOGL(LL_ERROR, "Too much children layout");
+        exit(1);
+    }
+    if (parent->children == NULL) {
+        parent->children = malloc(sizeof(layout *) * 8);
+    }
+
+    layout *child = malloc(sizeof(layout));
+    *child = base;
+    child->parent = &parent->nodes[node_index];
+    parent->children[parent->children_count] = child;
+    parent->children_count++;
+    return child;
 }

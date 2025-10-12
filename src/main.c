@@ -128,6 +128,7 @@ typedef enum {
     SCENE_IN_GAME,
     SCENE_GAME_ENDED,
     SCENE_EDITOR,
+    SCENE_EXPERIEMENTATIONS,
 } game_scene;
 
 game_scene active_scene = SCENE_MAIN_MENU;
@@ -2576,6 +2577,66 @@ bool load_editor(const char *filename) {
     return true;
 }
 
+layout root_layout = {.type = LT_HORIZONTAL,
+                      .request_width = LAYOUT_FIT_CONTAINER,
+                      .request_height = LAYOUT_FIT_CONTAINER,
+                      .padding = {50, 50, 50, 50},
+                      .spacing = 75};
+
+card test_c1 = CARD(0, 0, 0, 0, UI_NORD, "Test");
+card test_c2 = CARD(0, 0, 0, 0, UI_GREEN, "");
+
+button test_b1 = BUTTON_COLOR(0, 0, 0, 0, UI_RED, "BOUTON 1", 18);
+button test_b2 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "BOUTON 2", 18);
+
+slider test_slider = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
+slider test_slider2 = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
+button test_b3 = BUTTON_COLOR(0, 0, 0, 75, UI_BEIGE, "BOUTON 3", 18);
+
+ui_empty empty1 = {0};
+ui_empty empty2 = {0};
+
+void init_scene_experimentations() {
+    layout_push(&root_layout, UI_CARD, &test_c1);
+    layout_push(&root_layout, UI_CARD, &test_c2);
+
+    layout *n1 = layout_push_layout(&root_layout, 0,
+                                    (layout){.type = LT_VERTICAL,
+                                             .request_width = LAYOUT_FIT_CONTAINER,
+                                             .request_height = LAYOUT_FIT_CONTAINER,
+                                             .padding = {100, 25, 25, 25},
+                                             .spacing = 15});
+
+    layout_push(n1, UI_BUTTON, &test_b1);
+    layout_push(n1, UI_BUTTON, &test_b2);
+
+    layout *n2 = layout_push_layout(&root_layout, 1,
+                                    (layout){.type = LT_VERTICAL,
+                                             .request_width = LAYOUT_FIT_CONTAINER,
+                                             .request_height = LAYOUT_FIT_CONTAINER,
+                                             .padding = {0},
+                                             .spacing = 15});
+
+    layout_push(n2, UI_EMPTY, &empty1);
+    layout_push(n2, UI_EMPTY, &empty2);
+
+    layout *n21 = layout_push_layout(
+        n2, 0,
+        (layout){
+            .type = LT_VERTICAL, .request_width = LAYOUT_FIT_CONTAINER, .request_height = LAYOUT_FREE, .spacing = 25});
+    layout_push(n21, UI_SLIDER, &test_slider);
+    layout_push(n21, UI_BUTTON, &test_b3);
+    layout_push(n21, UI_SLIDER, &test_slider2);
+}
+
+void update_scene_experimentations() {
+}
+
+void render_scene_experimentations() {
+    ClearBackground(BLACK);
+    layout_render(&root_layout);
+}
+
 // Main
 
 int main(int argc, char **argv) {
@@ -2612,6 +2673,8 @@ int main(int argc, char **argv) {
             if (load_editor(map) == false) {
                 exit(1);
             }
+        } else if (strcmp(arg, "--experiment") == 0) {
+            active_scene = SCENE_EXPERIEMENTATIONS;
         } else {
             LOG("Unknown arg : '%s'", arg);
             exit(1);
@@ -2636,6 +2699,7 @@ int main(int argc, char **argv) {
     init_scene_main_menu(username);
     init_scene_lobby();
     init_scene_in_game();
+    init_scene_experimentations();
 
     init_queue(&pkt_queue, sizeof(net_packet));
     init_queue(&map_queue, sizeof(map_node));
@@ -2683,6 +2747,8 @@ int main(int argc, char **argv) {
             update_scene_game_ended();
         } else if (active_scene == SCENE_EDITOR) {
             update_scene_editor();
+        } else if (active_scene == SCENE_EXPERIEMENTATIONS) {
+            update_scene_experimentations();
         }
 
         BeginTextureMode(target);
@@ -2699,6 +2765,8 @@ int main(int argc, char **argv) {
                 render_scene_game_ended();
             } else if (active_scene == SCENE_EDITOR) {
                 render_scene_editor();
+            } else if (active_scene == SCENE_EXPERIEMENTATIONS) {
+                render_scene_experimentations();
             }
 
             if (error != NULL && error_time_remaining > 0) {
