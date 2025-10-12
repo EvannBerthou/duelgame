@@ -217,32 +217,51 @@ typedef enum {
 #define LAYOUT_CONTENT_FIT 0xFFFFFE
 #define LAYOUT_FREE 0xFFFFFD
 
-typedef struct layout_node layout_node;
+typedef enum {
+    UNIT_FIT,      // Fits the whole layout
+    UNIT_PERCENT,  // % of the current layout
+    UNIT_PX,       // Specific pixel count
+} ui_unit;
+
+typedef struct {
+    int value;
+    ui_unit unit;
+} ui_spec_value;
+
+typedef struct {
+    ui_spec_value width;
+    ui_spec_value height;
+} ui_node_specs;
+
+#define DEFAULT_UI_SPECS (ui_node_specs){0}
+
+typedef struct {
+    Rectangle rec;
+    ui_type node_type;
+    ui_node_specs specs;
+    void* data;
+} layout_node;
 
 typedef struct layout {
-    struct layout_node* parent;
+    layout_node* parent;
     struct layout** children;
     int children_count;
     layout_type type;
     Rectangle layout_rec;
 
-    int request_width;
-    int request_height;
+    int width;
+    int height;
 
     int padding[4];
     int spacing;
 
-    struct layout_node {
-        Rectangle rec;
-        ui_type node_type;
-        void* data;
-    } nodes[MAX_LAYOUT_NODES];
+    layout_node nodes[MAX_LAYOUT_NODES];
     int node_count;
 } layout;
 
 void layout_refresh(layout* l);
-void layout_push(layout* l, ui_type type, void* data);
+void layout_push(layout* l, ui_type type, void* data, ui_node_specs specs);
 void layout_render(layout* l);
-layout *layout_push_layout(layout *parent, int node_index, layout base);
+layout* layout_push_layout(layout* parent, int node_index, layout base);
 
 #endif

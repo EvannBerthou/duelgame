@@ -2578,8 +2578,8 @@ bool load_editor(const char *filename) {
 }
 
 layout root_layout = {.type = LT_HORIZONTAL,
-                      .request_width = LAYOUT_FIT_CONTAINER,
-                      .request_height = LAYOUT_FIT_CONTAINER,
+                      .width = LAYOUT_FIT_CONTAINER,
+                      .height = LAYOUT_FIT_CONTAINER,
                       .padding = {50, 50, 50, 50},
                       .spacing = 75};
 
@@ -2595,38 +2595,45 @@ button test_b3 = BUTTON_COLOR(0, 0, 0, 75, UI_BEIGE, "BOUTON 3", 18);
 
 ui_empty empty1 = {0};
 ui_empty empty2 = {0};
+ui_empty empty3 = {0};
+ui_empty empty4 = {0};
+ui_empty empty5 = {0};
+ui_empty empty6 = {0};
 
 void init_scene_experimentations() {
-    layout_push(&root_layout, UI_CARD, &test_c1);
-    layout_push(&root_layout, UI_CARD, &test_c2);
+    layout_push(&root_layout, UI_CARD, &test_c1, DEFAULT_UI_SPECS);
+    layout_push(&root_layout, UI_CARD, &test_c2, DEFAULT_UI_SPECS);
 
     layout *n1 = layout_push_layout(&root_layout, 0,
                                     (layout){.type = LT_VERTICAL,
-                                             .request_width = LAYOUT_FIT_CONTAINER,
-                                             .request_height = LAYOUT_FIT_CONTAINER,
+                                             .width = LAYOUT_FIT_CONTAINER,
+                                             .height = LAYOUT_FIT_CONTAINER,
                                              .padding = {100, 25, 25, 25},
                                              .spacing = 15});
 
-    layout_push(n1, UI_BUTTON, &test_b1);
-    layout_push(n1, UI_BUTTON, &test_b2);
+    layout_push(n1, UI_BUTTON, &test_b1, DEFAULT_UI_SPECS);
+    layout_push(n1, UI_BUTTON, &test_b2, DEFAULT_UI_SPECS);
 
-    layout *n2 = layout_push_layout(&root_layout, 1,
-                                    (layout){.type = LT_VERTICAL,
-                                             .request_width = LAYOUT_FIT_CONTAINER,
-                                             .request_height = LAYOUT_FIT_CONTAINER,
-                                             .padding = {0},
-                                             .spacing = 15});
+    layout *n2 = layout_push_layout(
+        &root_layout, 1,
+        (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE, .spacing = 25});
 
-    layout_push(n2, UI_EMPTY, &empty1);
-    layout_push(n2, UI_EMPTY, &empty2);
+    ui_node_specs s1 = {.height = {75, UNIT_PERCENT}};
+    layout_push(n2, UI_EMPTY, &empty1, s1);
 
-    layout *n21 = layout_push_layout(
-        n2, 0,
-        (layout){
-            .type = LT_VERTICAL, .request_width = LAYOUT_FIT_CONTAINER, .request_height = LAYOUT_FREE, .spacing = 25});
-    layout_push(n21, UI_SLIDER, &test_slider);
-    layout_push(n21, UI_BUTTON, &test_b3);
-    layout_push(n21, UI_SLIDER, &test_slider2);
+    ui_node_specs s2 = {.height = {25, UNIT_PERCENT}};
+    layout_push(n2, UI_EMPTY, &empty2, s2);
+
+    layout *n21 = layout_push_layout(n2, 0,
+                                     (layout){.type = LT_VERTICAL,
+                                              .width = LAYOUT_FIT_CONTAINER,
+                                              .height = LAYOUT_FIT_CONTAINER,
+                                              .spacing = 50,
+                                              .padding = {0}});
+    layout_push(n21, UI_EMPTY, &empty3, DEFAULT_UI_SPECS);
+    layout_push(n21, UI_EMPTY, &empty4, DEFAULT_UI_SPECS);
+    layout_push(n21, UI_EMPTY, &empty5, DEFAULT_UI_SPECS);
+    layout_push(n21, UI_EMPTY, &empty6, DEFAULT_UI_SPECS);
 }
 
 void update_scene_experimentations() {

@@ -827,6 +827,20 @@ void clear_picker(picker *p) {
 
 // Layout
 
+static int layout_get_node_progress(layout *l, ui_spec_value spec) {
+    int base = l->type == LT_VERTICAL ? l->layout_rec.height : l->layout_rec.width;
+    base -= l->spacing * (l->node_count - 1);
+    switch (spec.unit) {
+        case UNIT_FIT:
+            return base;
+        case UNIT_PERCENT:
+            return base * (spec.value / 100.f);
+        case UNIT_PX:
+            return spec.value;
+    }
+    return 0;
+}
+
 static int layout_compute_node_rec(layout *l, int node_index, int free_progress) {
     Rectangle *rec = (Rectangle *)l->nodes[node_index].data;
 
@@ -835,31 +849,39 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
         rec->y = l->layout_rec.y;
         rec->width = node_width;
 
-        if (l->request_height != LAYOUT_FREE) {
+        if (l->height != LAYOUT_FREE) {
             rec->x = l->layout_rec.x + (node_width + l->spacing) * node_index;
             rec->height = l->layout_rec.height;
         } else {
             rec->x = l->layout_rec.x + free_progress;
             if (rec->x >= l->layout_rec.width) {
-                LOGL(LL_DEBUG, "UI element is at x=%d but layout width is %d", rec->x, l->layout_rec.width);
+                LOGL(LL_DEBUG, "UI element is at x=%f but layout width is %f", rec->x, l->layout_rec.width);
             }
             free_progress += rec->width + l->spacing;
         }
     } else if (l->type == LT_VERTICAL) {
-        int node_height = (l->layout_rec.height - l->spacing) / l->node_count;
+        float node_height = (l->layout_rec.height - (l->spacing * (l->node_count - 1))) / l->node_count;
+        LOG("layout height = %f node_height = %f", l->layout_rec.height, node_height);
+        if (l->node_count == 1) {
+            node_height = l->layout_rec.height;
+        }
+
         rec->x = l->layout_rec.x;
         rec->width = l->layout_rec.width;
 
-        if (l->request_height != LAYOUT_FREE) {
+        if (l->height != LAYOUT_FREE) {
             rec->y = l->layout_rec.y + (node_height + l->spacing) * node_index;
+            LOG("Rendering at offset %f", rec->y - l->layout_rec.y);
             rec->height = node_height;
         } else {
             rec->y = l->layout_rec.y + free_progress;
             if (rec->y >= l->layout_rec.height) {
-                LOGL(LL_DEBUG, "UI element is at y=%d but layout height is %d", rec->y, l->layout_rec.height);
+                LOGL(LL_DEBUG, "UI element is at y=%f but layout height is %f", rec->y, l->layout_rec.height);
             }
 
-            free_progress += rec->height + l->spacing;
+            int height = layout_get_node_progress(l, l->nodes[node_index].specs.height);
+            rec->height = height;
+            free_progress += height + l->spacing;
         }
     }
     l->nodes[node_index].rec = *rec;
@@ -876,24 +898,23 @@ void layout_refresh(layout *l) {
         l->layout_rec.x = 0;
         l->layout_rec.y = 0;
         l->layout_rec.width = WIDTH;
-        l->layout_rec.height = 0;
+        l->layout_rec.height = HEIGHT;
     }
 
-    int max_height = 0;
-    if (l->request_height == LAYOUT_CONTENT_FIT) {
-        for (int i = 0; i < l->node_count; i++) {
-            Rectangle *rec = (Rectangle *)l->nodes[i].data;
-            max_height = fmax(rec->height, max_height);
-        }
-        l->layout_rec.height = max_height;
-    }
+    // int max_height = 0;
+    // if (l->height == LAYOUT_CONTENT_FIT) {
+    //     for (int i = 0; i < l->node_count; i++) {
+    //         Rectangle *rec = (Rectangle *)l->nodes[i].data;
+    //         max_height = fmax(rec->height, max_height);
+    //     }
+    //     l->layout_rec.height = max_height;
+    // }
 
-    if (l->request_height == LAYOUT_FIT_CONTAINER || l->request_height == LAYOUT_FREE) {
+    if (l->height == LAYOUT_FIT_CONTAINER || l->height == LAYOUT_FREE) {
         l->layout_rec.height = l->parent == NULL ? HEIGHT : l->parent->rec.height;
-        max_height = l->layout_rec.height;
     }
 
-    if (l->request_width == LAYOUT_FIT_CONTAINER) {
+    if (l->width == LAYOUT_FIT_CONTAINER) {
         l->layout_rec.width = l->parent == NULL ? WIDTH : l->parent->rec.width;
     }
 
@@ -913,9 +934,10 @@ void layout_refresh(layout *l) {
     }
 }
 
-void layout_push(layout *l, ui_type type, void *data) {
+void layout_push(layout *l, ui_type type, void *data, ui_node_specs specs) {
     l->nodes[l->node_count].node_type = type;
     l->nodes[l->node_count].data = data;
+    l->nodes[l->node_count].specs = specs;
     l->node_count++;
     layout_refresh(l);
 }
@@ -947,7 +969,7 @@ void layout_render(layout *l) {
                 picker_render(data);
                 break;
             case UI_EMPTY:
-                DrawRectangleRec(*(Rectangle *)(data), YELLOW);
+                DrawRectangleLinesEx(*(Rectangle *)(data), 5, BLUE);
                 break;
         }
     }
@@ -973,5 +995,6 @@ layout *layout_push_layout(layout *parent, int node_index, layout base) {
     child->parent = &parent->nodes[node_index];
     parent->children[parent->children_count] = child;
     parent->children_count++;
+    layout_refresh(child);
     return child;
 }
