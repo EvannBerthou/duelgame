@@ -96,6 +96,8 @@ typedef struct tagMSG *LPMSG;
         send_packet(PACKET_FUNC, server_fd); \
     } while (0)
 
+#define NSTR(STRUCT) TextFormat("%.*s", STRUCT.len, STRUCT.str)
+
 extern const spell all_spells[];
 extern const int spell_count;
 extern const char *wall_frames[];
@@ -181,8 +183,8 @@ card player_info_card = CARD(665, 150, card_width, 550, UI_NORD, "Spells", "Stat
 
 input_buf ip_buf = {.prefix = "IP", .max_length = 32};
 input_buf port_buf = {.prefix = "Port", .max_length = 6};
-input_buf password_buf = {.prefix = "Password", .max_length = 8};
-input_buf username_buf = {.prefix = "Username", .max_length = 8};
+input_buf password_buf = {.prefix = "Password", .max_length = 32};
+input_buf username_buf = {.prefix = "Username", .max_length = 32};
 button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
 
 // Build loading/saving
@@ -513,7 +515,7 @@ void update_console() {
                 if (result.content == NULL) {
                     LOGL(LL_ERROR, "Error creating packet");
                 } else {
-                    //send_serv(result.type, result.content, server_fd);
+                    // send_serv(result.type, result.content, server_fd);
                 }
                 free(result.content);
             }
@@ -1686,9 +1688,8 @@ void handle_packet(net_packet *p) {
         last_ping = ping->recieve_time - ping->send_time;
     } else if (p->type == PKT_PLAYER_JOINED) {
         net_packet_player_joined *join = (net_packet_player_joined *)p->content;
-        LOG("Joined: %.*s with ID=%d", 8, join->username, join->id);
-        memcpy(players[join->id].info.name, join->username, 8);
-        players[join->id].info.name[8] = '\0';
+        LOG("Joined: %s with ID=%d", NSTR(join->username), join->id);
+        memcpy(players[join->id].info.name, join->username.str, join->username.len);
         players[join->id].info.connected = true;
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
@@ -2628,7 +2629,7 @@ int main(int argc, char **argv) {
     ui = LoadRenderTexture(WIDTH, HEIGHT);
 
     if (username == NULL) {
-        username = TextFormat("User %d", rand());
+        username = TextFormat("User %d", rand() % 200);
     }
 
     load_assets();

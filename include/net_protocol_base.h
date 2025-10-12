@@ -17,18 +17,23 @@ typedef struct {
 #endif
 
 typedef struct {
+    uint8_t len;
+    char str[255];
+} network_string;
+
+typedef struct {
     uint64_t send_time;
     uint64_t recieve_time;
 } net_packet_ping;
 
 typedef struct {
-    char username[8];
-    char password[8];
+    network_string username;
+    network_string password;
 } net_packet_join;
 
 typedef struct {
     uint8_t id;
-    char username[8];
+    network_string username;
 } net_packet_player_joined;
 
 typedef struct {

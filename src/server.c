@@ -21,6 +21,8 @@ void handle_player_disconnect(int fd);
         for (player_info *P = &players[iterator]; P != NULL && P->connected; P = NULL) \
             if (1)
 
+#define NSTR(STRUCT) STRUCT.len, STRUCT.str
+
 extern const spell all_spells[];
 
 // Server management
@@ -425,8 +427,8 @@ void handle_message(int fd) {
     } else if (p.type == PKT_JOIN) {
         net_packet_join *j = (net_packet_join *)p.content;
 
-        if (server_password != NULL && strncmp(server_password, j->password, 8) != 0) {
-            LOG("Wrong password for %.8s => '%.8s'", j->username, j->password);
+        if (server_password != NULL && strncmp(server_password, j->password.str, strlen(server_password)) != 0) {
+            LOG("Wrong password for %.*s => '%.*s'", NSTR(j->username), NSTR(j->password));
             char msg[128] = {0};
             strncpy(msg, "Wrong password", 128);
             net_packet msg_p = pkt_server_message(LL_ERROR, msg);
@@ -447,8 +449,7 @@ void handle_message(int fd) {
         }
         assert(new_player_id != -1);
 
-        memcpy(players[new_player_id].name, j->username, 8);
-        players[new_player_id].name[8] = '\0';
+        memcpy(players[new_player_id].name, j->username.str, j->username.len);
         LOG("New player %s joined with ID=%d", players[new_player_id].name, new_player_id);
 
         // We refresh player list for everyone
@@ -684,6 +685,7 @@ int main(int argc, char **argv) {
             }
         } else if (strcmp(arg, "--pass") == 0) {
             server_password = POPARG(argc, argv);
+            LOG("Server password is %s", server_password);
         } else {
             LOG("Unknown arg : '%s'", arg);
         }

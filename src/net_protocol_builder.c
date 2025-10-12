@@ -12,6 +12,7 @@ typedef enum {
     TYPE_UINT8_ARRAY,
     TYPE_CHAR_ARRAY,
     TYPE_UINT64,
+    TYPE_STRING,
     TYPE_CUSTOM,
 } net_struct_field_type;
 
@@ -53,6 +54,8 @@ int get_field_size(struct_field *f) {
                 return get_struct_size(&structs[i]);
             }
         }
+    } else if (f->type == TYPE_STRING) {
+        return 0;
     } else {
         printf("Unknown field\n");
         exit(1);
@@ -212,8 +215,19 @@ void parse_struct(stb_lexer *l) {
                     expect_next_token_char(l, ']');
                 }
             } else {
-                fprintf(stderr, "Structure %s does not exists\n", l->string);
-                exit(1);
+                if (strcmp(l->string, "network_string") == 0) {
+                    f->type = TYPE_STRING;
+                    expect_next_token(l, CLEX_id);
+                    f->name = strdup(l->string);
+                    s->variable_size = 1;
+                    f->size = calloc(100, 1);
+                    strcat((char *)f->size, "s->");
+                    strcat((char *)f->size, f->name);
+                    strcat((char *)f->size, ".len + 1");
+                } else {
+                    fprintf(stderr, "Structure %s does not exists\n", l->string);
+                    exit(1);
+                }
             }
         }
 
@@ -229,7 +243,8 @@ void parse_struct(stb_lexer *l) {
         s->field_count++;
     }
     expect_next_token(l, CLEX_id);
-    if (strcmp(l->string, "net_packet") == 0) {
+    if (strcmp(l->string, "net_packet") == 0 || strcmp(l->string, "network_string") == 0) {
+        fprintf(stderr, "skipping %s\n", l->string);
         s->field_count = 0;
         return;
     }
@@ -301,6 +316,11 @@ int main(void) {
                 printf("uint64_t %s", f->name);
             } else if (f->type == TYPE_CUSTOM) {
                 printf("%s *%s", f->custom_type, f->name);
+            } else if (f->type == TYPE_STRING) {
+                printf("const char *%s", f->name);
+            } else {
+                fprintf(stderr, "Unknown type for signature\n");
+                exit(1);
             }
 
             if (j != s->field_count - 1) {
@@ -356,6 +376,11 @@ int main(void) {
                 printf("uint64_t %s", f->name);
             } else if (f->type == TYPE_CUSTOM) {
                 printf("%s *%s", f->custom_type, f->name);
+            } else if (f->type == TYPE_STRING) {
+                printf("const char *%s", f->name);
+            } else {
+                fprintf(stderr, "Unkown type for builder %s\n", f->name);
+                exit(1);
             }
             if (j != s->field_count - 1) {
                 printf(", ");
@@ -380,12 +405,18 @@ int main(void) {
                 printf("    for (int i = 0; i < %s; i++) {\n", f->array_size_str);
                 printf("        s.%s[i] = %s[i];\n", f->name, f->name);
                 printf("    }\n");
+            } else if (f->type == TYPE_STRING) {
+                printf("    s.%s.len = strlen(%s);\n", f->name, f->name);
+                printf("    memcpy(s.%s.str, %s, s.%s.len);\n", f->name, f->name, f->name);
+            } else {
+                fprintf(stderr, "Unknown type for %s\n", f->name);
+                exit(1);
             }
         }
         printf("    net_packet result = {0};\n");
         printf("    result.type = PKT_%s;\n", struct_upper(s));
         printf("    result.len = get_packet_length(PKT_%s, &s);\n", struct_upper(s));
-        printf("    memcpy(result.content, &s, result.len);\n");
+        printf("    memcpy(result.content, &s, sizeof(%s));\n", s->name);
         printf("    return result;\n");
         printf("}\n");
     }
@@ -427,6 +458,12 @@ int main(void) {
                         printf("TODO %d", __LINE__);
                         exit(1);
                     }
+                } else if (f->type == TYPE_STRING) {
+                    printf("            buf = packu8(buf, s->%s.len);\n", f->name);
+                    printf("            buf = packsv(buf, s->%s.str, s->%s.len);\n", f->name, f->name);
+                } else {
+                    fprintf(stderr, "Unknown type to pack %s\n", f->name);
+                    exit(1);
                 }
             }
         }
@@ -441,7 +478,7 @@ int main(void) {
     printf("uint64_t unpacku64(uint8_t **buf);\n");
     printf("void unpacksv(uint8_t **buf, char *dest, uint8_t len);\n");
 
-    printf("void *unpackstruct(net_packet_type_enum type, uint8_t *buf) {\n");
+    printf("void *unpackstruct(net_packet_type_enum type, uint8_t *buf, uint8_t *out) {\n");
     printf("    uint8_t **base = &buf;\n");
     printf("    switch (type) {\n");
     for (int i = 0; i < structs_count; i++) {
@@ -450,7 +487,7 @@ int main(void) {
             printf("        case PKT_%s: return NULL;\n", struct_upper(s));
         } else {
             printf("        case PKT_%s: {\n", struct_upper(s));
-            printf("            %s *s = malloc(sizeof(%s));\n", s->name, s->name);
+            printf("            %s *s = (%s*)out;\n", s->name, s->name);
             printf("            if (s == NULL) exit(1);\n");
             for (int j = 0; j < s->field_count; j++) {
                 struct_field *f = &s->fields[j];
@@ -472,19 +509,22 @@ int main(void) {
                 } else if (f->type == TYPE_CUSTOM) {
                     if (f->array_size_str != NULL) {
                         printf("            for (int i = 0; i < %s; i++) {\n", f->array_size_str);
-                        printf("                void *res = unpackstruct(PKT_%s, *base);\n",
-                               struct_upper_str(f->custom_type));
-                        printf("                s->%s[i] = *(%s*)res;\n", f->name, f->custom_type);
-                        printf("                free(res);\n");
-                        printf("                *base += sizeof(%s);\n", f->custom_type);
+                        printf("                base = unpackstruct(PKT_%s, *base, (void*)&s->%s[i]);\n",
+                               struct_upper_str(f->custom_type), f->name);
                         printf("            }\n");
                     } else {
                         printf("TODO %d", __LINE__);
                         exit(1);
                     }
+                } else if (f->type == TYPE_STRING) {
+                    printf("            s->%s.len = unpacku8(base);\n", f->name);
+                    printf("            unpacksv(base, s->%s.str, s->%s.len);\n", f->name, f->name);
+                } else {
+                    fprintf(stderr, "Unknown type to unpack %s\n", f->name);
+                    exit(1);
                 }
             }
-            printf("            return s;\n");
+            printf("            return base;\n");
             printf("        } break;\n");
         }
     }

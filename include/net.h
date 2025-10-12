@@ -74,8 +74,7 @@ uint64_t unpacku64(uint8_t** buf) {
 
 void unpacksv(uint8_t** buf, char* dest, uint8_t len) {
     for (int i = 0; i < len; i++) {
-        dest[i] = **buf;
-        (*buf)++;
+        dest[i] = unpacku8(buf);
     }
 }
 
@@ -149,12 +148,7 @@ int packet_read(net_packet* p, int fd) {
 
     uint8_t* base = buf;
     p->type = unpacku8(&base);
-    // TODO: Avoid allocation
-    void* content = unpackstruct(p->type, base);
-    if (content) {
-        memcpy(p->content, content, p->len);
-    }
-    free(content);
+    unpackstruct(p->type, base, p->content);
     return 0;
 }
 
