@@ -2580,18 +2580,17 @@ bool load_editor(const char *filename) {
 layout root_layout = {.type = LT_HORIZONTAL,
                       .width = LAYOUT_FIT_CONTAINER,
                       .height = LAYOUT_FIT_CONTAINER,
-                      .padding = {50, 50, 50, 50},
-                      .spacing = 75};
+                      .padding = {150, 50, 50, 50},
+                      .spacing = 50};
 
 card test_c1 = CARD(0, 0, 0, 0, UI_NORD, "Test");
-card test_c2 = CARD(0, 0, 0, 0, UI_GREEN, "");
+card test_c2 = CARD(0, 0, 0, 0, UI_NORD, "Build");
 
 button test_b1 = BUTTON_COLOR(0, 0, 0, 0, UI_RED, "BOUTON 1", 18);
 button test_b2 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "BOUTON 2", 18);
 
-slider test_slider = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
+slider test_slider = {{0, 0, 0, 0}, UI_RED, 100, 0, 0};
 slider test_slider2 = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
-button test_b3 = BUTTON_COLOR(0, 0, 0, 75, UI_BEIGE, "BOUTON 3", 18);
 
 ui_empty empty1 = {0};
 ui_empty empty2 = {0};
@@ -2599,6 +2598,14 @@ ui_empty empty3 = {0};
 ui_empty empty4 = {0};
 ui_empty empty5 = {0};
 ui_empty empty6 = {0};
+ui_empty empty7 = {0};
+ui_empty empty8 = {0};
+ui_empty empty9 = {0};
+ui_empty empty10 = {0};
+
+input_buf input_i1 = (input_buf){.prefix = "Path"};
+button test_b3 = BUTTON_COLOR(0, 0, 0, 0, UI_RED, "Load", 32);
+button test_b4 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Save", 32);
 
 void init_scene_experimentations() {
     layout_push(&root_layout, UI_CARD, &test_c1, DEFAULT_UI_SPECS);
@@ -2608,7 +2615,7 @@ void init_scene_experimentations() {
                                     (layout){.type = LT_VERTICAL,
                                              .width = LAYOUT_FIT_CONTAINER,
                                              .height = LAYOUT_FIT_CONTAINER,
-                                             .padding = {100, 25, 25, 25},
+                                             .padding = {50, 25, 25, 25},
                                              .spacing = 15});
 
     layout_push(n1, UI_BUTTON, &test_b1, DEFAULT_UI_SPECS);
@@ -2618,22 +2625,35 @@ void init_scene_experimentations() {
         &root_layout, 1,
         (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE, .spacing = 25});
 
-    ui_node_specs s1 = {.height = {75, UNIT_PERCENT}};
-    layout_push(n2, UI_EMPTY, &empty1, s1);
-
-    ui_node_specs s2 = {.height = {25, UNIT_PERCENT}};
-    layout_push(n2, UI_EMPTY, &empty2, s2);
+    layout_push(n2, UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(75)));
+    layout_push(n2, UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(25)));
 
     layout *n21 = layout_push_layout(n2, 0,
                                      (layout){.type = LT_VERTICAL,
                                               .width = LAYOUT_FIT_CONTAINER,
                                               .height = LAYOUT_FIT_CONTAINER,
                                               .spacing = 50,
-                                              .padding = {0}});
+                                              .padding = {50, 25, 25, 25}});
+
     layout_push(n21, UI_EMPTY, &empty3, DEFAULT_UI_SPECS);
-    layout_push(n21, UI_EMPTY, &empty4, DEFAULT_UI_SPECS);
     layout_push(n21, UI_EMPTY, &empty5, DEFAULT_UI_SPECS);
+    layout_push(n21, UI_SLIDER, &test_slider, DEFAULT_UI_SPECS);
     layout_push(n21, UI_EMPTY, &empty6, DEFAULT_UI_SPECS);
+
+    layout *n22 = layout_push_layout(n2, 1,
+                                     (layout){.type = LT_HORIZONTAL,
+                                              .width = LAYOUT_FREE,
+                                              .height = LAYOUT_FIT_CONTAINER,
+                                              .spacing = 3,
+                                              .padding = {24, 25, 24, 25}});
+    layout_push(n22, UI_INPUT, &input_i1, UI_NODE_SPEC(.width = PERCENT(50)));
+    layout_push(n22, UI_BUTTON, &test_b3, UI_NODE_SPEC(.width = PERCENT(25)));
+    layout_push(n22, UI_BUTTON, &test_b4, UI_NODE_SPEC(.width = PERCENT(25)));
+
+    // TODO: Should be valid
+    //  layout_push(n22, UI_INPUT, &input_i1, (ui_node_specs){.width = {50, UNIT_PERCENT}, .height = {75, UNIT_PX}});
+    //  layout_push(n22, UI_BUTTON, &test_b3, (ui_node_specs){.width = {25, UNIT_PERCENT}, .height = {75, UNIT_PX}});
+    //  layout_push(n22, UI_BUTTON, &test_b4, (ui_node_specs){.width = {25, UNIT_PERCENT}, .height = {75, UNIT_PX}});
 }
 
 void update_scene_experimentations() {
@@ -2726,6 +2746,9 @@ int main(int argc, char **argv) {
     while (!WindowShouldClose()) {
         step_animations();
         update_console();
+        if (IsKeyPressed(KEY_F3)) {
+            toggle_layout_debug_render();
+        }
         if (connected) {
             ping_counter -= GetFrameTime();
             if (ping_counter <= 0) {

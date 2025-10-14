@@ -9,7 +9,7 @@ include/net_protocol.h: build/net_protocol_builder include/net_protocol_base.h
 	./build/net_protocol_builder > ./include/net_protocol.h
 
 build/main_game: src/main.c src/ui.c src/common.c src/command.c include/net_protocol.h
-	gcc -Wall -Wextra -Warray-bounds \
+	gcc -Wall -Wextra -Warray-bounds -Wno-override-init-side-effects -Wno-initializer-overrides \
 		src/main.c src/common.c src/ui.c src/command.c -o build/main_game \
 		-DLOG_PREFIX=\"GAME\" -DDEBUG \
 		-I./include -L ./lib/linux -lraylib -lm -ggdb -lpthread

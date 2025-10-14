@@ -228,12 +228,17 @@ typedef struct {
     ui_unit unit;
 } ui_spec_value;
 
+#define FIT (ui_spec_value){.value = 0, .unit = UNIT_FIT}
+#define PX(x) (ui_spec_value){.value = x, .unit = UNIT_PX}
+#define PERCENT(x) (ui_spec_value){.value = x, .unit = UNIT_PERCENT}
+
 typedef struct {
     ui_spec_value width;
     ui_spec_value height;
 } ui_node_specs;
 
 #define DEFAULT_UI_SPECS (ui_node_specs){0}
+#define UI_NODE_SPEC(...) (ui_node_specs){.width = FIT, .height = FIT, __VA_ARGS__}
 
 typedef struct {
     Rectangle rec;
@@ -263,5 +268,6 @@ void layout_refresh(layout* l);
 void layout_push(layout* l, ui_type type, void* data, ui_node_specs specs);
 void layout_render(layout* l);
 layout* layout_push_layout(layout* parent, int node_index, layout base);
+void toggle_layout_debug_render();
 
 #endif

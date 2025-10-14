@@ -21,6 +21,8 @@ extern Vector2 get_mouse();
 
 // Utils
 
+const char *ui_type_name[] = {"Empty", "Input", "Button", "Slider", "Button slider", "Card", "Icon", "Picker"};
+
 const char *extract_raw_string(const char *s) {
     if (s == NULL) {
         return "";
@@ -473,6 +475,7 @@ void button_render(button *b) {
 
 // Slider
 
+// TODO: Clicking on a slider should set its value (can be disabled)
 bool slider_decrement(slider *s) {
     if (s->value == 0 || is_console_open()) {
         return false;
@@ -845,42 +848,46 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
     Rectangle *rec = (Rectangle *)l->nodes[node_index].data;
 
     if (l->type == LT_HORIZONTAL) {
-        int node_width = (l->layout_rec.width - l->spacing) / l->node_count;
         rec->y = l->layout_rec.y;
-        rec->width = node_width;
+        rec->height = l->layout_rec.height;
 
-        if (l->height != LAYOUT_FREE) {
+        if (l->width != LAYOUT_FREE) {
+            float node_width = (l->layout_rec.width - (l->spacing * (l->node_count - 1))) / l->node_count;
+            if (l->node_count == 1) {
+                node_width = l->layout_rec.width;
+            }
             rec->x = l->layout_rec.x + (node_width + l->spacing) * node_index;
-            rec->height = l->layout_rec.height;
+            rec->width = node_width;
         } else {
             rec->x = l->layout_rec.x + free_progress;
-            if (rec->x >= l->layout_rec.width) {
-                LOGL(LL_DEBUG, "UI element is at x=%f but layout width is %f", rec->x, l->layout_rec.width);
+            int width = layout_get_node_progress(l, l->nodes[node_index].specs.width);
+            rec->width = width;
+            if (free_progress + rec->width > l->layout_rec.width) {
+                LOGL(LL_DEBUG, "UI node ends=%f but width=%f", free_progress + rec->width, l->layout_rec.width);
             }
-            free_progress += rec->width + l->spacing;
+            free_progress += width + l->spacing;
         }
     } else if (l->type == LT_VERTICAL) {
-        float node_height = (l->layout_rec.height - (l->spacing * (l->node_count - 1))) / l->node_count;
-        LOG("layout height = %f node_height = %f", l->layout_rec.height, node_height);
-        if (l->node_count == 1) {
-            node_height = l->layout_rec.height;
-        }
-
         rec->x = l->layout_rec.x;
         rec->width = l->layout_rec.width;
 
         if (l->height != LAYOUT_FREE) {
+            float node_height = (l->layout_rec.height - (l->spacing * (l->node_count - 1))) / l->node_count;
+            if (l->node_count == 1) {
+                node_height = l->layout_rec.height;
+            }
+
             rec->y = l->layout_rec.y + (node_height + l->spacing) * node_index;
-            LOG("Rendering at offset %f", rec->y - l->layout_rec.y);
             rec->height = node_height;
         } else {
             rec->y = l->layout_rec.y + free_progress;
-            if (rec->y >= l->layout_rec.height) {
-                LOGL(LL_DEBUG, "UI element is at y=%f but layout height is %f", rec->y, l->layout_rec.height);
-            }
-
             int height = layout_get_node_progress(l, l->nodes[node_index].specs.height);
             rec->height = height;
+
+            if (free_progress + rec->height > l->layout_rec.height) {
+                LOGL(LL_DEBUG, "UI node ends=%f but layout height=%f", free_progress + rec->y, l->layout_rec.height);
+            }
+
             free_progress += height + l->spacing;
         }
     }
@@ -914,7 +921,7 @@ void layout_refresh(layout *l) {
         l->layout_rec.height = l->parent == NULL ? HEIGHT : l->parent->rec.height;
     }
 
-    if (l->width == LAYOUT_FIT_CONTAINER) {
+    if (l->width == LAYOUT_FIT_CONTAINER || l->width == LAYOUT_FREE) {
         l->layout_rec.width = l->parent == NULL ? WIDTH : l->parent->rec.width;
     }
 
@@ -942,42 +949,93 @@ void layout_push(layout *l, ui_type type, void *data, ui_node_specs specs) {
     layout_refresh(l);
 }
 
-void layout_render(layout *l) {
-    for (int i = 0; i < l->node_count; i++) {
-        void *data = l->nodes[i].data;
-        switch (l->nodes[i].node_type) {
-            case UI_INPUT:
-                input_render(data, 0);
-                break;
-            case UI_BUTTON:
-                button_render(data);
-                break;
-            case UI_SLIDER:
-                slider_render(data);
-                break;
-            case UI_BUTON_SLIDER:
-                buttoned_slider_render(data);
-                break;
-            case UI_CARD:
-                card_render(data);
-                break;
-            case UI_ICON:
-                LOGL(LL_ERROR, "UI_ICON render call not implemetend in layout");
-                // icon_render(data);
-                break;
-            case UI_PICKER:
-                picker_render(data);
-                break;
-            case UI_EMPTY:
+Rectangle deepest_rectangle = {0};
+
+static void layout_node_debug(layout_node *node) {
+    if (is_hover(node->rec)) {
+        deepest_rectangle = node->rec;
+        set_tooltip(get_mouse(), "Layout Node Debug",
+                    TextFormat("Type=%s\nx=%0.f\ny=%0.f\nwidth=%0.f\nheight=%0.f\n", ui_type_name[node->node_type],
+                               node->rec.x, node->rec.y, node->rec.width, node->rec.height));
+    }
+}
+
+bool layout_debug = true;
+
+static void render_node(layout_node *node) {
+    void *data = node->data;
+    switch (node->node_type) {
+        case UI_INPUT:
+            input_render(data, 0);
+            break;
+        case UI_BUTTON:
+            button_render(data);
+            break;
+        case UI_SLIDER:
+            slider_render(data);
+            break;
+        case UI_BUTON_SLIDER:
+            buttoned_slider_render(data);
+            break;
+        case UI_CARD:
+            card_render(data);
+            break;
+        case UI_ICON:
+            LOGL(LL_ERROR, "UI_ICON render call not implemetend in layout");
+            // icon_render(data);
+            break;
+        case UI_PICKER:
+            picker_render(data);
+            break;
+        case UI_EMPTY:
+            if (layout_debug) {
                 DrawRectangleLinesEx(*(Rectangle *)(data), 5, BLUE);
-                break;
-        }
+            }
+            break;
+    }
+}
+
+static void layout_render_no_debug(layout *l) {
+    for (int i = 0; i < l->node_count; i++) {
+        render_node(&l->nodes[i]);
+    }
+
+    for (int i = 0; i < l->children_count; i++) {
+        layout_render_no_debug(l->children[i]);
+    }
+}
+
+static void layout_render_debug(layout *l) {
+    if (is_hover(l->layout_rec)) {
+        deepest_rectangle = l->layout_rec;
+        set_tooltip(get_mouse(), "Layout Node Debug",
+                    TextFormat("Type=Layout\nx=%0.f\ny=%0.f\nwidth=%0.f\nheight=%0.f\n", l->layout_rec.x,
+                               l->layout_rec.y, l->layout_rec.width, l->layout_rec.height));
+    }
+
+    for (int i = 0; i < l->node_count; i++) {
+        render_node(&l->nodes[i]);
+        layout_node_debug(&l->nodes[i]);
     }
     DrawRectangleLinesEx(l->layout_rec, 1, GREEN);
     DrawRectangleLinesEx(l->layout_rec, 1, RED);
 
     for (int i = 0; i < l->children_count; i++) {
-        layout_render(l->children[i]);
+        layout_render_debug(l->children[i]);
+    }
+}
+
+static void layout_render_debug_wrapper(layout *l) {
+    deepest_rectangle = (Rectangle){0};
+    layout_render_debug(l);
+    DrawRectangleRec(deepest_rectangle, GetColor(0x18181868));
+}
+
+void layout_render(layout *l) {
+    if (layout_debug) {
+        layout_render_debug_wrapper(l);
+    } else {
+        layout_render_no_debug(l);
     }
 }
 
@@ -997,4 +1055,8 @@ layout *layout_push_layout(layout *parent, int node_index, layout base) {
     parent->children_count++;
     layout_refresh(child);
     return child;
+}
+
+void toggle_layout_debug_render() {
+    layout_debug = !layout_debug;
 }

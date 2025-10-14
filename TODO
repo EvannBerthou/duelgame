@@ -15,6 +15,7 @@
 - Moving should be an animation just like spell casting
     - Animations should include a path instead of just a cell
 - The editor should only be loadable on the main menu
+- Replace old ui with new layout system
 
 - Anti-cheat
     - Check server side that moves are valid
