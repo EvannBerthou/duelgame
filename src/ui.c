@@ -989,7 +989,7 @@ static void render_node(layout_node *node) {
             break;
         case UI_EMPTY:
             if (layout_debug) {
-                DrawRectangleLinesEx(*(Rectangle *)(data), 5, BLUE);
+                DrawRectangleLinesEx(node->rec, 5, BLUE);
             }
             break;
     }

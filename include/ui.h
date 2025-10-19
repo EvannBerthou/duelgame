@@ -110,6 +110,9 @@ typedef struct {
 #define BUTTON_COLOR(x, y, w, h, color, text, font_size) \
     BUTTON(x, y, w, h, BT_COLOR, color, {0}, text, font_size)
 
+#define BUTTON_COLOR2(color, text, font_size) \
+    BUTTON(0, 0, 0, 0, BT_COLOR, color, {0}, text, font_size)
+
 #define BUTTON_TEXTURE(x, y, w, h, texture, text, font_size) \
     BUTTON(x, y, w, h, BT_TEXTURE, WHITE, texture, text, font_size)
 
@@ -172,8 +175,8 @@ bool card_tab_clicked(card* c, int tab);
 void card_update_tabs(card* c);
 void card_render(card* c);
 
-#define CARD(x, y, w, h, c, ...)                                     \
-    ((card){.rec = (Rectangle){x, y, w, h},                          \
+#define CARD(c, ...)                                                 \
+    ((card){.rec = (Rectangle){0},                                   \
             .color = (c),                                            \
             .tabs = {__VA_ARGS__},                                   \
             .tab_count = ((int)(sizeof((char*[]){__VA_ARGS__}) /     \
@@ -228,9 +231,18 @@ typedef struct {
     ui_unit unit;
 } ui_spec_value;
 
-#define FIT (ui_spec_value){.value = 0, .unit = UNIT_FIT}
-#define PX(x) (ui_spec_value){.value = x, .unit = UNIT_PX}
-#define PERCENT(x) (ui_spec_value){.value = x, .unit = UNIT_PERCENT}
+#define FIT                          \
+    (ui_spec_value) {                \
+        .value = 0, .unit = UNIT_FIT \
+    }
+#define PX(x)                       \
+    (ui_spec_value) {               \
+        .value = x, .unit = UNIT_PX \
+    }
+#define PERCENT(x)                       \
+    (ui_spec_value) {                    \
+        .value = x, .unit = UNIT_PERCENT \
+    }
 
 typedef struct {
     ui_spec_value width;
@@ -238,7 +250,10 @@ typedef struct {
 } ui_node_specs;
 
 #define DEFAULT_UI_SPECS (ui_node_specs){0}
-#define UI_NODE_SPEC(...) (ui_node_specs){.width = FIT, .height = FIT, __VA_ARGS__}
+#define UI_NODE_SPEC(...)                        \
+    (ui_node_specs) {                            \
+        .width = FIT, .height = FIT, __VA_ARGS__ \
+    }
 
 typedef struct {
     Rectangle rec;

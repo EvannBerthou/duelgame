@@ -117,8 +117,6 @@ queue pkt_queue;
 // Console
 bool console_open = false;
 int log_base = 0;
-// char console_input[CONSOLE_INPUT_MAX_LENGTH] = {0};
-// int console_input_cursor = 0;
 input_buf console_buf = {.max_length = 256};
 
 // Scenes
@@ -172,6 +170,11 @@ Sound raindrop_sound = {0};
 
 // UI
 //   Main menu
+layout main_menu_root_layout = {.type = LT_HORIZONTAL,
+                                .width = LAYOUT_FIT_CONTAINER,
+                                .height = LAYOUT_FIT_CONTAINER,
+                                .padding = {150, 50, 50, 50},
+                                .spacing = 50};
 buttoned_slider health_slider = {0};
 buttoned_slider strength_slider = {0};
 buttoned_slider speed_slider = {0};
@@ -179,29 +182,29 @@ buttoned_slider *stat_sliders[] = {&health_slider, &strength_slider, &speed_slid
 const int stat_sliders_count = (int)(sizeof(stat_sliders) / sizeof(stat_sliders[0]));
 
 const int card_width = (WIDTH - 150) / 2;
-card server_info_card = CARD(50, 150, card_width, 550, UI_NORD, "Server");
-card player_info_card = CARD(665, 150, card_width, 550, UI_NORD, "Spells", "Stats");
+card server_info_card = CARD(UI_NORD, "Server");
+card player_info_card = CARD(UI_NORD, "Spells", "Stats");
 
 input_buf ip_buf = {.prefix = "IP", .max_length = 32};
 input_buf port_buf = {.prefix = "Port", .max_length = 6};
 input_buf password_buf = {.prefix = "Password", .max_length = 32};
 input_buf username_buf = {.prefix = "Username", .max_length = 32};
-button confirm_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Connect", 32);
+button confirm_button = BUTTON_COLOR2(UI_GREEN, "Connect", 32);
 
 // Build loading/saving
 input_buf build_filepath = {.max_length = 10};
-button build_load_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Load", 32);
-button build_save_button = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Save", 32);
+button build_load_button = BUTTON_COLOR2(UI_GREEN, "Load", 32);
+button build_save_button = BUTTON_COLOR2(UI_GREEN, "Save", 32);
 
 input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf, &build_filepath};
 
 //   Lobby
-card player_list_card = CARD(50, 150, card_width, 550, UI_NORD, "Player list");
-card server_config_card = CARD(665, 150, card_width, 550, UI_NORD, "Configuration");
+card player_list_card = CARD(UI_NORD, "Player list");
+card server_config_card = CARD(UI_NORD, "Configuration");
 button start_game_button = BUTTON_COLOR(75, 600, card_width - 50, 75, UI_GREEN, "Start Game", 36);
 
 button player_build_buttons[MAX_PLAYER_COUNT] = {0};
-card player_build_card = CARD(50, 150, WIDTH - 100, 550, UI_NORD, "Player build");
+card player_build_card = CARD(UI_NORD, "Player build");
 button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, "X", 46);
 int selected_player_build = -1;
 
@@ -1891,18 +1894,48 @@ bool join_game(const char *ip, int port, const char *username) {
 
 // Scenes
 //   Main menu
+ui_empty empty1 = {0};
+ui_empty empty2 = {0};
+ui_empty empty3 = {0};
 void init_scene_main_menu(const char *username) {
+    layout_push(&main_menu_root_layout, UI_CARD, &server_info_card, DEFAULT_UI_SPECS);
+    layout_push(&main_menu_root_layout, UI_CARD, &player_info_card, DEFAULT_UI_SPECS);
+
+    layout *server_layout = layout_push_layout(&main_menu_root_layout, 0,
+                                               (layout){.type = LT_VERTICAL,
+                                                        .width = LAYOUT_FIT_CONTAINER,
+                                                        .height = LAYOUT_FIT_CONTAINER,
+                                                        .padding = {50, 15, 15, 15},
+                                                        .spacing = 15});
+    for (int i = 0; i < MAIN_MENU_INPUT_COUNT - 1; i++) {
+        layout_push(server_layout, UI_INPUT, inputs[i], DEFAULT_UI_SPECS);
+    }
+    layout_push(server_layout, UI_BUTTON, &confirm_button, DEFAULT_UI_SPECS);
+
+    layout *player_info_layout = layout_push_layout(&main_menu_root_layout, 1,
+                                                    (layout){.type = LT_VERTICAL,
+                                                             .width = LAYOUT_FIT_CONTAINER,
+                                                             .height = LAYOUT_FREE,
+                                                             .padding = {50, 15, 15, 15},
+                                                             .spacing = 15});
+
+    layout_push(player_info_layout, UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(75)));
+    layout_push(player_info_layout, UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(25)));
+
+    layout *build_layout = layout_push_layout(player_info_layout, 1,
+                                              (layout){.type = LT_HORIZONTAL,
+                                                       .width = LAYOUT_FREE,
+                                                       .height = LAYOUT_FIT_CONTAINER,
+                                                       .padding = {24, 25, 24, 25},
+                                                       .spacing = 3});
+
+    layout_push(build_layout, UI_EMPTY, &empty3, UI_NODE_SPEC(.width = PERCENT(50)));
+    layout_push(build_layout, UI_BUTTON, &build_load_button, UI_NODE_SPEC(.width = PERCENT(25)));
+    layout_push(build_layout, UI_BUTTON, &build_save_button, UI_NODE_SPEC(.width = PERCENT(25)));
+
     input_set_text(&ip_buf, "127.0.0.1");
     input_set_text(&port_buf, "3000");
     input_set_text(&username_buf, username);
-
-    for (int i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-        inputs[i]->rec = (Rectangle){server_info_card.rec.x + 8, server_info_card.rec.y + 75 + 60 * i,
-                                     server_info_card.rec.width - 25, 50};
-    }
-    confirm_button.rec =
-        (Rectangle){server_info_card.rec.x + 25, server_info_card.rec.y + server_info_card.rec.height - 100,
-                    server_info_card.rec.width - 50, 75};
 
     spell_select_buttons = malloc(sizeof(button) * spell_count);
     spell_selection = malloc(sizeof(bool) * spell_count);
@@ -1943,11 +1976,6 @@ void init_scene_main_menu(const char *username) {
     if (build_filepath.ptr == 0) {
         input_set_text(&build_filepath, "build01");
     }
-    build_load_button.rec = (Rectangle){build_filepath.rec.x + build_filepath.rec.width, build_filepath.rec.y, quart,
-                                        build_filepath.rec.height};
-    build_save_button.rec = (Rectangle){build_load_button.rec.x + build_load_button.rec.width, build_filepath.rec.y,
-                                        quart, build_filepath.rec.height};
-
     load_build(TextFormat("%s.build", input_to_text(&build_filepath)));
 }
 
@@ -2087,13 +2115,8 @@ void render_scene_main_menu() {
     DrawText(version_text, WIDTH - version_width, 0, 24, LIGHTGRAY);
     int title_center = get_width_center((Rectangle){0, 0, WIDTH, 0}, "Duel Game", 64);
     DrawText("Duel Game", title_center, 32, 64, WHITE);
-    card_render(&server_info_card);
-    card_render(&player_info_card);
 
-    for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
-        input_render(inputs[i], i == selected_input);
-    }
-    button_render(&confirm_button);
+    layout_render(&main_menu_root_layout);
 
     if (player_info_card.selected_tab == 0) {
         int button_tooltip = -1;
@@ -2127,8 +2150,8 @@ void render_scene_main_menu() {
                  player_info_card.rec.y + 75, 32, WHITE);
     }
 
-    button_render(&build_load_button);
-    button_render(&build_save_button);
+    // button_render(&build_load_button);
+    // button_render(&build_save_button);
 }
 
 //   Lobby
@@ -2583,8 +2606,8 @@ layout root_layout = {.type = LT_HORIZONTAL,
                       .padding = {150, 50, 50, 50},
                       .spacing = 50};
 
-card test_c1 = CARD(0, 0, 0, 0, UI_NORD, "Test");
-card test_c2 = CARD(0, 0, 0, 0, UI_NORD, "Build");
+card test_c1 = CARD(UI_NORD, "Test");
+card test_c2 = CARD(UI_NORD, "Build");
 
 button test_b1 = BUTTON_COLOR(0, 0, 0, 0, UI_RED, "BOUTON 1", 18);
 button test_b2 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "BOUTON 2", 18);
@@ -2592,9 +2615,6 @@ button test_b2 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "BOUTON 2", 18);
 slider test_slider = {{0, 0, 0, 0}, UI_RED, 100, 0, 0};
 slider test_slider2 = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
 
-ui_empty empty1 = {0};
-ui_empty empty2 = {0};
-ui_empty empty3 = {0};
 ui_empty empty4 = {0};
 ui_empty empty5 = {0};
 ui_empty empty6 = {0};
