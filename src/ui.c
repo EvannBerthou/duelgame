@@ -550,16 +550,22 @@ bool buttoned_slider_increment(buttoned_slider *bs) {
     return true;
 }
 
-void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step) {
+void buttoned_slider_set_rec(buttoned_slider *bs, Rectangle rec) {
     bs->rec = rec;
 
     int height = rec.height;
     Rectangle slider = {rec.x + height, rec.y, rec.width - height * 2, height};
 
-    bs->minus = BUTTON_COLOR(rec.x, rec.y, height, height, UI_RED, "-", 28);
-    bs->plus = BUTTON_COLOR(rec.x + height + slider.width, rec.y, height, height, UI_GREEN, "+", 28);
-
     bs->slider.rec = slider;
+    bs->minus.rec = (Rectangle){rec.x, rec.y, height, height};
+    bs->plus.rec = (Rectangle){rec.x + height + slider.width, rec.y, height, height};
+}
+
+void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step) {
+    bs->minus = BUTTON_COLOR2(UI_RED, "-", 28);
+    bs->plus = BUTTON_COLOR2(UI_GREEN, "+", 28);
+
+    buttoned_slider_set_rec(bs, rec);
     bs->slider.color = WHITE;
     bs->slider.max = max;
     bs->slider.value = 0;
@@ -907,6 +913,11 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
         }
     }
     l->nodes[node_index].rec = *rec;
+
+    if (l->nodes[node_index].node_type == UI_BUTON_SLIDER) {
+        buttoned_slider_set_rec(l->nodes[node_index].data, *rec);
+    }
+
     return free_progress;
 }
 

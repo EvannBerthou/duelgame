@@ -223,6 +223,7 @@ typedef struct {
     int step;
 } buttoned_slider;
 
+void buttoned_slider_set_rec(buttoned_slider *bs, Rectangle rec);
 bool buttoned_slider_decrement(buttoned_slider* s);
 bool buttoned_slider_increment(buttoned_slider* s);
 void buttoned_slider_init(buttoned_slider* bs,

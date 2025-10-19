@@ -1958,17 +1958,20 @@ void init_scene_main_menu(const char *username) {
         }
     }
     {
-        int w = player_info_card.rec.width - 150;
-        int y = 125;
-        buttoned_slider_init(&health_slider,
-                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
-        y += 60;
-        buttoned_slider_init(&strength_slider,
-                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 100, 10);
-        y += 60;
-        buttoned_slider_init(&speed_slider,
-                             (Rectangle){player_info_card.rec.x + 125, player_info_card.rec.y + y, w, 50}, 30, 10);
+        buttoned_slider_init(&health_slider, (Rectangle){0}, 100, 10);
+        buttoned_slider_init(&strength_slider, (Rectangle){0}, 100, 10);
+        buttoned_slider_init(&speed_slider, (Rectangle){0}, 30, 10);
         speed_slider.slider.min = -30;
+
+        layout *stats_layout = layout_push_layout(&player_info_card.layouts[1], 0,
+                                                  (layout){.type = LT_VERTICAL,
+                                                           .width = LAYOUT_FIT_CONTAINER,
+                                                           .height = LAYOUT_FREE,
+                                                           .padding = {24, 25, 24, 25},
+                                                           .spacing = 5});
+        layout_push(stats_layout, UI_BUTON_SLIDER, &health_slider, UI_NODE_SPEC(.height = PX(50)));
+        layout_push(stats_layout, UI_BUTON_SLIDER, &strength_slider, UI_NODE_SPEC(.height = PX(50)));
+        layout_push(stats_layout, UI_BUTON_SLIDER, &speed_slider, UI_NODE_SPEC(.height = PX(50)));
     }
 
     if (build_filepath.ptr == 0) {
@@ -2017,7 +2020,6 @@ const char *try_join() {
 int get_total_stats() {
     int stat_total = 0;
     stat_total += health_slider.slider.value;
-    stat_total += strength_slider.slider.value;
     stat_total += strength_slider.slider.value;
     stat_total += fabs((float)speed_slider.slider.value);
     return stat_total;
@@ -2088,7 +2090,7 @@ void update_scene_main_menu() {
                 buttoned_slider_decrement(b);
             }
 
-            b->plus.disabled = (b->slider.value >= 0 && get_total_stats() + 10 > 200);
+            b->plus.disabled = b->slider.value >= 0 && get_total_stats() + 10 > 200;
             if (button_clicked(&b->plus)) {
                 buttoned_slider_increment(b);
             }
@@ -2122,41 +2124,32 @@ void render_scene_main_menu() {
 
     layout_render(&main_menu_root_layout);
 
-    // if (player_info_card.selected_tab == 0) {
-    //     int button_tooltip = -1;
-    //     int total = 0;
-    //     for (int i = 0; i < spell_count; i++) {
-    //         if (button_hover(&spell_select_buttons[i])) {
-    //             button_tooltip = i;
-    //         }
-    //         button_render(&spell_select_buttons[i]);
-    //         total += spell_selection[i] == true;
-    //     }
-    //     DrawText(TextFormat("Total : %d/%d", total, MAX_SPELL_COUNT), player_info_card.rec.x + 8,
-    //              server_info_card.rec.y + 75, 32, WHITE);
-    //     if (button_tooltip != -1) {
-    //         render_spell_tooltip(&all_spells[button_tooltip]);
-    //     }
-    // } else if (player_info_card.selected_tab == 1) {
-    //     DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8,
-    //     health_slider.rec.y,
-    //              32, WHITE);
-    //     buttoned_slider_render(&health_slider);
-    //
-    //     DrawText(TextFormat("STR", (int)strength_slider.slider.value), player_info_card.rec.x + 8,
-    //              strength_slider.rec.y, 32, WHITE);
-    //     buttoned_slider_render(&strength_slider);
-    //
-    //     DrawText(TextFormat("Speed", (int)speed_slider.slider.value), player_info_card.rec.x + 8, speed_slider.rec.y,
-    //              32, WHITE);
-    //     buttoned_slider_render(&speed_slider);
-    //
-    //     DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
-    //              player_info_card.rec.y + 75, 32, WHITE);
-    // }
+    if (player_info_card.selected_tab == 0) {
+        int button_tooltip = -1;
+        int total = 0;
+        for (int i = 0; i < spell_count; i++) {
+            if (button_hover(&spell_select_buttons[i])) {
+                button_tooltip = i;
+            }
+            button_render(&spell_select_buttons[i]);
+            total += spell_selection[i] == true;
+        }
+        DrawText(TextFormat("Total : %d/%d", total, MAX_SPELL_COUNT), player_info_card.rec.x + 8,
+                 server_info_card.rec.y + 75, 32, WHITE);
+        if (button_tooltip != -1) {
+            render_spell_tooltip(&all_spells[button_tooltip]);
+        }
+    }
 
-    // button_render(&build_load_button);
-    // button_render(&build_save_button);
+    DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8, health_slider.rec.y, 32,
+             WHITE);
+    DrawText(TextFormat("STR", (int)strength_slider.slider.value), player_info_card.rec.x + 8, strength_slider.rec.y,
+             32, WHITE);
+    DrawText(TextFormat("Speed", (int)speed_slider.slider.value), player_info_card.rec.x + 8, speed_slider.rec.y, 32,
+             WHITE);
+
+    DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
+             player_info_card.rec.y + 75, 32, WHITE);
 }
 
 //   Lobby
