@@ -39,6 +39,83 @@ typedef enum {
     UI_PICKER,
 } ui_type;
 
+// Layouts
+
+typedef enum {
+    LT_HORIZONTAL,
+    LT_VERTICAL,
+} layout_type;
+
+#define MAX_LAYOUT_NODES 8
+#define LAYOUT_FIT_CONTAINER 0xFFFFFF
+#define LAYOUT_CONTENT_FIT 0xFFFFFE
+#define LAYOUT_FREE 0xFFFFFD
+
+typedef enum {
+    UNIT_FIT,      // Fits the whole layout
+    UNIT_PERCENT,  // % of the current layout
+    UNIT_PX,       // Specific pixel count
+} ui_unit;
+
+typedef struct {
+    int value;
+    ui_unit unit;
+} ui_spec_value;
+
+#define FIT                          \
+    (ui_spec_value) {                \
+        .value = 0, .unit = UNIT_FIT \
+    }
+#define PX(x)                       \
+    (ui_spec_value) {               \
+        .value = x, .unit = UNIT_PX \
+    }
+#define PERCENT(x)                       \
+    (ui_spec_value) {                    \
+        .value = x, .unit = UNIT_PERCENT \
+    }
+
+typedef struct {
+    ui_spec_value width;
+    ui_spec_value height;
+} ui_node_specs;
+
+#define DEFAULT_UI_SPECS (ui_node_specs){0}
+#define UI_NODE_SPEC(...)                        \
+    (ui_node_specs) {                            \
+        .width = FIT, .height = FIT, __VA_ARGS__ \
+    }
+
+typedef struct {
+    Rectangle rec;
+    ui_type node_type;
+    ui_node_specs specs;
+    void* data;
+} layout_node;
+
+typedef struct layout {
+    layout_node* parent;
+    struct layout** children;
+    int children_count;
+    layout_type type;
+    Rectangle layout_rec;
+
+    int width;
+    int height;
+
+    int padding[4];
+    int spacing;
+
+    layout_node nodes[MAX_LAYOUT_NODES];
+    int node_count;
+} layout;
+
+void layout_refresh(layout* l);
+void layout_push(layout* l, ui_type type, void* data, ui_node_specs specs);
+void layout_render(layout* l);
+layout* layout_push_layout(layout* parent, int node_index, layout base);
+void toggle_layout_debug_render();
+
 // Empty UI Node
 
 typedef struct {
@@ -58,6 +135,7 @@ typedef struct {
     int origin;
     int selection_start;
     int selection_length;
+    bool active;
 } input_buf;
 
 typedef enum {
@@ -76,7 +154,7 @@ void input_set_text(input_buf* b, const char* s);
 bool input_is_blank(input_buf* b);
 void input_trim(input_buf* b);
 bool input_clicked(input_buf* b);
-void input_render(input_buf* b, int active);
+void input_render(input_buf* b);
 
 // Button
 
@@ -167,6 +245,8 @@ typedef struct {
     Color color;
     // Max 4 tabs for now
     const char* tabs[4];
+    layout_node node;
+    layout layouts[4];
     int tab_count;
     int selected_tab;
 } card;
@@ -174,6 +254,7 @@ typedef struct {
 bool card_tab_clicked(card* c, int tab);
 void card_update_tabs(card* c);
 void card_render(card* c);
+void card_layout_set_specs(card* c, int tab, layout specs);
 
 #define CARD(c, ...)                                                 \
     ((card){.rec = (Rectangle){0},                                   \
@@ -207,82 +288,5 @@ bool picker_clicked(picker* p);
 void picker_update_scroll(picker* p);
 void picker_render(picker* p);
 void clear_picker(picker* p);
-
-// Layouts
-
-typedef enum {
-    LT_HORIZONTAL,
-    LT_VERTICAL,
-} layout_type;
-
-#define MAX_LAYOUT_NODES 8
-#define LAYOUT_FIT_CONTAINER 0xFFFFFF
-#define LAYOUT_CONTENT_FIT 0xFFFFFE
-#define LAYOUT_FREE 0xFFFFFD
-
-typedef enum {
-    UNIT_FIT,      // Fits the whole layout
-    UNIT_PERCENT,  // % of the current layout
-    UNIT_PX,       // Specific pixel count
-} ui_unit;
-
-typedef struct {
-    int value;
-    ui_unit unit;
-} ui_spec_value;
-
-#define FIT                          \
-    (ui_spec_value) {                \
-        .value = 0, .unit = UNIT_FIT \
-    }
-#define PX(x)                       \
-    (ui_spec_value) {               \
-        .value = x, .unit = UNIT_PX \
-    }
-#define PERCENT(x)                       \
-    (ui_spec_value) {                    \
-        .value = x, .unit = UNIT_PERCENT \
-    }
-
-typedef struct {
-    ui_spec_value width;
-    ui_spec_value height;
-} ui_node_specs;
-
-#define DEFAULT_UI_SPECS (ui_node_specs){0}
-#define UI_NODE_SPEC(...)                        \
-    (ui_node_specs) {                            \
-        .width = FIT, .height = FIT, __VA_ARGS__ \
-    }
-
-typedef struct {
-    Rectangle rec;
-    ui_type node_type;
-    ui_node_specs specs;
-    void* data;
-} layout_node;
-
-typedef struct layout {
-    layout_node* parent;
-    struct layout** children;
-    int children_count;
-    layout_type type;
-    Rectangle layout_rec;
-
-    int width;
-    int height;
-
-    int padding[4];
-    int spacing;
-
-    layout_node nodes[MAX_LAYOUT_NODES];
-    int node_count;
-} layout;
-
-void layout_refresh(layout* l);
-void layout_push(layout* l, ui_type type, void* data, ui_node_specs specs);
-void layout_render(layout* l);
-layout* layout_push_layout(layout* parent, int node_index, layout base);
-void toggle_layout_debug_render();
 
 #endif

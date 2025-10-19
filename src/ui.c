@@ -244,8 +244,8 @@ bool input_clicked(input_buf *b) {
 }
 
 // Rounds to nearest pair for better rendering
-int get_font_size(input_buf *b) {
-    int res = b->rec.height * 0.5f;
+int get_font_size(Rectangle rec) {
+    int res = rec.height * 0.45f;
     return res % 2 == 1 ? res + 1 : res;
 }
 
@@ -257,7 +257,7 @@ ui_input_result input_update(input_buf *b) {
     if (is_hover(b->rec) && IsMouseButtonDown(0)) {
         Vector2 mouse = get_mouse();
         int last_width = 0;
-        int font_size = get_font_size(b);
+        int font_size = get_font_size(b->rec);
 
         int start_x = b->rec.x + simple_border_size;
         if (b->prefix) {
@@ -367,23 +367,24 @@ ui_input_result input_update(input_buf *b) {
 }
 
 // TODO: Some broken stuff with the rendering going outside of the given rec
-void input_render(input_buf *b, int active) {
+void input_render(input_buf *b) {
+    Rectangle inner_rec = b->rec;
     Color bg_color = UI_BEIGE;
     if (is_hover(b->rec)) {
         bg_color = ColorTint(bg_color, HOVER_TINT);
     }
-    DrawRectangleRec(b->rec, bg_color);
+    DrawRectangleRec(inner_rec, bg_color);
     NPatchInfo patch = {.source = {0, 0, simple_border.width, simple_border.height},
                         .left = simple_border_size,
                         .top = simple_border_size,
                         .right = simple_border_size,
                         .bottom = simple_border_size,
                         .layout = NPATCH_NINE_PATCH};
-    DrawTextureNPatch(simple_border, patch, b->rec, (Vector2){0, 0}, 0.0f, WHITE);
+    DrawTextureNPatch(simple_border, patch, inner_rec, (Vector2){0, 0}, 0.0f, WHITE);
 
-    int font_size = get_font_size(b);
-    int inner_x = b->rec.x + simple_border_size;
-    int inner_y = b->rec.y + (b->rec.height - font_size) / 2.f;
+    int font_size = get_font_size(inner_rec);
+    int inner_x = inner_rec.x + simple_border_size;
+    int inner_y = inner_rec.y + (inner_rec.height - font_size) / 2.f;
 
     int prefix_offset = 0;
     if (b->prefix) {
@@ -402,7 +403,7 @@ void input_render(input_buf *b, int active) {
     }
 
     int elapsed_time = GetTime() - input_last_click_time;
-    if (active && (elapsed_time % 2 == 0 || elapsed_time < 1)) {
+    if (b->active && (elapsed_time % 2 == 0 || elapsed_time < 1)) {
         int ptr_offset = GetTextWidth(b->buf, b->selection_start, font_size);
         DrawRectangle(inner_x + prefix_offset + ptr_offset, inner_y, 3, font_size, BLACK);
     }
@@ -715,6 +716,20 @@ void card_render(card *c) {
         Rectangle tab_rec = {c->rec.x + tab_width * i, c->rec.y, tab_width, 40};
         DrawTextCenter(tab_rec, c->tabs[i], 24, WHITE);
     }
+
+    // Render tab layout
+    layout_render(&c->layouts[c->selected_tab]);
+}
+
+void card_layout_set_specs(card *c, int tab, layout specs) {
+    c->node = (layout_node){.rec = c->rec};
+    specs.parent = &c->node;
+    specs.padding[0] = 50;
+    specs.padding[1] = 15;
+    specs.padding[2] = 15;
+    specs.padding[3] = 15;
+    c->layouts[tab] = specs;
+    layout_refresh(&c->layouts[tab]);
 }
 
 // Icon
@@ -874,7 +889,7 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
         if (l->height != LAYOUT_FREE) {
             float node_height = (l->layout_rec.height - (l->spacing * (l->node_count - 1))) / l->node_count;
             if (l->node_count == 1) {
-                node_height = l->layout_rec.height;
+                node_height = layout_get_node_progress(l, l->nodes[0].specs.height);
             }
 
             rec->y = l->layout_rec.y + (node_height + l->spacing) * node_index;
@@ -966,7 +981,7 @@ static void render_node(layout_node *node) {
     void *data = node->data;
     switch (node->node_type) {
         case UI_INPUT:
-            input_render(data, 0);
+            input_render(data);
             break;
         case UI_BUTTON:
             button_render(data);
@@ -1014,8 +1029,8 @@ static void layout_render_debug(layout *l) {
     }
 
     for (int i = 0; i < l->node_count; i++) {
-        render_node(&l->nodes[i]);
         layout_node_debug(&l->nodes[i]);
+        render_node(&l->nodes[i]);
     }
     DrawRectangleLinesEx(l->layout_rec, 1, GREEN);
     DrawRectangleLinesEx(l->layout_rec, 1, RED);
@@ -1025,17 +1040,21 @@ static void layout_render_debug(layout *l) {
     }
 }
 
-static void layout_render_debug_wrapper(layout *l) {
-    deepest_rectangle = (Rectangle){0};
-    layout_render_debug(l);
-    DrawRectangleRec(deepest_rectangle, GetColor(0x18181868));
-}
+int nesting = 0;
 
 void layout_render(layout *l) {
+    if (nesting == 1) {
+        deepest_rectangle = (Rectangle){0};
+    }
+    nesting++;
     if (layout_debug) {
-        layout_render_debug_wrapper(l);
+        layout_render_debug(l);
     } else {
         layout_render_no_debug(l);
+    }
+    nesting--;
+    if (nesting == 0) {
+        DrawRectangleRec(deepest_rectangle, GetColor(0x18181868));
     }
 }
 

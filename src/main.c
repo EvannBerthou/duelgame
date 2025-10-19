@@ -1901,37 +1901,38 @@ void init_scene_main_menu(const char *username) {
     layout_push(&main_menu_root_layout, UI_CARD, &server_info_card, DEFAULT_UI_SPECS);
     layout_push(&main_menu_root_layout, UI_CARD, &player_info_card, DEFAULT_UI_SPECS);
 
-    layout *server_layout = layout_push_layout(&main_menu_root_layout, 0,
-                                               (layout){.type = LT_VERTICAL,
-                                                        .width = LAYOUT_FIT_CONTAINER,
-                                                        .height = LAYOUT_FIT_CONTAINER,
-                                                        .padding = {50, 15, 15, 15},
-                                                        .spacing = 15});
+    card_layout_set_specs(&server_info_card, 0,
+                          (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FIT_CONTAINER});
+
+    card_layout_set_specs(&player_info_card, 0,
+                          (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE});
+
+    card_layout_set_specs(&player_info_card, 1,
+                          (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE});
+
     for (int i = 0; i < MAIN_MENU_INPUT_COUNT - 1; i++) {
-        layout_push(server_layout, UI_INPUT, inputs[i], DEFAULT_UI_SPECS);
+        layout_push(&server_info_card.layouts[0], UI_INPUT, inputs[i], DEFAULT_UI_SPECS);
     }
-    layout_push(server_layout, UI_BUTTON, &confirm_button, DEFAULT_UI_SPECS);
+    layout_push(&server_info_card.layouts[0], UI_BUTTON, &confirm_button, DEFAULT_UI_SPECS);
 
-    layout *player_info_layout = layout_push_layout(&main_menu_root_layout, 1,
-                                                    (layout){.type = LT_VERTICAL,
-                                                             .width = LAYOUT_FIT_CONTAINER,
-                                                             .height = LAYOUT_FREE,
-                                                             .padding = {50, 15, 15, 15},
-                                                             .spacing = 15});
+    layout_push(&player_info_card.layouts[0], UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(75)));
+    layout_push(&player_info_card.layouts[1], UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(75)));
 
-    layout_push(player_info_layout, UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(75)));
-    layout_push(player_info_layout, UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(25)));
+    layout_push(&player_info_card.layouts[0], UI_EMPTY, &empty3, UI_NODE_SPEC(.height = PERCENT(25)));
+    layout_push(&player_info_card.layouts[1], UI_EMPTY, &empty3, UI_NODE_SPEC(.height = PERCENT(25)));
 
-    layout *build_layout = layout_push_layout(player_info_layout, 1,
-                                              (layout){.type = LT_HORIZONTAL,
-                                                       .width = LAYOUT_FREE,
-                                                       .height = LAYOUT_FIT_CONTAINER,
-                                                       .padding = {24, 25, 24, 25},
-                                                       .spacing = 3});
+    for (int i = 0; i < 2; i++) {
+        layout *build_layout = layout_push_layout(&player_info_card.layouts[i], 1,
+                                                  (layout){.type = LT_HORIZONTAL,
+                                                           .width = LAYOUT_FREE,
+                                                           .height = LAYOUT_FIT_CONTAINER,
+                                                           .padding = {24, 25, 24, 25},
+                                                           .spacing = 3});
 
-    layout_push(build_layout, UI_EMPTY, &empty3, UI_NODE_SPEC(.width = PERCENT(50)));
-    layout_push(build_layout, UI_BUTTON, &build_load_button, UI_NODE_SPEC(.width = PERCENT(25)));
-    layout_push(build_layout, UI_BUTTON, &build_save_button, UI_NODE_SPEC(.width = PERCENT(25)));
+        layout_push(build_layout, UI_INPUT, &build_filepath, UI_NODE_SPEC(.width = PERCENT(50)));
+        layout_push(build_layout, UI_BUTTON, &build_load_button, UI_NODE_SPEC(.width = PERCENT(25)));
+        layout_push(build_layout, UI_BUTTON, &build_save_button, UI_NODE_SPEC(.width = PERCENT(25)));
+    }
 
     input_set_text(&ip_buf, "127.0.0.1");
     input_set_text(&port_buf, "3000");
@@ -1970,13 +1971,12 @@ void init_scene_main_menu(const char *username) {
         speed_slider.slider.min = -30;
     }
 
-    int quart = (player_info_card.rec.width - 50) / 4;
-    build_filepath.rec =
-        (Rectangle){player_info_card.rec.x + 25, confirm_button.rec.y, quart * 2, confirm_button.rec.height};
     if (build_filepath.ptr == 0) {
         input_set_text(&build_filepath, "build01");
     }
     load_build(TextFormat("%s.build", input_to_text(&build_filepath)));
+
+    inputs[selected_input]->active = true;
 }
 
 const char *try_join() {
@@ -2023,6 +2023,12 @@ int get_total_stats() {
     return stat_total;
 }
 
+void set_selected_input(int id) {
+    inputs[selected_input]->active = false;
+    selected_input = id;
+    inputs[selected_input]->active = true;
+}
+
 void update_scene_main_menu() {
     if (is_console_closed()) {
         for (size_t i = 0; i < MAIN_MENU_INPUT_COUNT; i++) {
@@ -2030,7 +2036,7 @@ void update_scene_main_menu() {
                 if (i != selected_input) {
                     input_clear_selection(inputs[selected_input]);
                 }
-                selected_input = i;
+                set_selected_input(i);
             }
         }
         // First card
@@ -2040,13 +2046,11 @@ void update_scene_main_menu() {
                 PlaySound(ui_button_clicked);
             }
         } else if (result == UI_INPUT_PREV) {
-            if (selected_input == 0) {
-                selected_input = MAIN_MENU_INPUT_COUNT - 1;
-            } else {
-                selected_input--;
-            }
+            int prev = (selected_input == 0) ? MAIN_MENU_INPUT_COUNT - 1 : selected_input - 1;
+            set_selected_input(prev);
         } else if (result == UI_INPUT_NEXT) {
-            selected_input = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
+            int next = (selected_input + 1) % MAIN_MENU_INPUT_COUNT;
+            set_selected_input(next);
         }
     }
 
@@ -2118,37 +2122,38 @@ void render_scene_main_menu() {
 
     layout_render(&main_menu_root_layout);
 
-    if (player_info_card.selected_tab == 0) {
-        int button_tooltip = -1;
-        int total = 0;
-        for (int i = 0; i < spell_count; i++) {
-            if (button_hover(&spell_select_buttons[i])) {
-                button_tooltip = i;
-            }
-            button_render(&spell_select_buttons[i]);
-            total += spell_selection[i] == true;
-        }
-        DrawText(TextFormat("Total : %d/%d", total, MAX_SPELL_COUNT), player_info_card.rec.x + 8,
-                 server_info_card.rec.y + 75, 32, WHITE);
-        if (button_tooltip != -1) {
-            render_spell_tooltip(&all_spells[button_tooltip]);
-        }
-    } else if (player_info_card.selected_tab == 1) {
-        DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8, health_slider.rec.y,
-                 32, WHITE);
-        buttoned_slider_render(&health_slider);
-
-        DrawText(TextFormat("STR", (int)strength_slider.slider.value), player_info_card.rec.x + 8,
-                 strength_slider.rec.y, 32, WHITE);
-        buttoned_slider_render(&strength_slider);
-
-        DrawText(TextFormat("Speed", (int)speed_slider.slider.value), player_info_card.rec.x + 8, speed_slider.rec.y,
-                 32, WHITE);
-        buttoned_slider_render(&speed_slider);
-
-        DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
-                 player_info_card.rec.y + 75, 32, WHITE);
-    }
+    // if (player_info_card.selected_tab == 0) {
+    //     int button_tooltip = -1;
+    //     int total = 0;
+    //     for (int i = 0; i < spell_count; i++) {
+    //         if (button_hover(&spell_select_buttons[i])) {
+    //             button_tooltip = i;
+    //         }
+    //         button_render(&spell_select_buttons[i]);
+    //         total += spell_selection[i] == true;
+    //     }
+    //     DrawText(TextFormat("Total : %d/%d", total, MAX_SPELL_COUNT), player_info_card.rec.x + 8,
+    //              server_info_card.rec.y + 75, 32, WHITE);
+    //     if (button_tooltip != -1) {
+    //         render_spell_tooltip(&all_spells[button_tooltip]);
+    //     }
+    // } else if (player_info_card.selected_tab == 1) {
+    //     DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8,
+    //     health_slider.rec.y,
+    //              32, WHITE);
+    //     buttoned_slider_render(&health_slider);
+    //
+    //     DrawText(TextFormat("STR", (int)strength_slider.slider.value), player_info_card.rec.x + 8,
+    //              strength_slider.rec.y, 32, WHITE);
+    //     buttoned_slider_render(&strength_slider);
+    //
+    //     DrawText(TextFormat("Speed", (int)speed_slider.slider.value), player_info_card.rec.x + 8, speed_slider.rec.y,
+    //              32, WHITE);
+    //     buttoned_slider_render(&speed_slider);
+    //
+    //     DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
+    //              player_info_card.rec.y + 75, 32, WHITE);
+    // }
 
     // button_render(&build_load_button);
     // button_render(&build_save_button);
