@@ -21,7 +21,7 @@ extern Vector2 get_mouse();
 
 // Utils
 
-const char *ui_type_name[] = {"Empty", "Input", "Button", "Slider", "Button slider", "Card", "Icon", "Picker"};
+const char *ui_type_name[] = {"Empty", "Input", "Button", "Slider", "Button slider", "Card", "Icon", "Picker", "Text"};
 
 const char *extract_raw_string(const char *s) {
     if (s == NULL) {
@@ -856,6 +856,7 @@ static int layout_get_node_progress(layout *l, ui_spec_value spec) {
     base -= l->spacing * (l->node_count - 1);
     switch (spec.unit) {
         case UNIT_FIT:
+            //TODO: Should take into account the count of elements that use UNIT_FIT and split evenly
             return base;
         case UNIT_PERCENT:
             return base * (spec.value / 100.f);
@@ -911,6 +912,13 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
 
             free_progress += height + l->spacing;
         }
+    } else if (l->type == LT_GRID) {
+        int cell_width = l->layout_rec.width / l->grid.x;
+        int row_count = l->grid.x;
+        rec->x = l->layout_rec.x + (node_index % row_count * cell_width);
+        rec->y = l->layout_rec.y + (int)(node_index / row_count * cell_width);
+        rec->width = l->grid.width;
+        rec->height = l->grid.height;
     }
     l->nodes[node_index].rec = *rec;
 
@@ -1018,6 +1026,9 @@ static void render_node(layout_node *node) {
                 DrawRectangleLinesEx(node->rec, 5, BLUE);
             }
             break;
+        case UI_TEXT:
+            text_render(data);
+            break;
     }
 }
 
@@ -1089,4 +1100,10 @@ layout *layout_push_layout(layout *parent, int node_index, layout base) {
 
 void toggle_layout_debug_render() {
     layout_debug = !layout_debug;
+}
+
+// Text
+
+void text_render(text *t) {
+    DrawText(t->content, t->rec.x, t->rec.y, t->font_size, t->color);
 }

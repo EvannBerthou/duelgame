@@ -37,6 +37,7 @@ typedef enum {
     UI_CARD,
     UI_ICON,
     UI_PICKER,
+    UI_TEXT
 } ui_type;
 
 // Layouts
@@ -44,9 +45,10 @@ typedef enum {
 typedef enum {
     LT_HORIZONTAL,
     LT_VERTICAL,
+    LT_GRID,
 } layout_type;
 
-#define MAX_LAYOUT_NODES 8
+#define MAX_LAYOUT_NODES 64
 #define LAYOUT_FIT_CONTAINER 0xFFFFFF
 #define LAYOUT_CONTENT_FIT 0xFFFFFE
 #define LAYOUT_FREE 0xFFFFFD
@@ -99,6 +101,7 @@ typedef struct layout {
     int children_count;
     layout_type type;
     Rectangle layout_rec;
+    Rectangle grid;
 
     int width;
     int height;
@@ -223,7 +226,7 @@ typedef struct {
     int step;
 } buttoned_slider;
 
-void buttoned_slider_set_rec(buttoned_slider *bs, Rectangle rec);
+void buttoned_slider_set_rec(buttoned_slider* bs, Rectangle rec);
 bool buttoned_slider_decrement(buttoned_slider* s);
 bool buttoned_slider_increment(buttoned_slider* s);
 void buttoned_slider_init(buttoned_slider* bs,
@@ -289,5 +292,16 @@ bool picker_clicked(picker* p);
 void picker_update_scroll(picker* p);
 void picker_render(picker* p);
 void clear_picker(picker* p);
+
+// Text
+
+typedef struct {
+    Rectangle rec;
+    char content[255];
+    int font_size;
+    Color color;
+} text;
+
+void text_render(text* t);
 
 #endif

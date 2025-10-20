@@ -175,13 +175,18 @@ layout main_menu_root_layout = {.type = LT_HORIZONTAL,
                                 .height = LAYOUT_FIT_CONTAINER,
                                 .padding = {150, 50, 50, 50},
                                 .spacing = 50};
+text stats_total_text = {.font_size = 32, .color = WHITE, .content = "Total Stats : 0 / 200"};
+text health_slider_text = {.font_size = 32, .color = WHITE, .content = "Health"};
+text strength_slider_text = {.font_size = 32, .color = WHITE, .content = "Strength"};
+text speed_slider_text = {.font_size = 32, .color = WHITE, .content = "Speed"};
+text total_spell_count_text = {.font_size = 32, .color = WHITE, .content = "Total : 0 / 0 "};
+
 buttoned_slider health_slider = {0};
 buttoned_slider strength_slider = {0};
 buttoned_slider speed_slider = {0};
 buttoned_slider *stat_sliders[] = {&health_slider, &strength_slider, &speed_slider};
 const int stat_sliders_count = (int)(sizeof(stat_sliders) / sizeof(stat_sliders[0]));
 
-const int card_width = (WIDTH - 150) / 2;
 card server_info_card = CARD(UI_NORD, "Server");
 card player_info_card = CARD(UI_NORD, "Spells", "Stats");
 
@@ -201,7 +206,7 @@ input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf, &build_
 //   Lobby
 card player_list_card = CARD(UI_NORD, "Player list");
 card server_config_card = CARD(UI_NORD, "Configuration");
-button start_game_button = BUTTON_COLOR(75, 600, card_width - 50, 75, UI_GREEN, "Start Game", 36);
+button start_game_button = BUTTON_COLOR(75, 600, 0, 75, UI_GREEN, "Start Game", 36);
 
 button player_build_buttons[MAX_PLAYER_COUNT] = {0};
 card player_build_card = CARD(UI_NORD, "Player build");
@@ -1897,6 +1902,9 @@ bool join_game(const char *ip, int port, const char *username) {
 ui_empty empty1 = {0};
 ui_empty empty2 = {0};
 ui_empty empty3 = {0};
+ui_empty empty4 = {0};
+ui_empty empty5 = {0};
+ui_empty empty6 = {0};
 void init_scene_main_menu(const char *username) {
     layout_push(&main_menu_root_layout, UI_CARD, &server_info_card, DEFAULT_UI_SPECS);
     layout_push(&main_menu_root_layout, UI_CARD, &player_info_card, DEFAULT_UI_SPECS);
@@ -1915,19 +1923,16 @@ void init_scene_main_menu(const char *username) {
     }
     layout_push(&server_info_card.layouts[0], UI_BUTTON, &confirm_button, DEFAULT_UI_SPECS);
 
-    layout_push(&player_info_card.layouts[0], UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(75)));
-    layout_push(&player_info_card.layouts[1], UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(75)));
+    layout_push(&player_info_card.layouts[0], UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(80)));
+    layout_push(&player_info_card.layouts[1], UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(80)));
 
-    layout_push(&player_info_card.layouts[0], UI_EMPTY, &empty3, UI_NODE_SPEC(.height = PERCENT(25)));
-    layout_push(&player_info_card.layouts[1], UI_EMPTY, &empty3, UI_NODE_SPEC(.height = PERCENT(25)));
+    layout_push(&player_info_card.layouts[0], UI_EMPTY, &empty3, UI_NODE_SPEC(.height = PERCENT(20)));
+    layout_push(&player_info_card.layouts[1], UI_EMPTY, &empty3, UI_NODE_SPEC(.height = PERCENT(20)));
 
     for (int i = 0; i < 2; i++) {
-        layout *build_layout = layout_push_layout(&player_info_card.layouts[i], 1,
-                                                  (layout){.type = LT_HORIZONTAL,
-                                                           .width = LAYOUT_FREE,
-                                                           .height = LAYOUT_FIT_CONTAINER,
-                                                           .padding = {24, 25, 24, 25},
-                                                           .spacing = 3});
+        layout *build_layout = layout_push_layout(
+            &player_info_card.layouts[i], 1,
+            (layout){.type = LT_HORIZONTAL, .width = LAYOUT_FREE, .height = LAYOUT_FIT_CONTAINER, .spacing = 3});
 
         layout_push(build_layout, UI_INPUT, &build_filepath, UI_NODE_SPEC(.width = PERCENT(50)));
         layout_push(build_layout, UI_BUTTON, &build_load_button, UI_NODE_SPEC(.width = PERCENT(25)));
@@ -1941,17 +1946,26 @@ void init_scene_main_menu(const char *username) {
     spell_select_buttons = malloc(sizeof(button) * spell_count);
     spell_selection = malloc(sizeof(bool) * spell_count);
     {
-        int max_row_count = 9;
-        int x = player_info_card.rec.x + 16;
-        int y = player_info_card.rec.y + 125;
+        layout *spells_layout = layout_push_layout(
+            &player_info_card.layouts[0], 0,
+            (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE, .spacing = 5});
+        layout_push(spells_layout, UI_TEXT, &total_spell_count_text, UI_NODE_SPEC(.height = PX(32)));
+        layout_push(spells_layout, UI_EMPTY, &empty4, UI_NODE_SPEC(.height = PERCENT(90)));
+
+        layout *spell_grid_layout = layout_push_layout(spells_layout, 1,
+                                                       (layout){.type = LT_GRID,
+                                                                .width = LAYOUT_FIT_CONTAINER,
+                                                                .height = LAYOUT_FIT_CONTAINER,
+                                                                .grid = (Rectangle){9, 4, 50, 50}});
         for (int i = 0; i < spell_count; i++) {
-            int cell_x = x + 60 * (i % max_row_count);
-            int cell_y = y + 60 * (i / max_row_count);
-            spell_select_buttons[i] = BUTTON_TEXTURE(cell_x, cell_y, 50, 50, icons_sheet, NULL, 32);
+            spell_select_buttons[i] = BUTTON_TEXTURE(0, 0, 0, 0, icons_sheet, NULL, 32);
             spell_select_buttons[i].texture_sprite = icons[all_spells[i].icon];
             spell_select_buttons[i].muted = true;
             spell_selection[i] = false;
+
+            layout_push(spell_grid_layout, UI_BUTTON, &spell_select_buttons[i], DEFAULT_UI_SPECS);
         }
+
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             spell_selection[i] = true;
             spell_select_buttons[i].color = DARKGRAY;
@@ -1963,14 +1977,18 @@ void init_scene_main_menu(const char *username) {
         buttoned_slider_init(&speed_slider, (Rectangle){0}, 30, 10);
         speed_slider.slider.min = -30;
 
-        layout *stats_layout = layout_push_layout(&player_info_card.layouts[1], 0,
-                                                  (layout){.type = LT_VERTICAL,
-                                                           .width = LAYOUT_FIT_CONTAINER,
-                                                           .height = LAYOUT_FREE,
-                                                           .padding = {24, 25, 24, 25},
-                                                           .spacing = 5});
+        layout *stats_layout = layout_push_layout(
+            &player_info_card.layouts[1], 0,
+            (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE, .spacing = 5});
+        layout_push(stats_layout, UI_TEXT, &stats_total_text, UI_NODE_SPEC(.height = PX(32)));
+
+        layout_push(stats_layout, UI_TEXT, &health_slider_text, UI_NODE_SPEC(.height = PX(32)));
         layout_push(stats_layout, UI_BUTON_SLIDER, &health_slider, UI_NODE_SPEC(.height = PX(50)));
+
+        layout_push(stats_layout, UI_TEXT, &strength_slider_text, UI_NODE_SPEC(.height = PX(32)));
         layout_push(stats_layout, UI_BUTON_SLIDER, &strength_slider, UI_NODE_SPEC(.height = PX(50)));
+
+        layout_push(stats_layout, UI_TEXT, &speed_slider_text, UI_NODE_SPEC(.height = PX(32)));
         layout_push(stats_layout, UI_BUTON_SLIDER, &speed_slider, UI_NODE_SPEC(.height = PX(50)));
     }
 
@@ -2122,34 +2140,25 @@ void render_scene_main_menu() {
     int title_center = get_width_center((Rectangle){0, 0, WIDTH, 0}, "Duel Game", 64);
     DrawText("Duel Game", title_center, 32, 64, WHITE);
 
+    strcpy(stats_total_text.content, TextFormat("Total Stats : %d / 200", get_total_stats()));
+    int total = 0;
+    for (int i = 0; i < spell_count; i++) {
+        total += spell_selection[i] == true;
+    }
+    strcpy(total_spell_count_text.content, TextFormat("Total : %d / %d", total, MAX_SPELL_COUNT));
     layout_render(&main_menu_root_layout);
 
     if (player_info_card.selected_tab == 0) {
         int button_tooltip = -1;
-        int total = 0;
         for (int i = 0; i < spell_count; i++) {
             if (button_hover(&spell_select_buttons[i])) {
                 button_tooltip = i;
             }
-            button_render(&spell_select_buttons[i]);
-            total += spell_selection[i] == true;
         }
-        DrawText(TextFormat("Total : %d/%d", total, MAX_SPELL_COUNT), player_info_card.rec.x + 8,
-                 server_info_card.rec.y + 75, 32, WHITE);
         if (button_tooltip != -1) {
             render_spell_tooltip(&all_spells[button_tooltip]);
         }
     }
-
-    DrawText(TextFormat("Health", (int)health_slider.slider.value), player_info_card.rec.x + 8, health_slider.rec.y, 32,
-             WHITE);
-    DrawText(TextFormat("STR", (int)strength_slider.slider.value), player_info_card.rec.x + 8, strength_slider.rec.y,
-             32, WHITE);
-    DrawText(TextFormat("Speed", (int)speed_slider.slider.value), player_info_card.rec.x + 8, speed_slider.rec.y, 32,
-             WHITE);
-
-    DrawText(TextFormat("Total stats: %d / 200", get_total_stats()), player_info_card.rec.x + 8,
-             player_info_card.rec.y + 75, 32, WHITE);
 }
 
 //   Lobby
@@ -2613,9 +2622,6 @@ button test_b2 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "BOUTON 2", 18);
 slider test_slider = {{0, 0, 0, 0}, UI_RED, 100, 0, 0};
 slider test_slider2 = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
 
-ui_empty empty4 = {0};
-ui_empty empty5 = {0};
-ui_empty empty6 = {0};
 ui_empty empty7 = {0};
 ui_empty empty8 = {0};
 ui_empty empty9 = {0};
