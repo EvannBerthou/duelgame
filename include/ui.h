@@ -33,7 +33,7 @@ typedef enum {
     UI_INPUT,
     UI_BUTTON,
     UI_SLIDER,
-    UI_BUTON_SLIDER,
+    UI_BUTTON_SLIDER,
     UI_CARD,
     UI_ICON,
     UI_PICKER,
@@ -224,6 +224,7 @@ typedef struct {
     button plus;
     slider slider;
     int step;
+    bool disabled;
 } buttoned_slider;
 
 void buttoned_slider_set_rec(buttoned_slider* bs, Rectangle rec);
@@ -284,6 +285,7 @@ typedef struct {
     int option_frame;
     int option_offset;
     bool opened;
+    bool disabled;
 } picker;
 
 void picker_add_option(picker* p, const char* option);

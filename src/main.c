@@ -204,21 +204,24 @@ button build_save_button = BUTTON_COLOR2(UI_GREEN, "Save", 32);
 input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf, &build_filepath};
 
 //   Lobby
+layout lobby_root_layout = {.type = LT_HORIZONTAL,
+                            .width = LAYOUT_FIT_CONTAINER,
+                            .height = LAYOUT_FIT_CONTAINER,
+                            .padding = {150, 50, 50, 50},
+                            .spacing = 50};
 card player_list_card = CARD(UI_NORD, "Player list");
 card server_config_card = CARD(UI_NORD, "Configuration");
 button start_game_button = BUTTON_COLOR(75, 600, 0, 75, UI_GREEN, "Start Game", 36);
 
+text map_picker_text = {.font_size = 32, .color = WHITE, .content = "Map"};
+text round_picker_text = {.font_size = 32, .color = WHITE, .content = "Round count"};
+
 button player_build_buttons[MAX_PLAYER_COUNT] = {0};
 card player_build_card = CARD(UI_NORD, "Player build");
 button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, "X", 46);
-int selected_player_build = -1;
 
 picker map_picker = {0};
 buttoned_slider round_count_slider = {0};
-
-// Configuration sync
-const char *selected_map = NULL;
-int round_count = 0;
 
 //    In game
 slider health_bars[MAX_PLAYER_COUNT] = {0};
@@ -1691,6 +1694,8 @@ void player_join(const char *username) {
     send_serv(pkt_join(username, input_to_text(&password_buf)));
 }
 
+void update_lobby_player_list();
+
 void handle_packet(net_packet *p) {
     if (p->type == PKT_PING) {
         net_packet_ping *ping = (net_packet_ping *)p->content;
@@ -1700,6 +1705,7 @@ void handle_packet(net_packet *p) {
         LOG("Joined: %s with ID=%d", NSTR(join->username), join->id);
         memcpy(players[join->id].info.name, join->username.str, join->username.len);
         players[join->id].info.connected = true;
+        update_lobby_player_list();
     } else if (p->type == PKT_CONNECTED) {
         net_packet_connected *c = (net_packet_connected *)p->content;
         set_scene(SCENE_LOBBY);
@@ -1714,10 +1720,11 @@ void handle_packet(net_packet *p) {
         LOG("Joining with %d strength", strength);
         send_serv(pkt_player_build(current_player, base_health, players[current_player].info.spells, strength, speed));
         connected = true;
+        update_lobby_player_list();
     } else if (p->type == PKT_UPDATE_SERVER_CONFIGURATION) {
         net_packet_update_server_configuration *u = (net_packet_update_server_configuration *)p->content;
-        selected_map = map_picker.options[u->map_index];
-        round_count = u->round_count;
+        map_picker.selected_option = u->map_index;
+        round_count_slider.slider.value = u->round_count;
     } else if (p->type == PKT_DISCONNECT) {
         net_packet_disconnect *d = (net_packet_disconnect *)p->content;
         LOG("Player %d disconnected", d->id);
@@ -1726,6 +1733,7 @@ void handle_packet(net_packet *p) {
         set_scene(SCENE_LOBBY);
         gs = GS_WAITING;
         connected = false;
+        update_lobby_player_list();
     } else if (p->type == PKT_SERVER_MAP_LIST) {
         net_packet_server_map_list *list = (net_packet_server_map_list *)p->content;
         clear_picker(&map_picker);
@@ -1751,6 +1759,7 @@ void handle_packet(net_packet *p) {
         for (int i = 0; i < MAX_SPELL_COUNT; i++) {
             player->info.spells[i] = b->spells[i];
         }
+        update_lobby_player_list();
     } else if (p->type == PKT_MAP) {
         net_packet_map *m = (net_packet_map *)p->content;
         LOG("Map is %d/%d", m->width, m->height);
@@ -1818,6 +1827,7 @@ void handle_packet(net_packet *p) {
     } else if (p->type == PKT_ROUND_START) {
         gs = GS_STARTED;
     } else if (p->type == PKT_ROUND_END) {
+        update_lobby_player_list();
         net_packet_round_end *e = (net_packet_round_end *)p->content;
         LOG("Round ended");
         state = RS_PLAYING_TURN;
@@ -1932,7 +1942,7 @@ void init_scene_main_menu(const char *username) {
     for (int i = 0; i < 2; i++) {
         layout *build_layout = layout_push_layout(
             &player_info_card.layouts[i], 1,
-            (layout){.type = LT_HORIZONTAL, .width = LAYOUT_FREE, .height = LAYOUT_FIT_CONTAINER, .spacing = 3});
+            (layout){.type = LT_HORIZONTAL, .width = LAYOUT_FREE, .height = LAYOUT_FIT_CONTAINER, .spacing = 20});
 
         layout_push(build_layout, UI_INPUT, &build_filepath, UI_NODE_SPEC(.width = PERCENT(50)));
         layout_push(build_layout, UI_BUTTON, &build_load_button, UI_NODE_SPEC(.width = PERCENT(25)));
@@ -1983,13 +1993,13 @@ void init_scene_main_menu(const char *username) {
         layout_push(stats_layout, UI_TEXT, &stats_total_text, UI_NODE_SPEC(.height = PX(32)));
 
         layout_push(stats_layout, UI_TEXT, &health_slider_text, UI_NODE_SPEC(.height = PX(32)));
-        layout_push(stats_layout, UI_BUTON_SLIDER, &health_slider, UI_NODE_SPEC(.height = PX(50)));
+        layout_push(stats_layout, UI_BUTTON_SLIDER, &health_slider, UI_NODE_SPEC(.height = PX(50)));
 
         layout_push(stats_layout, UI_TEXT, &strength_slider_text, UI_NODE_SPEC(.height = PX(32)));
-        layout_push(stats_layout, UI_BUTON_SLIDER, &strength_slider, UI_NODE_SPEC(.height = PX(50)));
+        layout_push(stats_layout, UI_BUTTON_SLIDER, &strength_slider, UI_NODE_SPEC(.height = PX(50)));
 
         layout_push(stats_layout, UI_TEXT, &speed_slider_text, UI_NODE_SPEC(.height = PX(32)));
-        layout_push(stats_layout, UI_BUTON_SLIDER, &speed_slider, UI_NODE_SPEC(.height = PX(50)));
+        layout_push(stats_layout, UI_BUTTON_SLIDER, &speed_slider, UI_NODE_SPEC(.height = PX(50)));
     }
 
     if (build_filepath.ptr == 0) {
@@ -2161,72 +2171,99 @@ void render_scene_main_menu() {
     }
 }
 
+text lobby_player_names[MAX_PLAYER_COUNT] = {};
+text lobby_player_builds[MAX_PLAYER_COUNT] = {};
+ui_empty lobby_empty[MAX_PLAYER_COUNT] = {};
+layout *lobby_player_layouts[MAX_PLAYER_COUNT] = {};
+
+void update_lobby_player_list() {
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        if (players[i].info.connected) {
+            lobby_player_names[i].font_size = 32;
+            lobby_player_builds[i].font_size = 32;
+
+            lobby_player_names[i].color = i == master_player ? YELLOW : WHITE;
+            lobby_player_builds[i].color = WHITE;
+
+            const bool you = i == current_player;
+            const char *name = players[i].info.name;
+            const char *formated_name = TextFormat("- %s %s", name, you ? "(You)" : "");
+            strncpy(lobby_player_names[i].content, formated_name, sizeof(lobby_player_names[i].content));
+            strncpy(lobby_player_builds[i].content, "Description build", sizeof(lobby_player_builds[i].content));
+        } else {
+            lobby_player_names[i].color = (Color){0};
+            lobby_player_builds[i].color = (Color){0};
+        }
+    }
+}
+
 //   Lobby
 void init_scene_lobby() {
-    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
-        int x = player_list_card.rec.x + player_list_card.rec.width - 75;
-        int y = player_list_card.rec.y + 75 + 46 * i;
-        player_build_buttons[i] = BUTTON_COLOR(x, y, 50, 50, UI_BEIGE, "B", 36);
-    }
+    layout_push(&lobby_root_layout, UI_CARD, &player_list_card, DEFAULT_UI_SPECS);
+    layout_push(&lobby_root_layout, UI_CARD, &server_config_card, DEFAULT_UI_SPECS);
 
-    map_picker.rec = (Rectangle){server_config_card.rec.x + 125, server_config_card.rec.y + 75,
-                                 server_config_card.rec.width - 150, 50};
+    card_layout_set_specs(&player_list_card, 0,
+                          (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FIT_CONTAINER});
+
+    for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
+        layout_push(&player_list_card.layouts[0], UI_EMPTY, &lobby_empty[i], UI_NODE_SPEC(.height = PX(100)));
+        lobby_player_layouts[i] =
+            layout_push_layout(&player_list_card.layouts[0], i,
+                               (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE});
+        layout_push(lobby_player_layouts[i], UI_TEXT, &lobby_player_names[i], UI_NODE_SPEC(.height = PX(50)));
+        layout_push(lobby_player_layouts[i], UI_TEXT, &lobby_player_builds[i], UI_NODE_SPEC(.height = PX(50)));
+        update_lobby_player_list();
+    }
+    layout_push(&player_list_card.layouts[0], UI_BUTTON, &start_game_button, DEFAULT_UI_SPECS);
+
+    card_layout_set_specs(&server_config_card, 0,
+                          (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE});
+
     map_picker.option_frame = 5;
     picker_add_option(&map_picker, "Loading...");
+    layout_push(&server_config_card.layouts[0], UI_TEXT, &map_picker_text, UI_NODE_SPEC(.height = PX(32)));
+    layout_push(&server_config_card.layouts[0], UI_PICKER, &map_picker, UI_NODE_SPEC(.height = PX(50)));
 
-    Rectangle round_counter_rec = {map_picker.rec.x, map_picker.rec.y + map_picker.rec.height + 25,
-                                   map_picker.rec.width, map_picker.rec.height};
-    buttoned_slider_init(&round_count_slider, round_counter_rec, 15, 1);
+    buttoned_slider_init(&round_count_slider, (Rectangle){0}, 15, 1);
     round_count_slider.slider.min = 3;
     round_count_slider.slider.value = 3;
+    layout_push(&server_config_card.layouts[0], UI_TEXT, &round_picker_text, UI_NODE_SPEC(.height = PX(32)));
+    layout_push(&server_config_card.layouts[0], UI_BUTTON_SLIDER, &round_count_slider, UI_NODE_SPEC(.height = PX(50)));
 }
 
 void update_scene_lobby() {
     start_game_button.disabled = master_player != current_player || player_count() < 2;
 
-    if (selected_player_build == -1) {
-        if (button_clicked(&start_game_button) && master_player == current_player) {
-            send_serv(pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value));
-        }
+    if (button_clicked(&start_game_button) && master_player == current_player) {
+        send_serv(pkt_request_game_start(map_picker.selected_option, round_count_slider.slider.value));
+    }
 
-        card_update_tabs(&player_list_card);
-        card_update_tabs(&server_config_card);
+    card_update_tabs(&player_list_card);
+    card_update_tabs(&server_config_card);
 
-        if (server_config_card.selected_tab == 0) {
-            if (master_player == current_player) {
-                picker_update_scroll(&map_picker);
-                if (picker_clicked(&map_picker)) {
-                    map_picker.opened = !map_picker.opened;
-                }
-                int clicked_option = picker_option_clicked(&map_picker);
-                if (clicked_option != -1) {
-                    send_serv(pkt_update_server_configuration(clicked_option, round_count_slider.slider.value));
-                }
+    map_picker.disabled = master_player != current_player;
+    round_count_slider.disabled = master_player != current_player;
 
-                if (button_clicked(&round_count_slider.minus)) {
-                    buttoned_slider_decrement(&round_count_slider);
-                    send_serv(
-                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value));
-                }
-
-                if (button_clicked(&round_count_slider.plus)) {
-                    buttoned_slider_increment(&round_count_slider);
-                    send_serv(
-                        pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value));
-                }
+    if (server_config_card.selected_tab == 0) {
+        if (master_player == current_player) {
+            picker_update_scroll(&map_picker);
+            if (picker_clicked(&map_picker)) {
+                map_picker.opened = !map_picker.opened;
             }
-        }
-
-        int idx = 0;
-        FOREACH_PLAYER(i, player) {
-            if (button_clicked(&player_build_buttons[idx])) {
-                selected_player_build = idx;
+            int clicked_option = picker_option_clicked(&map_picker);
+            if (clicked_option != -1) {
+                send_serv(pkt_update_server_configuration(clicked_option, round_count_slider.slider.value));
             }
-            idx++;
-        }
-    } else {
-        if (button_clicked(&close_build_card_button)) {
-            selected_player_build = -1;
+
+            if (button_clicked(&round_count_slider.minus)) {
+                buttoned_slider_decrement(&round_count_slider);
+                send_serv(pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value));
+            }
+
+            if (button_clicked(&round_count_slider.plus)) {
+                buttoned_slider_increment(&round_count_slider);
+                send_serv(pkt_update_server_configuration(map_picker.selected_option, round_count_slider.slider.value));
+            }
         }
     }
 }
@@ -2235,74 +2272,7 @@ void render_scene_lobby() {
     int title_center = get_width_center((Rectangle){0, 0, WIDTH, HEIGHT}, "Lobby", 64);
     DrawText("Lobby", title_center, 32, 64, WHITE);
 
-    if (selected_player_build == -1) {
-        card_render(&player_list_card);
-        card_render(&server_config_card);
-    }
-
-    if (gs == GS_WAITING) {
-        int idx = 0;
-        // TODO: We should order names based on who connected first
-        FOREACH_PLAYER(i, player) {
-            int x = player_list_card.rec.x + 8;
-            int y = player_list_card.rec.y + 75 + 46 * idx;
-            Color c = master_player == i ? YELLOW : WHITE;
-            if (i == current_player) {
-                DrawText(TextFormat("- %s (you)", player->info.name), x, y, 36, c);
-            } else {
-                DrawText(TextFormat("- %s", player->info.name), x, y, 36, c);
-            }
-            button_render(&player_build_buttons[idx]);
-            idx++;
-        }
-
-        if (server_config_card.selected_tab == 0) {
-            if (master_player == current_player) {
-                DrawText("Round", server_config_card.rec.x + 25, round_count_slider.rec.y + 8, 32, WHITE);
-                buttoned_slider_render(&round_count_slider);
-
-                DrawText("Map", server_config_card.rec.x + 25, map_picker.rec.y + 8, 32, WHITE);
-                picker_render(&map_picker);
-            } else {
-                // TODO Include round count sync
-                DrawText(TextFormat("Map: %s", selected_map), server_config_card.rec.x + 25, map_picker.rec.y, 32,
-                         WHITE);
-                DrawText(TextFormat("Round: %d", round_count), server_config_card.rec.x + 25, round_count_slider.rec.y,
-                         32, WHITE);
-            }
-        }
-    }
-
-    if (current_player == master_player) {
-        button_render(&start_game_button);
-    }
-
-    if (selected_player_build != -1) {
-        int icon_tooltip = -1;
-        card_render(&player_build_card);
-        Rectangle header = {player_build_card.rec.x, player_build_card.rec.y + 75, player_build_card.rec.width, 64};
-        DrawTextCenter(header, TextFormat("Viewing %s build", players[selected_player_build].info.name), 54, WHITE);
-        player *p = &players[selected_player_build];
-        player_info *info = &p->info;
-        int x = player_build_card.rec.x + 25;
-        DrawText(TextFormat("Health = %d", info->stats[STAT_HEALTH].max), x, header.y + 64, 32, WHITE);
-        DrawText(TextFormat("Strength = %d", info->stats[STAT_STRENGTH].value), x, header.y + 96, 32, WHITE);
-        DrawText(TextFormat("Speed = %d", info->stats[STAT_SPEED].value), x, header.y + 128, 32, WHITE);
-        DrawText("Spells", x, header.y + 192, 32, WHITE);
-        for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-            Rectangle icon = icons[all_spells[info->spells[i]].icon];
-            Rectangle dst = {x + 60 * i, header.y + 224, 50, 50};
-            icon_render(icon, dst);
-            if (icon_hover(dst)) {
-                icon_tooltip = info->spells[i];
-            }
-        }
-        button_render(&close_build_card_button);
-
-        if (icon_tooltip != -1) {
-            render_spell_tooltip(&all_spells[icon_tooltip]);
-        }
-    }
+    layout_render(&lobby_root_layout);
 }
 
 //   In game

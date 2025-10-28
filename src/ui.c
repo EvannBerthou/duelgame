@@ -575,8 +575,8 @@ void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step)
 }
 
 void buttoned_slider_render(buttoned_slider *bs) {
-    bs->minus.disabled = bs->minus.disabled || bs->slider.value == bs->slider.min;
-    bs->plus.disabled = bs->plus.disabled || bs->slider.value == bs->slider.max;
+    bs->minus.disabled = bs->disabled || bs->minus.disabled || bs->slider.value == bs->slider.min;
+    bs->plus.disabled = bs->disabled || bs->plus.disabled || bs->slider.value == bs->slider.max;
 
     button_render(&bs->minus);
     slider_render(&bs->slider);
@@ -797,7 +797,7 @@ void picker_update_scroll(picker *p) {
 
 void picker_render(picker *p) {
     Color picker_color = UI_BEIGE;
-    if (is_hover(p->rec)) {
+    if (is_hover(p->rec) && p->disabled == false) {
         picker_color = ColorTint(picker_color, HOVER_TINT);
     }
     DrawRectangleRec(p->rec, picker_color);
@@ -856,7 +856,7 @@ static int layout_get_node_progress(layout *l, ui_spec_value spec) {
     base -= l->spacing * (l->node_count - 1);
     switch (spec.unit) {
         case UNIT_FIT:
-            //TODO: Should take into account the count of elements that use UNIT_FIT and split evenly
+            // TODO: Should take into account the count of elements that use UNIT_FIT and split evenly
             return base;
         case UNIT_PERCENT:
             return base * (spec.value / 100.f);
@@ -922,7 +922,7 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
     }
     l->nodes[node_index].rec = *rec;
 
-    if (l->nodes[node_index].node_type == UI_BUTON_SLIDER) {
+    if (l->nodes[node_index].node_type == UI_BUTTON_SLIDER) {
         buttoned_slider_set_rec(l->nodes[node_index].data, *rec);
     }
 
@@ -1008,7 +1008,7 @@ static void render_node(layout_node *node) {
         case UI_SLIDER:
             slider_render(data);
             break;
-        case UI_BUTON_SLIDER:
+        case UI_BUTTON_SLIDER:
             buttoned_slider_render(data);
             break;
         case UI_CARD:
@@ -1033,7 +1033,7 @@ static void render_node(layout_node *node) {
 }
 
 static void layout_render_no_debug(layout *l) {
-    for (int i = 0; i < l->node_count; i++) {
+    for (int i = l->node_count; i >= 0; i--) {
         render_node(&l->nodes[i]);
     }
 
@@ -1050,7 +1050,7 @@ static void layout_render_debug(layout *l) {
                                l->layout_rec.y, l->layout_rec.width, l->layout_rec.height));
     }
 
-    for (int i = 0; i < l->node_count; i++) {
+    for (int i = l->node_count; i >= 0; i--) {
         layout_node_debug(&l->nodes[i]);
         render_node(&l->nodes[i]);
     }
@@ -1065,7 +1065,7 @@ static void layout_render_debug(layout *l) {
 int nesting = 0;
 
 void layout_render(layout *l) {
-    if (nesting == 1) {
+    if (nesting == 0) {
         deepest_rectangle = (Rectangle){0};
     }
     nesting++;
