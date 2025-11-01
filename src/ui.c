@@ -562,8 +562,8 @@ void buttoned_slider_set_rec(buttoned_slider *bs, Rectangle rec) {
 }
 
 void buttoned_slider_init(buttoned_slider *bs, Rectangle rec, int max, int step) {
-    bs->minus = BUTTON_COLOR2(UI_RED, "-", 28);
-    bs->plus = BUTTON_COLOR2(UI_GREEN, "+", 28);
+    bs->minus = BUTTON_COLOR(UI_RED, "-", 28);
+    bs->plus = BUTTON_COLOR(UI_GREEN, "+", 28);
 
     buttoned_slider_set_rec(bs, rec);
     bs->slider.color = WHITE;
@@ -930,17 +930,22 @@ static int layout_compute_node_rec(layout *l, int node_index, int free_progress)
 }
 
 void layout_refresh(layout *l) {
+    int base_width = 0;
+    int base_height = 0;
+
     if (l->parent != NULL) {
+        base_width = l->parent->rec.width;
+        base_height = l->parent->rec.height;
         l->layout_rec.x = l->parent->rec.x;
         l->layout_rec.y = l->parent->rec.y;
-        l->layout_rec.width = l->parent->rec.width;
-        l->layout_rec.height = l->parent->rec.height;
     } else {
-        l->layout_rec.x = 0;
-        l->layout_rec.y = 0;
-        l->layout_rec.width = WIDTH;
-        l->layout_rec.height = HEIGHT;
+        base_width = l->base_rec.width ? l->base_rec.width : WIDTH;
+        base_height = l->base_rec.height ? l->base_rec.height : HEIGHT;
+        l->layout_rec.x = l->base_rec.x;
+        l->layout_rec.y = l->base_rec.y;
     }
+    l->layout_rec.width = base_width;
+    l->layout_rec.height = base_height;
 
     // int max_height = 0;
     // if (l->height == LAYOUT_CONTENT_FIT) {
@@ -952,11 +957,11 @@ void layout_refresh(layout *l) {
     // }
 
     if (l->height == LAYOUT_FIT_CONTAINER || l->height == LAYOUT_FREE) {
-        l->layout_rec.height = l->parent == NULL ? HEIGHT : l->parent->rec.height;
+        l->layout_rec.height = l->parent == NULL ? base_height : l->parent->rec.height;
     }
 
     if (l->width == LAYOUT_FIT_CONTAINER || l->width == LAYOUT_FREE) {
-        l->layout_rec.width = l->parent == NULL ? WIDTH : l->parent->rec.width;
+        l->layout_rec.width = l->parent == NULL ? base_width : l->parent->rec.width;
     }
 
     l->layout_rec.x += l->padding[3];

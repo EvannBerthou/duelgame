@@ -194,12 +194,12 @@ input_buf ip_buf = {.prefix = "IP", .max_length = 32};
 input_buf port_buf = {.prefix = "Port", .max_length = 6};
 input_buf password_buf = {.prefix = "Password", .max_length = 32};
 input_buf username_buf = {.prefix = "Username", .max_length = 32};
-button confirm_button = BUTTON_COLOR2(UI_GREEN, "Connect", 32);
+button confirm_button = BUTTON_COLOR(UI_GREEN, "Connect", 32);
 
 // Build loading/saving
 input_buf build_filepath = {.max_length = 10};
-button build_load_button = BUTTON_COLOR2(UI_GREEN, "Load", 32);
-button build_save_button = BUTTON_COLOR2(UI_GREEN, "Save", 32);
+button build_load_button = BUTTON_COLOR(UI_GREEN, "Load", 32);
+button build_save_button = BUTTON_COLOR(UI_GREEN, "Save", 32);
 
 input_buf *inputs[] = {&ip_buf, &port_buf, &password_buf, &username_buf, &build_filepath};
 
@@ -211,17 +211,18 @@ layout lobby_root_layout = {.type = LT_HORIZONTAL,
                             .spacing = 50};
 card player_list_card = CARD(UI_NORD, "Player list");
 card server_config_card = CARD(UI_NORD, "Configuration");
-button start_game_button = BUTTON_COLOR(75, 600, 0, 75, UI_GREEN, "Start Game", 36);
+button start_game_button = BUTTON_COLOR(UI_GREEN, "Start Game", 36);
 
 text map_picker_text = {.font_size = 32, .color = WHITE, .content = "Map"};
 text round_picker_text = {.font_size = 32, .color = WHITE, .content = "Round count"};
 
-button player_build_buttons[MAX_PLAYER_COUNT] = {0};
-card player_build_card = CARD(UI_NORD, "Player build");
-button close_build_card_button = BUTTON_COLOR(WIDTH - 125, 175, 50, 50, UI_RED, "X", 46);
-
 picker map_picker = {0};
 buttoned_slider round_count_slider = {0};
+
+text lobby_player_names[MAX_PLAYER_COUNT] = {};
+text lobby_player_builds[MAX_PLAYER_COUNT] = {};
+ui_empty lobby_empty[MAX_PLAYER_COUNT] = {};
+layout *lobby_player_layouts[MAX_PLAYER_COUNT] = {};
 
 //    In game
 slider health_bars[MAX_PLAYER_COUNT] = {0};
@@ -404,6 +405,18 @@ Sound raindrop_sounds[RAINDROP_COUNT] = {0};
 // Editor
 map_data editor_map = {0};
 const char *editor_map_filepath = NULL;
+
+layout editor_cell_buttons = {.type = LT_HORIZONTAL,
+                              .width = LAYOUT_FREE,
+                              .height = LAYOUT_FIT_CONTAINER,
+                              .base_rec = {25, HEIGHT - 75, WIDTH - 50, 50}};
+
+const char *cell_type_name[] = {"Floor", "Wall", "No Prop", "Torch", "Vine"};
+#define CELL_TYPE_COUNT (int)(sizeof(cell_type_name) / sizeof(cell_type_name[0]))
+button cell_type_button[CELL_TYPE_COUNT] = {};
+map_layer_type cell_layer[CELL_TYPE_COUNT] = {MLT_BACKGROUND, MLT_BACKGROUND, MLT_PROPS, MLT_PROPS, MLT_PROPS};
+map_layer_type cell_id[CELL_TYPE_COUNT] = {0, 1, 0, 1, 2};
+int editor_cell_id = 0;
 
 // Utils
 
@@ -2171,11 +2184,6 @@ void render_scene_main_menu() {
     }
 }
 
-text lobby_player_names[MAX_PLAYER_COUNT] = {};
-text lobby_player_builds[MAX_PLAYER_COUNT] = {};
-ui_empty lobby_empty[MAX_PLAYER_COUNT] = {};
-layout *lobby_player_layouts[MAX_PLAYER_COUNT] = {};
-
 void update_lobby_player_list() {
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
         if (players[i].info.connected) {
@@ -2215,6 +2223,9 @@ void init_scene_lobby() {
         update_lobby_player_list();
     }
     layout_push(&player_list_card.layouts[0], UI_BUTTON, &start_game_button, DEFAULT_UI_SPECS);
+    if (current_player == master_player) {
+        button_render(&start_game_button);
+    }
 
     card_layout_set_specs(&server_config_card, 0,
                           (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE});
@@ -2483,6 +2494,11 @@ void render_scene_game_ended() {
 
 //    Editor
 void init_scene_editor() {
+    for (int i = 0; i < CELL_TYPE_COUNT; i++) {
+        cell_type_button[i] = BUTTON_COLOR(UI_BEIGE, cell_type_name[i], 32);
+        layout_push(&editor_cell_buttons, UI_BUTTON, &cell_type_button[i], UI_NODE_SPEC(.width = PX(150)));
+    }
+
     init_map(&game_map, MAP_WIDTH, MAP_HEIGHT, editor_map.map);
     init_map(&variants, MAP_WIDTH, MAP_HEIGHT, NULL);
     base_x_offset = (WIDTH - (CELL_SIZE * game_map.width)) / 2;
@@ -2493,36 +2509,24 @@ void init_scene_editor() {
 }
 
 void update_scene_editor() {
+    for (int i = 0; i < CELL_TYPE_COUNT; i++) {
+        if (button_clicked(&cell_type_button[i])) {
+            editor_cell_id = i;
+        }
+    }
+
     Vector2 over_cell = screen2grid(get_mouse());
     if (get_map(&game_map, over_cell.x, over_cell.y) != -1) {
         if (IsMouseButtonPressed(0)) {
-            set_map(&game_map, over_cell.x, over_cell.y, 0);
-            editor_map.map[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 0;
-        }
-        if (IsMouseButtonPressed(1)) {
-            set_map(&game_map, over_cell.x, over_cell.y, 1);
-            editor_map.map[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 1;
-        }
-
-        if (IsKeyPressed(KEY_R)) {
-            set_map(&props, over_cell.x, over_cell.y, 0);
-            clear_animations();
-            set_props_animations();
-            editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 0;
-        }
-
-        if (IsKeyPressed(KEY_T)) {
-            set_map(&props, over_cell.x, over_cell.y, 1);
-            clear_animations();
-            set_props_animations();
-            editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 1;
-        }
-
-        if (IsKeyPressed(KEY_Y)) {
-            set_map(&props, over_cell.x, over_cell.y, 2);
-            clear_animations();
-            set_props_animations();
-            editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = 2;
+            if (cell_layer[editor_cell_id] == MLT_BACKGROUND) {
+                set_map(&game_map, over_cell.x, over_cell.y, cell_id[editor_cell_id]);
+                editor_map.map[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = cell_id[editor_cell_id];
+            } else if (cell_layer[editor_cell_id] == MLT_PROPS) {
+                set_map(&props, over_cell.x, over_cell.y, cell_id[editor_cell_id]);
+                clear_animations();
+                set_props_animations();
+                editor_map.props[(int)(over_cell.x + MAP_WIDTH * over_cell.y)] = cell_id[editor_cell_id];
+            }
         }
 
         if (IsKeyPressed(KEY_Z)) {
@@ -2553,6 +2557,41 @@ void update_scene_editor() {
 void render_scene_editor() {
     render_map();
 
+    Vector2 grid = screen2grid(get_mouse());
+    Vector2 cursor = grid2screen(screen2grid(get_mouse()));
+    if (get_map(&game_map, grid.x, grid.y) != -1) {
+        if (cell_layer[editor_cell_id] == MLT_BACKGROUND) {
+            cell_metadata metadata = cell_metadatas[cell_id[editor_cell_id]];
+            Texture2D t = *metadata.texture;
+            Rectangle src = get_sprite(t, metadata.sprite_count, 0);
+            DrawSpriteRecFromSheetTint(t, src, cursor, 4, WHITE);
+
+            int prop = get_map(&props, grid.x, grid.y);
+            if (prop != 0) {
+                cell_metadata metadata = prop_metadatas[prop];
+                cursor.x += metadata.offset.x;
+                cursor.y += metadata.offset.y;
+                Texture2D spritesheet = metadata.texture != NULL ? (*metadata.texture) : (Texture2D){0};
+                anim_id a = get_map(&props_animations, grid.x, grid.y);
+                DrawSpriteFromSheet(spritesheet, a, cursor, metadata.scaling);
+            }
+        } else {
+            cell_metadata metadata = cell_metadatas[get_map(&game_map, grid.x, grid.y)];
+            Texture2D t = *metadata.texture;
+            Rectangle src = get_sprite(t, metadata.sprite_count, 0);
+            DrawSpriteRecFromSheetTint(t, src, cursor, 4, WHITE);
+
+            cell_metadata prop_metadata = prop_metadatas[cell_id[editor_cell_id]];
+            cursor.x += prop_metadata.offset.x;
+            cursor.y += prop_metadata.offset.y;
+            if (prop_metadata.texture != NULL) {
+                t = *prop_metadata.texture;
+                src = get_sprite(t, prop_metadata.sprite_count, 0);
+                DrawSpriteRecFromSheetTint(t, src, cursor, prop_metadata.scaling, WHITE);
+            }
+        }
+    }
+
     for (int i = 0; i < MAX_PLAYER_COUNT; i++) {
         Vector2 spawn_point = {editor_map.spawn_positions[i][0], editor_map.spawn_positions[i][1]};
         Vector2 screen_space = grid2screen(spawn_point);
@@ -2564,6 +2603,8 @@ void render_scene_editor() {
 
     DrawText(editor_map_filepath, 0, 36, 32, WHITE);
     DrawText("Press S to save", 0, 68, 32, WHITE);
+    DrawText(TextFormat("Cell = %s", cell_type_name[editor_cell_id]), 0, 100, 32, WHITE);
+    layout_render(&editor_cell_buttons);
 }
 
 bool load_editor(const char *filename) {
@@ -2580,74 +2621,17 @@ bool load_editor(const char *filename) {
 layout root_layout = {.type = LT_HORIZONTAL,
                       .width = LAYOUT_FIT_CONTAINER,
                       .height = LAYOUT_FIT_CONTAINER,
-                      .padding = {150, 50, 50, 50},
-                      .spacing = 50};
+                      .spacing = 9,
+                      .base_rec = {100, HEIGHT - 125, WIDTH - 200, 100}};
 
-card test_c1 = CARD(UI_NORD, "Test");
-card test_c2 = CARD(UI_NORD, "Build");
-
-button test_b1 = BUTTON_COLOR(0, 0, 0, 0, UI_RED, "BOUTON 1", 18);
-button test_b2 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "BOUTON 2", 18);
-
-slider test_slider = {{0, 0, 0, 0}, UI_RED, 100, 0, 0};
-slider test_slider2 = {{0, 0, 0, 50}, UI_RED, 100, 0, 0};
-
-ui_empty empty7 = {0};
-ui_empty empty8 = {0};
-ui_empty empty9 = {0};
-ui_empty empty10 = {0};
-
-input_buf input_i1 = (input_buf){.prefix = "Path"};
-button test_b3 = BUTTON_COLOR(0, 0, 0, 0, UI_RED, "Load", 32);
-button test_b4 = BUTTON_COLOR(0, 0, 0, 0, UI_GREEN, "Save", 32);
+#define N 10
+button buttons[N] = {0};
 
 void init_scene_experimentations() {
-    layout_push(&root_layout, UI_CARD, &test_c1, DEFAULT_UI_SPECS);
-    layout_push(&root_layout, UI_CARD, &test_c2, DEFAULT_UI_SPECS);
-
-    layout *n1 = layout_push_layout(&root_layout, 0,
-                                    (layout){.type = LT_VERTICAL,
-                                             .width = LAYOUT_FIT_CONTAINER,
-                                             .height = LAYOUT_FIT_CONTAINER,
-                                             .padding = {50, 25, 25, 25},
-                                             .spacing = 15});
-
-    layout_push(n1, UI_BUTTON, &test_b1, DEFAULT_UI_SPECS);
-    layout_push(n1, UI_BUTTON, &test_b2, DEFAULT_UI_SPECS);
-
-    layout *n2 = layout_push_layout(
-        &root_layout, 1,
-        (layout){.type = LT_VERTICAL, .width = LAYOUT_FIT_CONTAINER, .height = LAYOUT_FREE, .spacing = 25});
-
-    layout_push(n2, UI_EMPTY, &empty1, UI_NODE_SPEC(.height = PERCENT(75)));
-    layout_push(n2, UI_EMPTY, &empty2, UI_NODE_SPEC(.height = PERCENT(25)));
-
-    layout *n21 = layout_push_layout(n2, 0,
-                                     (layout){.type = LT_VERTICAL,
-                                              .width = LAYOUT_FIT_CONTAINER,
-                                              .height = LAYOUT_FIT_CONTAINER,
-                                              .spacing = 50,
-                                              .padding = {50, 25, 25, 25}});
-
-    layout_push(n21, UI_EMPTY, &empty3, DEFAULT_UI_SPECS);
-    layout_push(n21, UI_EMPTY, &empty5, DEFAULT_UI_SPECS);
-    layout_push(n21, UI_SLIDER, &test_slider, DEFAULT_UI_SPECS);
-    layout_push(n21, UI_EMPTY, &empty6, DEFAULT_UI_SPECS);
-
-    layout *n22 = layout_push_layout(n2, 1,
-                                     (layout){.type = LT_HORIZONTAL,
-                                              .width = LAYOUT_FREE,
-                                              .height = LAYOUT_FIT_CONTAINER,
-                                              .spacing = 3,
-                                              .padding = {24, 25, 24, 25}});
-    layout_push(n22, UI_INPUT, &input_i1, UI_NODE_SPEC(.width = PERCENT(50)));
-    layout_push(n22, UI_BUTTON, &test_b3, UI_NODE_SPEC(.width = PERCENT(25)));
-    layout_push(n22, UI_BUTTON, &test_b4, UI_NODE_SPEC(.width = PERCENT(25)));
-
-    // TODO: Should be valid
-    //  layout_push(n22, UI_INPUT, &input_i1, (ui_node_specs){.width = {50, UNIT_PERCENT}, .height = {75, UNIT_PX}});
-    //  layout_push(n22, UI_BUTTON, &test_b3, (ui_node_specs){.width = {25, UNIT_PERCENT}, .height = {75, UNIT_PX}});
-    //  layout_push(n22, UI_BUTTON, &test_b4, (ui_node_specs){.width = {25, UNIT_PERCENT}, .height = {75, UNIT_PX}});
+    for (int i = 0; i < N; i++) {
+        buttons[i] = BUTTON_COLOR(UI_BEIGE, "X", 32);
+        layout_push(&root_layout, UI_BUTTON, &buttons[i], DEFAULT_UI_SPECS);
+    }
 }
 
 void update_scene_experimentations() {

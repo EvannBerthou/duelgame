@@ -100,6 +100,7 @@ typedef struct layout {
     struct layout** children;
     int children_count;
     layout_type type;
+    Rectangle base_rec;
     Rectangle layout_rec;
     Rectangle grid;
 
@@ -188,10 +189,7 @@ typedef struct {
         .was_down = false                                                    \
     }
 
-#define BUTTON_COLOR(x, y, w, h, color, text, font_size) \
-    BUTTON(x, y, w, h, BT_COLOR, color, {0}, text, font_size)
-
-#define BUTTON_COLOR2(color, text, font_size) \
+#define BUTTON_COLOR(color, text, font_size) \
     BUTTON(0, 0, 0, 0, BT_COLOR, color, {0}, text, font_size)
 
 #define BUTTON_TEXTURE(x, y, w, h, texture, text, font_size) \
