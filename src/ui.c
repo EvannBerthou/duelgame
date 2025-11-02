@@ -472,6 +472,18 @@ void button_render(button *b) {
                         .bottom = simple_border_size,
                         .layout = NPATCH_NINE_PATCH};
     DrawTextureNPatch(simple_border, patch, b->rec, (Vector2){0, 0}, 0.0f, WHITE);
+
+    if (b->outlined) {
+        Rectangle dest = {b->rec.x - 8, b->rec.y - 8, b->rec.width + 16, b->rec.height + 16};
+        int spell_box_border = 22;
+        NPatchInfo patch = {.source = {0, 0, spell_box_select.width, spell_box_select.height},
+                            .left = spell_box_border,
+                            .top = spell_box_border,
+                            .right = spell_box_border,
+                            .bottom = spell_box_border,
+                            .layout = NPATCH_NINE_PATCH};
+        DrawTextureNPatch(spell_box_select, patch, dest, (Vector2){0, 0}, 0.0f, WHITE);
+    }
 }
 
 // Slider
@@ -999,7 +1011,7 @@ static void layout_node_debug(layout_node *node) {
     }
 }
 
-bool layout_debug = true;
+bool layout_debug = false;
 
 static void render_node(layout_node *node) {
     void *data = node->data;

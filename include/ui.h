@@ -178,6 +178,7 @@ typedef struct {
     bool disabled;
     bool was_down;
     bool muted;
+    bool outlined;
 } button;
 
 #define BUTTON(x, y, w, h, btn_type, btn_color, btn_texture, btn_text,       \

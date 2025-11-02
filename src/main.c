@@ -228,6 +228,12 @@ layout *lobby_player_layouts[MAX_PLAYER_COUNT] = {};
 slider health_bars[MAX_PLAYER_COUNT] = {0};
 button toolbar_spells_buttons[MAX_SPELL_COUNT] = {0};
 
+layout game_spell_buttons_layout = {.type = LT_HORIZONTAL,
+                                    .width = LAYOUT_FREE,
+                                    .height = LAYOUT_FIT_CONTAINER,
+                                    .spacing = 8,
+                                    .base_rec = {25, HEIGHT - CELL_SIZE - 25, WIDTH - 50, CELL_SIZE}};
+
 // Rendering
 RenderTexture2D lightmap = {0};
 RenderTexture2D ui = {0};
@@ -965,7 +971,9 @@ void render_game_slot(Vector2 pos) {
 }
 
 void set_selected_spell(player *p, int spell) {
+    toolbar_spells_buttons[p->selected_spell].outlined = false;
     p->selected_spell = spell;
+    toolbar_spells_buttons[p->selected_spell].outlined = true;
     compute_spell_range(p);
 }
 
@@ -996,7 +1004,7 @@ void render_spell_actions(player *p) {
     }
 }
 
-void render_spell_tooltip(const spell *s) {
+void set_spell_tooltip(const spell *s) {
     char stats_str[1024] = {0};
     if (s->damage_value != 0) {
         strcat(stats_str, "Damage: ");
@@ -1088,11 +1096,11 @@ bool load_build(const char *filepath) {
     }
     for (int i = 0; i < spell_count; i++) {
         spell_selection[i] = false;
-        spell_select_buttons[i].color = WHITE;
+        spell_select_buttons[i].color = DARKGRAY;  // TODO: We shoudl not set color here
     }
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
         spell_selection[buf[2 + i]] = true;
-        spell_select_buttons[buf[2 + i]].color = DARKGRAY;
+        spell_select_buttons[buf[2 + i]].color = WHITE;
     }
     for (int i = 0; i < STAT_COUNT; i++) {
         stat_sliders[i]->slider.value = (int8_t)(buf[3 + MAX_SPELL_COUNT + i]);
@@ -1220,51 +1228,9 @@ void render_player(player *p) {
 }
 
 void render_player_actions(player *p) {
+    player_info *info = &p->info;
     if (p->info.effect[SE_STUN]) {
         return;
-    }
-
-    // Toolbar rendering
-    int hoverred_button = -1;
-    player_info *info = &p->info;
-    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-        button *b = &toolbar_spells_buttons[i];
-        bool on_cooldown = info->cooldowns[i] > 0;
-        Rectangle icon = icons[all_spells[info->spells[i]].icon];
-        Color tint = WHITE;
-        if (on_cooldown && info->banned[i] == false) {
-            tint = GRAY;
-            const char *text = TextFormat("%d", info->cooldowns[i]);
-            toolbar_spells_buttons[i].text = text;
-        } else {
-            toolbar_spells_buttons[i].text = NULL;
-        }
-
-        b->texture = icons_sheet;
-        b->texture_sprite = icon;
-        b->color = tint;
-        b->type = BT_TEXTURE;
-        b->disabled = on_cooldown || info->banned[i];
-        button_render(b);
-
-        if (is_console_closed()) {
-            if (button_hover(b)) {
-                hoverred_button = info->spells[i];
-            }
-            // TODO: Should not be here ?
-            if (button_clicked(b) && players[current_player].info.cooldowns[i] == 0) {
-                info->action = PA_SPELL;
-                set_selected_spell(p, i);
-            }
-        }
-    }
-
-    if (info->action == PA_SPELL) {
-        int x = base_x_offset + (CELL_SIZE + 8) * p->selected_spell;
-        int y = toolbar_spells_buttons[0].rec.y;
-        Rectangle source = {0, 0, spell_box_select.width, spell_box_select.height};
-        Rectangle dest = {x - 8, y - 8, CELL_SIZE + 16, CELL_SIZE + 16};
-        DrawTexturePro(spell_box_select, source, dest, (Vector2){0}, 0, WHITE);
     }
 
     // In-game rendering
@@ -1272,10 +1238,6 @@ void render_player_actions(player *p) {
         if (info->action == PA_SPELL) {
             render_spell_actions(p);
         }
-    }
-
-    if (hoverred_button != -1) {
-        render_spell_tooltip(&all_spells[hoverred_button]);
     }
 }
 
@@ -1345,10 +1307,7 @@ void render_infos() {
 }
 
 void init_in_game_ui() {
-    int toolbar_y = base_y_offset + CELL_SIZE * game_map.height + 16;
     for (int i = 0; i < MAX_SPELL_COUNT; i++) {
-        int x = base_x_offset + (CELL_SIZE + 8) * i;
-        toolbar_spells_buttons[i].rec = (Rectangle){x, toolbar_y, CELL_SIZE, CELL_SIZE};
         toolbar_spells_buttons[i].texture = icons_sheet;
         toolbar_spells_buttons[i].texture_sprite = icons[all_spells[my_spells[i]].icon];
         toolbar_spells_buttons[i].color = WHITE;
@@ -2119,7 +2078,7 @@ void update_scene_main_menu() {
                     set_error("Spell selection limit reached");
                 } else {
                     spell_selection[i] = !spell_selection[i];
-                    spell_select_buttons[i].color = spell_selection[i] ? DARKGRAY : WHITE;
+                    spell_select_buttons[i].color = spell_selection[i] ? WHITE : DARKGRAY;
                 }
             }
         }
@@ -2154,6 +2113,18 @@ void update_scene_main_menu() {
             set_error("Could not save build");
         }
     }
+
+    if (player_info_card.selected_tab == 0) {
+        int button_tooltip = -1;
+        for (int i = 0; i < spell_count; i++) {
+            if (button_hover(&spell_select_buttons[i])) {
+                button_tooltip = i;
+            }
+        }
+        if (button_tooltip != -1) {
+            set_spell_tooltip(&all_spells[button_tooltip]);
+        }
+    }
 }
 
 void render_scene_main_menu() {
@@ -2170,18 +2141,6 @@ void render_scene_main_menu() {
     }
     strcpy(total_spell_count_text.content, TextFormat("Total : %d / %d", total, MAX_SPELL_COUNT));
     layout_render(&main_menu_root_layout);
-
-    if (player_info_card.selected_tab == 0) {
-        int button_tooltip = -1;
-        for (int i = 0; i < spell_count; i++) {
-            if (button_hover(&spell_select_buttons[i])) {
-                button_tooltip = i;
-            }
-        }
-        if (button_tooltip != -1) {
-            render_spell_tooltip(&all_spells[button_tooltip]);
-        }
-    }
 }
 
 void update_lobby_player_list() {
@@ -2288,6 +2247,11 @@ void render_scene_lobby() {
 
 //   In game
 void init_scene_in_game() {
+    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+        layout_push(&game_spell_buttons_layout, UI_BUTTON, &toolbar_spells_buttons[i],
+                    UI_NODE_SPEC(.width = PX(CELL_SIZE)));
+    }
+
     for (int i = 0; i < RAINDROP_COUNT; i++) {
         raindrop_timers[i] = RAINDROP_RAND_SPAWNRATE;
         raindrop_target[i] = (Vector2){0};
@@ -2295,6 +2259,44 @@ void init_scene_in_game() {
         raindrop_sounds[i] = LoadSoundAlias(raindrop_sound);
         SetSoundVolume(raindrop_sounds[i], 0.01f);
         SetSoundPitch(raindrop_sounds[i], 1.0f + ((rand() % 200 - 100) / 100.f));
+    }
+}
+
+void update_toolbar_spells() {
+    player *p = &players[current_player];
+    int hoverred_button = -1;
+    player_info *info = &p->info;
+    for (int i = 0; i < MAX_SPELL_COUNT; i++) {
+        button *b = &toolbar_spells_buttons[i];
+        bool on_cooldown = info->cooldowns[i] > 0;
+        Rectangle icon = icons[all_spells[info->spells[i]].icon];
+        Color tint = WHITE;
+        if (on_cooldown && info->banned[i] == false) {
+            tint = GRAY;
+            const char *text = TextFormat("%d", info->cooldowns[i]);
+            toolbar_spells_buttons[i].text = text;
+        } else {
+            toolbar_spells_buttons[i].text = NULL;
+        }
+
+        b->texture = icons_sheet;
+        b->texture_sprite = icon;
+        b->color = tint;
+        b->type = BT_TEXTURE;
+        b->disabled = on_cooldown || info->banned[i];
+
+        if (is_console_closed()) {
+            if (button_hover(b)) {
+                hoverred_button = info->spells[i];
+            }
+            if (button_clicked(b) && players[current_player].info.cooldowns[i] == 0) {
+                info->action = PA_SPELL;
+                set_selected_spell(p, i);
+            }
+        }
+    }
+    if (hoverred_button != -1) {
+        set_spell_tooltip(&all_spells[hoverred_button]);
     }
 }
 
@@ -2313,6 +2315,7 @@ void update_scene_in_game() {
         }
 
         if (state == RS_PLAYING) {
+            update_toolbar_spells();
             player_move move = player_exec_action(&players[current_player]);
             if (move.action != PA_NONE) {
                 next_state = RS_WAITING;
@@ -2421,6 +2424,7 @@ void render_scene_in_game() {
 
         if (state == RS_PLAYING) {
             render_player_actions(&players[current_player]);
+            layout_render(&game_spell_buttons_layout);
         } else if (state == RS_WAITING) {
             render_player_move(&players[current_player].round_move);
         } else if (state == RS_PLAYING_TURN || state == RS_WAITING_ANIMATIONS) {
