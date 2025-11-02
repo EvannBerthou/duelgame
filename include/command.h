@@ -14,8 +14,10 @@ typedef enum {
     CT_UNKNOWN,
     CT_ADMIN_UPDATE_PLAYER_INFO,
     CT_CLEAR,
+    CT_HELP,
     CT_LOAD_EDITOR,
 } command_type;
+
 
 command_result handle_command(char *str);
 

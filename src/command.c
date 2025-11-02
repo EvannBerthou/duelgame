@@ -2,9 +2,10 @@
 #include <stdbool.h>
 #include <string.h>
 #include "common.h"
-#include "net_protocol.h"
 
 bool load_editor(const char *filename);
+
+const char *all_commands = "update, clear, help, editor";
 
 #define GETTOKI(X)                                                                                               \
     const char *X##str = strtok(NULL, " ");                                                                      \
@@ -34,6 +35,8 @@ command_type get_command_type(char *str) {
         return CT_ADMIN_UPDATE_PLAYER_INFO;
     } else if (streq(tok, "clear")) {
         return CT_CLEAR;
+    } else if (streq(tok, "help")) {
+        return CT_HELP;
     } else if (streq(tok, "editor")) {
         return CT_LOAD_EDITOR;
     } else {
@@ -42,10 +45,17 @@ command_type get_command_type(char *str) {
 }
 
 const char *command_usage(command_type command) {
-    if (command == CT_ADMIN_UPDATE_PLAYER_INFO) {
-        return "update <player_id> <property_id> <value>";
-    } else if (command == CT_LOAD_EDITOR) {
-        return "editor <map_name>";
+    switch (command) {
+        case CT_UNKNOWN:
+            return "Unknown command";
+        case CT_ADMIN_UPDATE_PLAYER_INFO:
+            return "update <player_id> <property_id> <value>";
+        case CT_CLEAR:
+            return "clear";
+        case CT_HELP:
+            return "help (command)";
+        case CT_LOAD_EDITOR:
+            return "editor <map_name>";
     }
     return "Unknown command";
 }
@@ -65,6 +75,15 @@ command_result handle_command(char *str) {
         return (command_result){0};
     } else if (command == CT_CLEAR) {
         clear_logs();
+        return (command_result){.valid = true, .has_packet = false, .content = NULL};
+    } else if (command == CT_HELP) {
+        char *specific_command = strtok(NULL, " ");
+        if (specific_command != NULL) {
+            command_type help_command = get_command_type(specific_command);
+            LOG(command_usage(help_command));
+        } else {
+            LOG("Commands: %s", all_commands);
+        }
         return (command_result){.valid = true, .has_packet = false, .content = NULL};
     } else if (command == CT_LOAD_EDITOR) {
         GETTOKS(filename);
